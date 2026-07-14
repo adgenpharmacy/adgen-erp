@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'firebase_options.dart';
@@ -18,6 +19,10 @@ void main() async {
 
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+      );
     } catch (e, st) {
       runApp(_ErrorApp(error: 'Firebase init failed:\n$e\n\n$st'));
       return;

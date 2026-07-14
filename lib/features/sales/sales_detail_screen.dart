@@ -15,16 +15,20 @@ import '../../shared/models/sales_bill_model.dart';
 import '../../shared/widgets/app_card.dart';
 import '../../core/utils/pdf_generator.dart';
 
-class SalesDetailScreen extends StatefulWidget {
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/providers/sales_provider.dart';
+import '../../core/providers/auth_provider.dart';
+
+class SalesDetailScreen extends ConsumerStatefulWidget {
   final SalesBillModel bill;
 
   const SalesDetailScreen({super.key, required this.bill});
 
   @override
-  State<SalesDetailScreen> createState() => _SalesDetailScreenState();
+  ConsumerState<SalesDetailScreen> createState() => _SalesDetailScreenState();
 }
 
-class _SalesDetailScreenState extends State<SalesDetailScreen> {
+class _SalesDetailScreenState extends ConsumerState<SalesDetailScreen> {
   bool _isSharing = false;
 
   SalesBillModel get bill => widget.bill;
@@ -45,6 +49,39 @@ class _SalesDetailScreenState extends State<SalesDetailScreen> {
     } finally {
       if (mounted) setState(() => _isSharing = false);
     }
+  }
+
+  void _confirmDelete() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Sale'),
+        content: const Text(
+            'Are you sure you want to delete this sale?\nThis will revert the inventory and delete associated ledger entries permanently.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final error = await ref.read(salesNotifierProvider.notifier).deleteSale(bill.id!);
+              if (mounted) {
+                if (error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sale deleted successfully')));
+                  context.pop();
+                }
+              }
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -69,6 +106,11 @@ class _SalesDetailScreenState extends State<SalesDetailScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_rounded, color: AppColors.error),
+            tooltip: 'Delete',
+            onPressed: _confirmDelete,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_rounded, color: AppColors.primary),
             tooltip: 'Edit',

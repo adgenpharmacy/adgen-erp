@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'apk_installer_stub.dart' if (dart.library.io) 'apk_installer_mobile.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+import '../utils/app_version.dart';
 
 import 'package:path_provider/path_provider.dart';
 import '../theme/app_colors.dart';
@@ -24,8 +24,7 @@ class UpdateService {
         final data = response.data as Map<String, dynamic>;
         final serverBuild = data['buildNumber'] as int;
         
-        final packageInfo = await PackageInfo.fromPlatform();
-        final currentBuild = int.parse(packageInfo.buildNumber);
+        final currentBuild = AppVersion.buildNumber;
         
         if (serverBuild > currentBuild) {
           if (!context.mounted) return;

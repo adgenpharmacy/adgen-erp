@@ -284,6 +284,74 @@ class InventoryNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
+  /// Revert stock when a sales bill is deleted or updated
+  /// Adds the sold quantity back to its original batch, or the closest matching batch
+  Future<String?> revertSalesStock({
+    required String productId,
+    required String batchNumber,
+    required double quantity,
+  }) async {
+    try {
+      final docRef = _db.collection(AppConstants.colInventory).doc(productId);
+
+      return await _db.runTransaction<String?>((transaction) async {
+        final doc = await transaction.get(docRef);
+
+        if (!doc.exists) return 'Product not found in inventory';
+
+        final existing = InventoryModel.fromFirestore(doc);
+        final batches = List<InventoryBatch>.from(existing.batches);
+        
+        bool batchFound = false;
+
+        // Try to add it back to the exact batch
+        if (batchNumber.isNotEmpty) {
+          final exactIdx = batches.indexWhere((b) => b.batchNumber == batchNumber);
+          if (exactIdx >= 0) {
+            batches[exactIdx] = batches[exactIdx].copyWith(
+              quantity: batches[exactIdx].quantity + quantity
+            );
+            batchFound = true;
+          }
+        }
+
+        // If batch not found, add it to the first available batch, or re-create a default one
+        if (!batchFound) {
+          if (batches.isNotEmpty) {
+            batches[0] = batches[0].copyWith(
+              quantity: batches[0].quantity + quantity
+            );
+          } else {
+            // Recreate a generic batch if none exist
+            batches.add(
+              InventoryBatch(
+                batchNumber: batchNumber.isNotEmpty ? batchNumber : 'RESTORED',
+                quantity: quantity,
+                mrp: 0,
+                purchaseRate: 0,
+                purchaseDate: DateTime.now(),
+                expiryDate: DateTime.now().add(const Duration(days: 365)),
+                purchaseBillId: 'REVERTED_SALE',
+              )
+            );
+          }
+        }
+
+        final newTotal = batches.fold<double>(0, (acc, b) => acc + b.quantity);
+        transaction.update(docRef, {
+          'batches': batches.map((b) => b.toMap()).toList(),
+          'systemStock': newTotal,
+          'physicalStock': newTotal,
+          'lastUpdated': Timestamp.fromDate(DateTime.now()),
+        });
+
+        return null;
+      });
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
   // ── Batch-Level Manual Adjustment (replaces whole-stock correction) ──────────
 
   /// Adjust quantity of a specific batch (owner only)

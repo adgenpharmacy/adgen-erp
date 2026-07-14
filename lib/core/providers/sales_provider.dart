@@ -105,6 +105,60 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
+  Future<String?> deleteSale(String id) async {
+    try {
+      state = const AsyncValue.loading();
+
+      // 1. Fetch the old sales bill to revert its stock changes
+      final oldDoc = await _db.collection(AppConstants.colSalesBills).doc(id).get();
+      if (!oldDoc.exists) return 'Sales bill not found';
+      final oldBill = SalesBillModel.fromFirestore(oldDoc);
+
+      final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
+
+      // 2. Revert old stock deduction
+      for (final item in oldBill.items) {
+        final error = await inventoryNotifier.revertSalesStock(
+          productId: item.productId,
+          batchNumber: item.batchNumber,
+          quantity: item.quantity,
+        );
+        if (error != null) {
+          debugPrint('Stock revert error for ${item.productName}: $error');
+        }
+      }
+
+      // 3. Delete ledger entry & update party balance
+      if (oldBill.paymentMethod == PaymentMethod.credit) {
+        final partyId = oldBill.customerId ?? oldBill.customerName;
+        if (partyId.isNotEmpty) {
+          // Subtract balance from Party
+          await _db.collection(AppConstants.colParties).doc(partyId).update({
+            'outstandingBalance': FieldValue.increment(-oldBill.grandTotal),
+          }).catchError((_) {}); // Ignore if party was deleted manually
+        }
+
+        // Delete associated ledger entries
+        final ledgerSnap = await _db
+            .collection(AppConstants.colLedger)
+            .where('billId', isEqualTo: id)
+            .get();
+        for (final doc in ledgerSnap.docs) {
+          await doc.reference.delete();
+        }
+      }
+
+      // 4. Delete the sales bill document
+      await _db.collection(AppConstants.colSalesBills).doc(id).delete();
+
+      state = const AsyncValue.data(null);
+      return null;
+    } catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+      return e.toString();
+    }
+  }
+
   Future<String?> updateSale(String id, SalesBillModel bill) async {
     try {
       state = const AsyncValue.loading();
@@ -116,23 +170,16 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
 
       final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
 
-      // 2. Revert old stock deduction (add quantity back to stock)
+      // 2. Revert old stock deduction
       for (final item in oldBill.items) {
-        final batch = InventoryBatch(
-          batchNumber: item.batchNumber,
-          expiryDate: item.expiryDate,
-          quantity: item.quantity,
-          mrp: item.mrp,
-          purchaseRate: item.rate, // Sell rate in this context
-          purchaseDate: oldBill.saleDate,
-          purchaseBillId: id,
-        );
-        await inventoryNotifier.addStock(
+        final error = await inventoryNotifier.revertSalesStock(
           productId: item.productId,
-          productName: item.productName,
-          batch: batch,
-          lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
+          batchNumber: item.batchNumber,
+          quantity: item.quantity,
         );
+        if (error != null) {
+          debugPrint('Stock revert error for ${item.productName}: $error');
+        }
       }
 
       // 3. Update the sales bill document
@@ -204,55 +251,7 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  Future<String?> deleteSale(String id) async {
-    try {
-      state = const AsyncValue.loading();
 
-      // 1. Fetch old sales bill to revert stock
-      final doc = await _db.collection(AppConstants.colSalesBills).doc(id).get();
-      if (!doc.exists) return 'Sales bill not found';
-      final bill = SalesBillModel.fromFirestore(doc);
-
-      final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
-
-      // 2. Revert stock deduction (add quantity back to stock)
-      for (final item in bill.items) {
-        final batch = InventoryBatch(
-          batchNumber: item.batchNumber,
-          expiryDate: item.expiryDate,
-          quantity: item.quantity,
-          mrp: item.mrp,
-          purchaseRate: item.rate,
-          purchaseDate: bill.saleDate,
-          purchaseBillId: id,
-        );
-        await inventoryNotifier.addStock(
-          productId: item.productId,
-          productName: item.productName,
-          batch: batch,
-          lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
-        );
-      }
-
-      // 3. Delete ledger entries
-      final ledgerSnap = await _db
-          .collection(AppConstants.colLedger)
-          .where('billId', isEqualTo: id)
-          .get();
-      for (final doc in ledgerSnap.docs) {
-        await doc.reference.delete();
-      }
-
-      // 4. Delete the sales bill document
-      await _db.collection(AppConstants.colSalesBills).doc(id).delete();
-
-      state = const AsyncValue.data(null);
-      return null;
-    } catch (e) {
-      state = AsyncValue.error(e, StackTrace.current);
-      return e.toString();
-    }
-  }
 }
 
 final salesNotifierProvider =

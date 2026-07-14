@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/providers/auth_provider.dart';
+import '../../../core/utils/app_version.dart';
 
 class AppSidebar extends ConsumerStatefulWidget {
   const AppSidebar({super.key});
@@ -283,6 +284,19 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
               ),
             ),
           ),
+          
+          // ─── Version Info ────────────────────────────────────────────────
+          if (!_isCollapsed)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Text(
+                AppVersion.displayVersion,
+                style: AppTypography.labelSmall.copyWith(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                ),
+              ),
+            ),
         ],
       ),
     );

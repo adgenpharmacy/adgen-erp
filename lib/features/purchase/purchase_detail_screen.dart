@@ -14,16 +14,19 @@ import '../../core/utils/constants.dart';
 import '../../shared/models/purchase_bill_model.dart';
 import '../../shared/widgets/app_card.dart';
 
-class PurchaseDetailScreen extends StatefulWidget {
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/providers/purchase_provider.dart';
+
+class PurchaseDetailScreen extends ConsumerStatefulWidget {
   final PurchaseBillModel bill;
 
   const PurchaseDetailScreen({super.key, required this.bill});
 
   @override
-  State<PurchaseDetailScreen> createState() => _PurchaseDetailScreenState();
+  ConsumerState<PurchaseDetailScreen> createState() => _PurchaseDetailScreenState();
 }
 
-class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
+class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
   bool _isSharing = false;
 
   PurchaseBillModel get bill => widget.bill;
@@ -170,6 +173,39 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
     }
   }
 
+  void _confirmDelete() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Purchase'),
+        content: const Text(
+            'Are you sure you want to delete this purchase bill?\nThis will revert the inventory and delete associated ledger entries permanently.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final error = await ref.read(purchaseNotifierProvider.notifier).deletePurchase(bill.id!);
+              if (mounted) {
+                if (error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Purchase bill deleted successfully')));
+                  context.pop();
+                }
+              }
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
@@ -192,6 +228,11 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_rounded, color: AppColors.error),
+            tooltip: 'Delete',
+            onPressed: _confirmDelete,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_rounded, color: AppColors.primary),
             tooltip: 'Edit',

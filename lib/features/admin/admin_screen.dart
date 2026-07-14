@@ -7,6 +7,7 @@ import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/providers/admin_provider.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/providers/data_ops_provider.dart';
 import '../../shared/models/user_model.dart';
 import '../../shared/models/attendance_model.dart';
 import '../../shared/widgets/app_card.dart';
@@ -27,7 +28,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -84,6 +85,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
               ]),
             ),
             const Tab(text: 'Attendance'),
+            const Tab(text: 'Data Ops'),
           ],
         ),
       ],
@@ -236,6 +238,9 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
               );
             },
           ),
+
+          // ── Tab 4: Data Operations ──────────────────────────────────
+          const _DataOpsTab(),
         ],
       ),
     );
@@ -453,3 +458,162 @@ class _AttendanceStat extends StatelessWidget {
     );
   }
 }
+
+// ── Data Ops Tab ──────────────────────────────────────────────────────────────
+class _DataOpsTab extends ConsumerWidget {
+  const _DataOpsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dataOpsState = ref.watch(dataOpsNotifierProvider);
+
+    // Show toast on success/error
+    ref.listen<AsyncValue<String?>>(dataOpsNotifierProvider, (prev, next) {
+      if (next.hasError) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: ${next.error}'),
+          backgroundColor: AppColors.error,
+        ));
+      } else if (next.value != null && next.value!.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(next.value!),
+          backgroundColor: AppColors.success,
+        ));
+      }
+    });
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        AppCard(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Legacy Data Import', style: AppTypography.h3),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Import JSON files generated from the legacy Excel sheets. Use this ONLY ONCE to avoid duplicating records.',
+                style: AppTypography.bodySmall,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              
+              if (dataOpsState.isLoading)
+                const Center(child: CircularProgressIndicator(color: AppColors.primary))
+              else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyProductsAndInventory(),
+                        icon: const Icon(Icons.upload_file_rounded),
+                        label: const Text('Import Products.json'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyParties(),
+                        icon: const Icon(Icons.group_add_rounded),
+                        label: const Text('Import Parties.json'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xl),
+                Text('Export Data (Backup)', style: AppTypography.h3),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Export current database collections as JSON files for backup purposes.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('products'),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Export Products'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('inventory'),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Export Inventory'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('parties'),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Export Parties'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xxl),
+                const Divider(),
+                const SizedBox(height: AppSpacing.md),
+                Text('Danger Zone', style: AppTypography.h3.copyWith(color: AppColors.error)),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Irreversible actions that will permanently delete data from the database.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Wipe All Inventory Stock?'),
+                          content: const Text(
+                              'This will permanently delete ALL stock batches from the inventory. Your product catalog will remain intact, but all quantities will effectively become zero. This action cannot be undone.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                ref.read(dataOpsNotifierProvider.notifier).clearInventory();
+                              },
+                              child: const Text('Wipe Everything'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.delete_forever_rounded),
+                    label: const Text('Wipe All Inventory Stock'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.errorContainer,
+                      foregroundColor: AppColors.error,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+

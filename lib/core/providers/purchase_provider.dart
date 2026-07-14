@@ -78,6 +78,54 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
       return e.toString();
     }
   }
+  Future<String?> deletePurchase(String id) async {
+    try {
+      state = const AsyncValue.loading();
+
+      // 1. Fetch the old bill to revert its stock changes
+      final oldDoc = await _db.collection(AppConstants.colPurchaseBills).doc(id).get();
+      if (!oldDoc.exists) return 'Purchase bill not found';
+      final oldBill = PurchaseBillModel.fromFirestore(oldDoc);
+
+      final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
+
+      // 2. Revert old stock
+      for (final item in oldBill.items) {
+        await inventoryNotifier.revertPurchaseStock(
+          productId: item.productId,
+          batchNumber: item.batchNumber,
+          quantity: item.totalContentQty,
+        );
+      }
+
+      // 3. Delete ledger entry & update party balance
+      if (oldBill.ledgerType == LedgerType.credit) {
+        if (oldBill.partyId.isNotEmpty) {
+          // Subtract balance from Party
+          await _db.collection(AppConstants.colParties).doc(oldBill.partyId).update({
+            'outstandingBalance': FieldValue.increment(-oldBill.grandTotal),
+          }).catchError((_) {});
+        }
+
+        final ledgerSnap = await _db
+            .collection(AppConstants.colLedger)
+            .where('billId', isEqualTo: id)
+            .get();
+        for (final doc in ledgerSnap.docs) {
+          await doc.reference.delete();
+        }
+      }
+
+      // 4. Delete the purchase bill document
+      await _db.collection(AppConstants.colPurchaseBills).doc(id).delete();
+
+      state = const AsyncValue.data(null);
+      return null;
+    } catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+      return e.toString();
+    }
+  }
 
   Future<String?> updatePurchase(String id, PurchaseBillModel bill) async {
     try {
@@ -165,45 +213,7 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  Future<String?> deletePurchase(String id) async {
-    try {
-      state = const AsyncValue.loading();
 
-      // 1. Fetch old bill to revert stock
-      final doc = await _db.collection(AppConstants.colPurchaseBills).doc(id).get();
-      if (!doc.exists) return 'Purchase bill not found';
-      final bill = PurchaseBillModel.fromFirestore(doc);
-
-      final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
-
-      // 2. Revert stock (deduct quantities in content units)
-      for (final item in bill.items) {
-        await inventoryNotifier.revertPurchaseStock(
-          productId: item.productId,
-          batchNumber: item.batchNumber,
-          quantity: item.totalContentQty,
-        );
-      }
-
-      // 3. Delete ledger entries
-      final ledgerSnap = await _db
-          .collection(AppConstants.colLedger)
-          .where('billId', isEqualTo: id)
-          .get();
-      for (final doc in ledgerSnap.docs) {
-        await doc.reference.delete();
-      }
-
-      // 4. Delete the purchase bill document
-      await _db.collection(AppConstants.colPurchaseBills).doc(id).delete();
-
-      state = const AsyncValue.data(null);
-      return null;
-    } catch (e) {
-      state = AsyncValue.error(e, StackTrace.current);
-      return e.toString();
-    }
-  }
 }
 
 final purchaseNotifierProvider =

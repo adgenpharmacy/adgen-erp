@@ -8,6 +8,7 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../shared/widgets/app_button.dart';
 import '../../shared/widgets/app_text_field.dart';
+import '../../core/utils/app_version.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -519,8 +520,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   const SizedBox(height: AppSpacing.lg),
 
                   // Footer
-                   Text(
-                    'v1.0.0 • AdGen Pharmacy ERP',
+                  Text(
+                    '${AppVersion.displayVersion} • AdGen Pharmacy ERP',
                     style: AppTypography.caption,
                     textAlign: TextAlign.center,
                   ).animate(delay: 450.ms).fadeIn(),
