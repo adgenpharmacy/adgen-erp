@@ -79,6 +79,8 @@ class ProductModel extends Equatable {
   final int packSize;             // e.g. 10 tablets per strip (for hasPack types)
   final String packUnit;          // e.g. "Strip", "Bottle"
   final String contentUnit;       // e.g. "Tablet", "ml"
+  final double mrp;
+  final double rate;
   final bool requiresColdStorage;
   final double lowStockThreshold;
   final bool isActive;
@@ -96,8 +98,10 @@ class ProductModel extends Equatable {
     this.packSize = 1,
     this.packUnit = 'Strip',
     this.contentUnit = 'Tablet',
+    this.mrp = 0.0,
+    this.rate = 0.0,
     this.requiresColdStorage = false,
-    this.lowStockThreshold = 10,
+    this.lowStockThreshold = 1,
     this.isActive = true,
     required this.createdAt,
   });
@@ -111,6 +115,8 @@ class ProductModel extends Equatable {
       companyName: data['companyName'] ?? data['manufacturer'] ?? '',
       hsnCode: data['hsnCode'] ?? '',
       gstPercent: (data['gstPercent'] ?? 12).toDouble(),
+      mrp: (data['mrp'] ?? 0).toDouble(),
+      rate: (data['rate'] ?? 0).toDouble(),
       productType: ProductType.values.firstWhere(
         (t) => t.name == data['productType'],
         orElse: () => ProductType.tablet,
@@ -123,7 +129,7 @@ class ProductModel extends Equatable {
       packUnit: data['packUnit'] ?? 'Strip',
       contentUnit: data['contentUnit'] ?? 'Tablet',
       requiresColdStorage: data['requiresColdStorage'] ?? false,
-      lowStockThreshold: (data['lowStockThreshold'] ?? 10).toDouble(),
+      lowStockThreshold: (data['lowStockThreshold'] ?? 1).toDouble(),
       isActive: data['isActive'] ?? true,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -142,6 +148,8 @@ class ProductModel extends Equatable {
     'packSize': packSize,
     'packUnit': packUnit,
     'contentUnit': contentUnit,
+    'mrp': mrp,
+    'rate': rate,
     'requiresColdStorage': requiresColdStorage,
     'lowStockThreshold': lowStockThreshold,
     'isActive': isActive,
@@ -159,6 +167,8 @@ class ProductModel extends Equatable {
     int? packSize,
     String? packUnit,
     String? contentUnit,
+    double? mrp,
+    double? rate,
     bool? requiresColdStorage,
     double? lowStockThreshold,
     bool? isActive,
@@ -175,6 +185,8 @@ class ProductModel extends Equatable {
       packSize: packSize ?? this.packSize,
       packUnit: packUnit ?? this.packUnit,
       contentUnit: contentUnit ?? this.contentUnit,
+      mrp: mrp ?? this.mrp,
+      rate: rate ?? this.rate,
       requiresColdStorage: requiresColdStorage ?? this.requiresColdStorage,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
       isActive: isActive ?? this.isActive,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
@@ -127,6 +128,19 @@ class UserDetailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: AppSpacing.lg),
 
+                  if (dates.isNotEmpty) ...[
+                    Text('Hours Worked', style: AppTypography.h3),
+                    const SizedBox(height: AppSpacing.md),
+                    AppCard(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: SizedBox(
+                        height: 200,
+                        child: _buildAttendanceChart(byDate, dates),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
+
                   if (dates.isEmpty) ...[
                     Center(
                       child: Padding(
@@ -202,6 +216,79 @@ class UserDetailScreen extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildAttendanceChart(Map<String, List<AttendanceModel>> byDate, List<String> dates) {
+    // Show up to last 7 days from the records
+    final latestDates = dates.take(7).toList().reversed.toList();
+    
+    if (latestDates.isEmpty) return const SizedBox();
+
+    double maxY = 1.0;
+    final List<BarChartGroupData> barGroups = [];
+    
+    for (int i = 0; i < latestDates.length; i++) {
+      final date = latestDates[i];
+      final records = byDate[date]!;
+      final totalDuration = records.fold(Duration.zero, (acc, r) {
+        if (r.sessionDuration != null) return acc + r.sessionDuration!;
+        return acc;
+      });
+      final hours = totalDuration.inMinutes / 60.0;
+      if (hours > maxY) maxY = hours;
+      
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: hours,
+              color: AppColors.primary,
+              width: 16,
+              borderRadius: BorderRadius.circular(4),
+              backDrawRodData: BackgroundBarChartRodData(
+                show: true,
+                toY: 12, // Max likely hours
+                color: AppColors.surface2,
+              ),
+            )
+          ],
+        )
+      );
+    }
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: maxY < 4 ? 4 : maxY + 1,
+        barTouchData: BarTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          show: true,
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                if (value.toInt() >= 0 && value.toInt() < latestDates.length) {
+                  final dt = DateTime.parse(latestDates[value.toInt()]);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(DateFormat('E').format(dt), style: AppTypography.caption),
+                  );
+                }
+                return const SizedBox();
+              },
+              reservedSize: 30,
+            ),
+          ),
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        barGroups: barGroups,
+      ),
     );
   }
 }

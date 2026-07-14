@@ -227,13 +227,95 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
                   ),
                   const SizedBox(height: AppSpacing.lg),
 
-                  Text('Sessions', style: AppTypography.h3),
+                  Text('Staff Present Today', style: AppTypography.h3),
                   const SizedBox(height: AppSpacing.md),
 
-                  ...records.map((r) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: _AttendanceRecord(record: r),
-                  )),
+                  ...byUser.entries.map((entry) {
+                    final uid = entry.key;
+                    final userRecords = entry.value;
+                    // Sort records newest first
+                    userRecords.sort((a, b) => b.loginTime.compareTo(a.loginTime));
+                    
+                    final userName = userRecords.first.userName;
+                    final isCurrentlyActive = userRecords.any((r) => r.logoutTime == null);
+                    
+                    // Calculate total active time today for this user
+                    Duration totalDuration = Duration.zero;
+                    for (final r in userRecords) {
+                      if (r.sessionDuration != null) {
+                        totalDuration += r.sessionDuration!;
+                      }
+                    }
+                    
+                    final totalStr = totalDuration.inMinutes > 0 
+                      ? '${totalDuration.inHours}h ${totalDuration.inMinutes.remainder(60)}m'
+                      : '< 1m';
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                      child: AppCard(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Container(
+                              width: 40, height: 40,
+                              decoration: BoxDecoration(
+                                color: isCurrentlyActive ? AppColors.success.withValues(alpha: 0.1) : AppColors.surface2,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                isCurrentlyActive ? Icons.person_rounded : Icons.person_outline_rounded,
+                                size: 22,
+                                color: isCurrentlyActive ? AppColors.success : AppColors.textMuted,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(userName, style: AppTypography.labelLarge),
+                                if (isCurrentlyActive)
+                                  StatusChip(label: 'Active Now', type: StatusType.success, small: true)
+                                else
+                                  Text('Clocked Out', style: AppTypography.caption),
+                              ]),
+                            ),
+                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              Text('Total Time', style: AppTypography.caption),
+                              Text(totalStr, style: AppTypography.numericSmall.copyWith(color: AppColors.primary)),
+                            ]),
+                          ]),
+                          const Divider(height: 24),
+                          ...userRecords.map((r) {
+                            final loginStr = DateFormat('h:mm a').format(r.loginTime);
+                            final logoutStr = r.logoutTime != null
+                                ? DateFormat('h:mm a').format(r.logoutTime!)
+                                : 'Active';
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(children: [
+                                const Icon(Icons.login_rounded, size: 14, color: AppColors.success),
+                                const SizedBox(width: 4),
+                                Text(loginStr, style: AppTypography.caption),
+                                const SizedBox(width: 8),
+                                const Icon(Icons.logout_rounded, size: 14, color: AppColors.error),
+                                const SizedBox(width: 4),
+                                Text(
+                                  logoutStr, 
+                                  style: AppTypography.caption.copyWith(
+                                    color: r.logoutTime == null ? AppColors.success : null,
+                                    fontWeight: r.logoutTime == null ? FontWeight.w700 : null
+                                  )
+                                ),
+                                const Spacer(),
+                                if (r.sessionDuration != null)
+                                  Text(r.formattedDuration, style: AppTypography.caption),
+                              ]),
+                            );
+                          }),
+                        ]),
+                      ),
+                    );
+                  }),
                 ],
               );
             },
@@ -384,53 +466,6 @@ class _PendingUserCard extends StatelessWidget {
   }
 }
 
-// ── Attendance Record ─────────────────────────────────────────────────────────
-class _AttendanceRecord extends StatelessWidget {
-  final AttendanceModel record;
-  const _AttendanceRecord({required this.record});
-
-  @override
-  Widget build(BuildContext context) {
-    final loginStr = DateFormat('h:mm a').format(record.loginTime);
-    final logoutStr = record.logoutTime != null
-        ? DateFormat('h:mm a').format(record.logoutTime!)
-        : 'Active';
-    final isActive = record.logoutTime == null;
-
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-      child: Row(children: [
-        Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(
-            color: isActive ? AppColors.success.withValues(alpha: 0.1) : AppColors.surface2,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(
-            isActive ? Icons.person_rounded : Icons.person_outline_rounded,
-            size: 20,
-            color: isActive ? AppColors.success : AppColors.textMuted,
-          ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(record.userName, style: AppTypography.labelLarge),
-            const SizedBox(height: 2),
-            Text('$loginStr → $logoutStr', style: AppTypography.caption),
-          ]),
-        ),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          if (isActive)
-            StatusChip(label: 'Active', type: StatusType.success, small: true)
-          else
-            Text(record.formattedDuration, style: AppTypography.numericSmall),
-        ]),
-      ]),
-    );
-  }
-}
-
 // ── Attendance Stat ───────────────────────────────────────────────────────────
 class _AttendanceStat extends StatelessWidget {
   final String label;
@@ -460,11 +495,51 @@ class _AttendanceStat extends StatelessWidget {
 }
 
 // ── Data Ops Tab ──────────────────────────────────────────────────────────────
-class _DataOpsTab extends ConsumerWidget {
+class _DataOpsTab extends ConsumerStatefulWidget {
   const _DataOpsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_DataOpsTab> createState() => _DataOpsTabState();
+}
+
+class _DataOpsTabState extends ConsumerState<_DataOpsTab> {
+  bool _devModeUnlocked = false;
+
+  void _showPinDialog(String title, VoidCallback onSuccess) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'Enter PIN'),
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (ctrl.text == '2659') {
+                Navigator.pop(ctx);
+                onSuccess();
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invalid PIN'), backgroundColor: AppColors.error),
+                );
+              }
+            },
+            child: const Text('Unlock'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final dataOpsState = ref.watch(dataOpsNotifierProvider);
 
     // Show toast on success/error
@@ -501,32 +576,78 @@ class _DataOpsTab extends ConsumerWidget {
               if (dataOpsState.isLoading)
                 const Center(child: CircularProgressIndicator(color: AppColors.primary))
               else ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyProductsAndInventory(),
-                        icon: const Icon(Icons.upload_file_rounded),
-                        label: const Text('Import Products.json'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+              if (!_devModeUnlocked)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showPinDialog('Developer Options', () => setState(() => _devModeUnlocked = true)),
+                    icon: const Icon(Icons.developer_mode_rounded),
+                    label: const Text('Unlock Developer Options'),
+                  ),
+                )
+              else ...[
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.warningContainer.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: AppColors.warning),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text('Developer Options Unlocked', style: AppTypography.label.copyWith(color: AppColors.warning)),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyProductsAndInventory(),
+                              icon: const Icon(Icons.upload_file_rounded),
+                              label: const Text('Import Products.json'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyParties(),
+                              icon: const Icon(Icons.group_add_rounded),
+                              label: const Text('Import Parties.json'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => ref.read(dataOpsNotifierProvider.notifier).bulkSetLowStockToOne(),
+                          icon: const Icon(Icons.speed_rounded),
+                          label: const Text('Run Low Stock Migration'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: AppColors.secondary,
+                            foregroundColor: AppColors.surface,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).importLegacyParties(),
-                        icon: const Icon(Icons.group_add_rounded),
-                        label: const Text('Import Parties.json'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.xl),
+              ],
+              const SizedBox(height: AppSpacing.xl),
                 Text('Export Data (Backup)', style: AppTypography.h3),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
@@ -561,6 +682,41 @@ class _DataOpsTab extends ConsumerWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: AppSpacing.md),
+                Text('Restore Data (Backup)', style: AppTypography.h3),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Restore a previously exported JSON backup file.',
+                  style: AppTypography.bodySmall,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('products'),
+                        icon: const Icon(Icons.upload_rounded, size: 18),
+                        label: const Text('Restore Products'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('inventory'),
+                        icon: const Icon(Icons.upload_rounded, size: 18),
+                        label: const Text('Restore Inventory'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('parties'),
+                        icon: const Icon(Icons.upload_rounded, size: 18),
+                        label: const Text('Restore Parties'),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: AppSpacing.xxl),
                 const Divider(),
                 const SizedBox(height: AppSpacing.md),
@@ -575,28 +731,30 @@ class _DataOpsTab extends ConsumerWidget {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Wipe All Inventory Stock?'),
-                          content: const Text(
-                              'This will permanently delete ALL stock batches from the inventory. Your product catalog will remain intact, but all quantities will effectively become zero. This action cannot be undone.'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              child: const Text('Cancel'),
-                            ),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-                              onPressed: () {
-                                Navigator.pop(ctx);
-                                ref.read(dataOpsNotifierProvider.notifier).clearInventory();
-                              },
-                              child: const Text('Wipe Everything'),
-                            ),
-                          ],
-                        ),
-                      );
+                      _showPinDialog('Wipe Inventory (Requires Admin PIN)', () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Wipe All Inventory Stock?'),
+                            content: const Text(
+                                'This will permanently delete ALL stock batches from the inventory. Your product catalog will remain intact, but all quantities will effectively become zero. This action cannot be undone.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Cancel'),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  ref.read(dataOpsNotifierProvider.notifier).clearInventory();
+                                },
+                                child: const Text('Wipe Everything'),
+                              ),
+                            ],
+                          ),
+                        );
+                      });
                     },
                     icon: const Icon(Icons.delete_forever_rounded),
                     label: const Text('Wipe All Inventory Stock'),

@@ -30,7 +30,9 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   final _companyCtrl    = TextEditingController();
   final _hsnCtrl        = TextEditingController();
   final _packSizeCtrl   = TextEditingController(text: '1');
-  final _lowStockCtrl   = TextEditingController(text: '10');
+  final _lowStockCtrl   = TextEditingController(text: '1');
+  final _mrpCtrl        = TextEditingController();
+  final _rateCtrl       = TextEditingController();
 
   ProductType _productType = ProductType.tablet;
   ProductDivision _division = ProductDivision.general;
@@ -64,6 +66,8 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
         _hsnCtrl.text         = product.hsnCode;
         _packSizeCtrl.text    = product.packSize.toString();
         _lowStockCtrl.text    = product.lowStockThreshold.toStringAsFixed(0);
+        _mrpCtrl.text         = product.mrp > 0 ? product.mrp.toStringAsFixed(2) : '';
+        _rateCtrl.text        = product.rate > 0 ? product.rate.toStringAsFixed(2) : '';
         _productType          = product.productType;
         _division             = product.division;
         _gstPercent           = product.gstPercent;
@@ -81,6 +85,8 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
     _hsnCtrl.dispose();
     _packSizeCtrl.dispose();
     _lowStockCtrl.dispose();
+    _mrpCtrl.dispose();
+    _rateCtrl.dispose();
     super.dispose();
   }
 
@@ -104,8 +110,10 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
       packSize: packSize,
       packUnit: _productType.defaultPackUnit,
       contentUnit: _productType.defaultContentUnit,
+      mrp: double.tryParse(_mrpCtrl.text) ?? 0,
+      rate: double.tryParse(_rateCtrl.text) ?? 0,
       requiresColdStorage: _requiresColdStorage,
-      lowStockThreshold: double.tryParse(_lowStockCtrl.text) ?? 10,
+      lowStockThreshold: double.tryParse(_lowStockCtrl.text) ?? 1,
       isActive: _isActive,
       createdAt: DateTime.now(),
     );
@@ -336,10 +344,32 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
             // ── Settings ──────────────────────────────────────────────────
             _SectionHeader('Settings'),
             const SizedBox(height: AppSpacing.md),
+            Row(children: [
+              Expanded(
+                child: AppTextField(
+                  label: 'Default MRP (₹)',
+                  controller: _mrpCtrl,
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  prefixIcon: Icons.currency_rupee_rounded,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: AppTextField(
+                  label: 'Default Rate (₹)',
+                  controller: _rateCtrl,
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  prefixIcon: Icons.currency_rupee_rounded,
+                ),
+              ),
+            ]),
+            const SizedBox(height: AppSpacing.md),
             AppTextField(
-              label: 'Low Stock Alert (${_productType.defaultContentUnit}s)',
+              label: 'Low Stock Alert Threshold',
               controller: _lowStockCtrl,
-              hint: '10',
+              hint: '1',
               keyboardType: TextInputType.number,
               prefixIcon: Icons.warning_amber_rounded,
             ),

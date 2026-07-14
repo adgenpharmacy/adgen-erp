@@ -51,7 +51,11 @@ class DataOpsNotifier extends StateNotifier<AsyncValue<String?>> {
         for (var p in products) {
           final docRef = _db.collection(AppConstants.colProducts).doc(p['id']);
           p['createdAt'] = FieldValue.serverTimestamp();
-          batch.set(docRef, p);
+          p['mrp'] = (p['mrp'] as num?)?.toDouble() ?? 0.0;
+          p['rate'] = (p['rate'] as num?)?.toDouble() ?? 0.0;
+          p['lowStockThreshold'] = 1.0;
+          
+          batch.set(docRef, p, SetOptions(merge: true));
           opCount++;
 
           if (opCount == 400) { // Firestore limit is 500 per batch
@@ -64,49 +68,7 @@ class DataOpsNotifier extends StateNotifier<AsyncValue<String?>> {
         totalUploaded += products.length;
       }
 
-      // 2. Upload Inventory (Batched)
-      if (inventory.isNotEmpty) {
-        WriteBatch batch = _db.batch();
-        int opCount = 0;
-
-        for (var inv in inventory) {
-          final docRef = _db.collection(AppConstants.colInventory).doc(inv['productId']);
-          
-          // Map timestamps properly
-          final batchesList = inv['batches'] as List;
-          final mappedBatches = batchesList.map((b) => {
-            'batchNumber': b['batchNumber'],
-            'quantity': (b['quantity'] as num).toDouble(),
-            'mrp': (b['mrp'] as num).toDouble(),
-            'purchaseRate': (b['purchaseRate'] as num).toDouble(),
-            'expiryDate': Timestamp.fromDate(DateTime.parse(b['expiryDate'])),
-            'purchaseDate': Timestamp.fromDate(DateTime.parse(b['purchaseDate'])),
-          }).toList();
-
-          final payload = {
-            'id': inv['productId'],
-            'productId': inv['productId'],
-            'productName': inv['productName'],
-            'systemStock': (inv['systemStock'] as num).toDouble(),
-            'physicalStock': (inv['physicalStock'] as num).toDouble(),
-            'lowStockThreshold': (inv['lowStockThreshold'] as num).toDouble(),
-            'lastUpdated': FieldValue.serverTimestamp(),
-            'batches': mappedBatches,
-          };
-
-          batch.set(docRef, payload);
-          opCount++;
-
-          if (opCount == 400) {
-            await batch.commit();
-            batch = _db.batch();
-            opCount = 0;
-          }
-        }
-        if (opCount > 0) await batch.commit();
-      }
-
-      state = AsyncValue.data("Successfully imported ${products.length} products and ${inventory.length} inventory records!");
+      state = AsyncValue.data("Successfully updated ${products.length} products!");
     } catch (e, st) {
       state = AsyncValue.error(e.toString(), st);
     }
@@ -174,7 +136,12 @@ class DataOpsNotifier extends StateNotifier<AsyncValue<String?>> {
       final snap = await _db.collection(collectionName).get();
       final docs = snap.docs.map((d) => d.data()).toList();
       
-      final jsonStr = jsonEncode(docs);
+      final jsonStr = jsonEncode(docs, toEncodable: (dynamic item) {
+        if (item is Timestamp) {
+          return item.toDate().toUtc().toIso8601String();
+        }
+        return item.toString();
+      });
       
       // Save to temp file
       final dir = await getTemporaryDirectory();
@@ -191,35 +158,142 @@ class DataOpsNotifier extends StateNotifier<AsyncValue<String?>> {
     }
   }
 
-  Future<void> clearInventory() async {
+  Future<void> restoreBackup(String collectionName) async {
     try {
       state = const AsyncValue.loading();
       
-      // Fetch all inventory documents
-      final snap = await _db.collection(AppConstants.colInventory).get();
-      
-      if (snap.docs.isEmpty) {
-        state = const AsyncValue.data("Inventory is already empty.");
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        withData: true,
+      );
+
+      if (result == null || (!kIsWeb && result.files.single.path == null)) {
+        state = const AsyncValue.data(null);
         return;
       }
 
-      WriteBatch batch = _db.batch();
-      int opCount = 0;
+      String content;
+      if (kIsWeb) {
+        content = utf8.decode(result.files.single.bytes!);
+      } else {
+        final file = File(result.files.single.path!);
+        content = await file.readAsString();
+      }
+      final List<dynamic> data = jsonDecode(content);
 
-      for (var doc in snap.docs) {
-        batch.delete(doc.reference);
-        opCount++;
-        
-        if (opCount == 400) {
-          await batch.commit();
-          batch = _db.batch();
-          opCount = 0;
+      if (data.isNotEmpty) {
+        WriteBatch batch = _db.batch();
+        int opCount = 0;
+
+        for (var doc in data) {
+          if (doc is! Map<String, dynamic>) continue;
+          
+          Map<String, dynamic> parsedDoc = {};
+          doc.forEach((key, value) {
+            if (value is String && value.contains('T') && value.endsWith('Z')) {
+              final dt = DateTime.tryParse(value);
+              if (dt != null) {
+                parsedDoc[key] = Timestamp.fromDate(dt);
+                return;
+              }
+            }
+            parsedDoc[key] = value;
+          });
+
+          String? docId = parsedDoc['id'];
+          final docRef = docId != null 
+              ? _db.collection(collectionName).doc(docId)
+              : _db.collection(collectionName).doc();
+              
+          batch.set(docRef, parsedDoc, SetOptions(merge: true));
+          opCount++;
+
+          if (opCount == 400) {
+            await batch.commit();
+            batch = _db.batch();
+            opCount = 0;
+          }
         }
+        if (opCount > 0) await batch.commit();
+      }
+
+      state = AsyncValue.data("Successfully restored ${data.length} records to $collectionName!");
+    } catch (e, st) {
+      state = AsyncValue.error(e.toString(), st);
+    }
+  }
+
+  Future<void> clearInventory() async {
+    try {
+      state = const AsyncValue.loading();
+      final snapshot = await _db.collection(AppConstants.colInventory).get();
+      
+      if (snapshot.docs.isNotEmpty) {
+        WriteBatch batch = _db.batch();
+        int opCount = 0;
+        
+        for (var doc in snapshot.docs) {
+          batch.delete(doc.reference);
+          opCount++;
+          
+          if (opCount == 400) {
+            await batch.commit();
+            batch = _db.batch();
+            opCount = 0;
+          }
+        }
+        if (opCount > 0) await batch.commit();
       }
       
-      if (opCount > 0) await batch.commit();
+      state = const AsyncValue.data("All inventory stock has been successfully wiped!");
+    } catch (e, st) {
+      state = AsyncValue.error(e.toString(), st);
+    }
+  }
 
-      state = const AsyncValue.data("Successfully wiped all inventory stock!");
+  Future<void> bulkSetLowStockToOne() async {
+    try {
+      state = const AsyncValue.loading();
+      int totalUpdated = 0;
+
+      // 1. Update Products
+      var productSnaps = await _db.collection(AppConstants.colProducts).get();
+      if (productSnaps.docs.isNotEmpty) {
+        WriteBatch batch = _db.batch();
+        int opCount = 0;
+        for (var doc in productSnaps.docs) {
+          batch.update(doc.reference, {'lowStockThreshold': 1.0});
+          opCount++;
+          if (opCount == 400) {
+            await batch.commit();
+            batch = _db.batch();
+            opCount = 0;
+          }
+        }
+        if (opCount > 0) await batch.commit();
+        totalUpdated += productSnaps.docs.length;
+      }
+
+      // 2. Update Inventory
+      var invSnaps = await _db.collection(AppConstants.colInventory).get();
+      if (invSnaps.docs.isNotEmpty) {
+        WriteBatch batch = _db.batch();
+        int opCount = 0;
+        for (var doc in invSnaps.docs) {
+          batch.update(doc.reference, {'lowStockThreshold': 1.0});
+          opCount++;
+          if (opCount == 400) {
+            await batch.commit();
+            batch = _db.batch();
+            opCount = 0;
+          }
+        }
+        if (opCount > 0) await batch.commit();
+        totalUpdated += invSnaps.docs.length;
+      }
+
+      state = AsyncValue.data("Successfully migrated $totalUpdated records to lowStock=1!");
     } catch (e, st) {
       state = AsyncValue.error(e.toString(), st);
     }

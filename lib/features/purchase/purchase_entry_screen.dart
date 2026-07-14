@@ -350,7 +350,8 @@ class _PurchaseEntryScreenState extends ConsumerState<PurchaseEntryScreen> {
             item.packUnit = product.packUnit;
             item.contentUnit = product.contentUnit;
             item.division = product.division.displayName;
-            // MRP and Rate are NOT autofilled — they come from the purchase invoice
+            item.mrp = product.mrp;
+            item.rate = product.rate;
             item.gstPercent = product.gstPercent;
           });
         },
@@ -769,9 +770,12 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
   late TextEditingController _rateCtrl;
   late TextEditingController _discCtrl;
 
+  String _lastProductId = '';
+
   @override
   void initState() {
     super.initState();
+    _lastProductId = widget.item.productId;
     _batchCtrl = TextEditingController(text: widget.item.batchNumber);
     _qtyCtrl = TextEditingController(
         text: widget.item.quantity > 0 ? widget.item.quantity.toString() : '');
@@ -785,6 +789,23 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
         text: widget.item.discountPercent > 0
             ? widget.item.discountPercent.toString()
             : '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _PurchaseItemCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.item.productId != _lastProductId) {
+      _lastProductId = widget.item.productId;
+      _mrpCtrl.text = widget.item.mrp > 0 ? widget.item.mrp.toStringAsFixed(2) : '';
+      _rateCtrl.text = widget.item.rate > 0 ? widget.item.rate.toStringAsFixed(2) : '';
+      
+      // Also reset batch/qty if product changes completely
+      if (widget.item.productId.isNotEmpty) {
+        _batchCtrl.text = '';
+        _qtyCtrl.text = '';
+        _freeQtyCtrl.text = '';
+      }
+    }
   }
 
   @override

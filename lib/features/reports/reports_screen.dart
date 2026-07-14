@@ -12,6 +12,7 @@ import '../../shared/models/sales_bill_model.dart';
 import '../../shared/models/purchase_bill_model.dart';
 import '../../shared/widgets/app_card.dart';
 import '../../shared/widgets/screen_shell.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 // ─── Month filter model ───────────────────────────────────────────────────────
 class _MonthFilter {
@@ -373,12 +374,222 @@ class _SalesTab extends ConsumerWidget {
 
               const SizedBox(height: AppSpacing.xxl),
 
+              // Spline Chart
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.show_chart_rounded,
+                            color: AppColors.primary, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Revenue Trend', style: AppTypography.h3),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(
+                      height: 250,
+                      child: _SalesSplineChart(bills: bills, isMonthly: filter.from == null),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xxl),
+
               // Month-wise breakdown table
               if (filter.from == null) _MonthBreakdownTable(bills: allBills),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+// ─── Charts ───────────────────────────────────────────────────────────────────
+// ─── Charts ───────────────────────────────────────────────────────────────────
+class _PurchaseSplineChart extends StatelessWidget {
+  final List<PurchaseBillModel> bills;
+  final bool isMonthly;
+
+  const _PurchaseSplineChart({required this.bills, required this.isMonthly});
+
+  @override
+  Widget build(BuildContext context) {
+    if (bills.isEmpty) {
+      return Center(child: Text('No data for this period', style: AppTypography.bodySmall));
+    }
+
+    final Map<int, double> groupedData = {};
+    for (final bill in bills) {
+      final key = isMonthly ? bill.invoiceDate.month : bill.invoiceDate.day;
+      groupedData[key] = (groupedData[key] ?? 0) + bill.grandTotal;
+    }
+    if (groupedData.isEmpty) return const SizedBox();
+
+    final maxKey = groupedData.keys.reduce((a, b) => a > b ? a : b);
+    final minKey = groupedData.keys.reduce((a, b) => a < b ? a : b);
+    double maxY = groupedData.values.reduce((a, b) => a > b ? a : b);
+
+    final spots = groupedData.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList();
+    spots.sort((a, b) => a.x.compareTo(b.x));
+
+    return LineChart(
+      LineChartData(
+        gridData: const FlGridData(show: false),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                if (value % 1 != 0) return const SizedBox();
+                final text = isMonthly ? DateFormat('MMM').format(DateTime(2024, value.toInt())) : '${value.toInt()}';
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(text, style: AppTypography.caption),
+                );
+              },
+              reservedSize: 30,
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                if (value == 0) return const SizedBox();
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Text(AppFormatters.formatCurrency(value).replaceAll('₹', ''), style: AppTypography.caption),
+                );
+              },
+              reservedSize: 45,
+            ),
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        borderData: FlBorderData(show: false),
+        minX: minKey.toDouble(),
+        maxX: maxKey.toDouble(),
+        minY: 0,
+        maxY: maxY * 1.2,
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            color: AppColors.secondary,
+            barWidth: 4,
+            isStrokeCapRound: true,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.secondary.withValues(alpha: 0.3),
+                  AppColors.secondary.withValues(alpha: 0.0),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SalesSplineChart extends StatelessWidget {
+  final List<SalesBillModel> bills;
+  final bool isMonthly;
+
+  const _SalesSplineChart({required this.bills, required this.isMonthly});
+
+  @override
+  Widget build(BuildContext context) {
+    if (bills.isEmpty) {
+      return Center(child: Text('No data for this period', style: AppTypography.bodySmall));
+    }
+
+    final Map<int, double> groupedData = {};
+    
+    for (final bill in bills) {
+      final key = isMonthly ? bill.saleDate.month : bill.saleDate.day;
+      groupedData[key] = (groupedData[key] ?? 0) + bill.grandTotal;
+    }
+
+    if (groupedData.isEmpty) return const SizedBox();
+
+    final maxKey = groupedData.keys.reduce((a, b) => a > b ? a : b);
+    final minKey = groupedData.keys.reduce((a, b) => a < b ? a : b);
+    double maxY = groupedData.values.reduce((a, b) => a > b ? a : b);
+
+    final spots = groupedData.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList();
+    spots.sort((a, b) => a.x.compareTo(b.x));
+
+    return LineChart(
+      LineChartData(
+        gridData: const FlGridData(show: false),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                if (value % 1 != 0) return const SizedBox();
+                final text = isMonthly ? DateFormat('MMM').format(DateTime(2024, value.toInt())) : '${value.toInt()}';
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(text, style: AppTypography.caption),
+                );
+              },
+              reservedSize: 30,
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                if (value == 0) return const SizedBox();
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Text(AppFormatters.formatCurrency(value).replaceAll('₹', ''), style: AppTypography.caption),
+                );
+              },
+              reservedSize: 45,
+            ),
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        borderData: FlBorderData(show: false),
+        minX: minKey.toDouble(),
+        maxX: maxKey.toDouble(),
+        minY: 0,
+        maxY: maxY * 1.2,
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            color: AppColors.primary,
+            barWidth: 4,
+            isStrokeCapRound: true,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.primary.withValues(alpha: 0.3),
+                  AppColors.primary.withValues(alpha: 0.0),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -456,6 +667,7 @@ class _PurchaseTab extends ConsumerWidget {
           ),
         ];
 
+        // Pie Chart data for Divisions (we'll just mock random divisions if none exist, or we can use product categories)
         return SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
@@ -481,6 +693,30 @@ class _PurchaseTab extends ConsumerWidget {
                       .toList()
                     ..removeLast(),
                 ),
+
+              const SizedBox(height: AppSpacing.xxl),
+
+              // Purchase Trend Spline Chart
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.show_chart_rounded,
+                            color: AppColors.primary, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Purchase Trend', style: AppTypography.h3),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(
+                      height: 250,
+                      child: _PurchaseSplineChart(bills: bills, isMonthly: filter.from == null),
+                    ),
+                  ],
+                ),
+              ),
 
               const SizedBox(height: AppSpacing.xxl),
 

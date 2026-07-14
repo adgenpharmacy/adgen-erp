@@ -214,6 +214,18 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       }
     } catch (_) {}
   }
+
+  Future<void> clockIn() async {
+    final user = state.value;
+    if (user == null) return;
+    await _recordAttendance(user.uid);
+  }
+
+  Future<void> clockOut() async {
+    final user = state.value;
+    if (user == null) return;
+    await _recordLogout(user.uid);
+  }
 }
 
 final authNotifierProvider =
@@ -222,4 +234,28 @@ final authNotifierProvider =
     ref.watch(firebaseAuthProvider),
     ref.watch(firestoreProvider),
   );
+});
+
+final myTodayAttendanceProvider = StreamProvider<AttendanceModel?>((ref) {
+  final user = ref.watch(authNotifierProvider).value;
+  if (user == null) return const Stream.empty();
+  
+  final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  final firestore = ref.watch(firestoreProvider);
+  
+  return firestore
+      .collection(AppConstants.colAttendance)
+      .where('uid', isEqualTo: user.uid)
+      .where('date', isEqualTo: today)
+      .snapshots()
+      .map((snap) {
+        if (snap.docs.isEmpty) return null;
+        final sorted = snap.docs.toList()
+          ..sort((a, b) {
+            final aTime = (a.data()['loginTime'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            final bTime = (b.data()['loginTime'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            return bTime.compareTo(aTime);
+          });
+        return AttendanceModel.fromFirestore(sorted.first);
+      });
 });

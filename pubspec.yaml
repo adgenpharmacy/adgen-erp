@@ -1,7 +1,7 @@
 name: adgen_pharmacy_erp
 description: AdGen Pharmacy ERP — Full-featured pharmacy management system
 publish_to: 'none'
-version: 1.0.2+12
+version: 1.0.5+15
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

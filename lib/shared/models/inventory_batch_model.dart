@@ -145,7 +145,7 @@ class InventoryModel extends Equatable {
       batches: batchList,
       systemStock: (data['systemStock'] ?? 0).toDouble(),
       physicalStock: (data['physicalStock'] ?? 0).toDouble(),
-      lowStockThreshold: (data['lowStockThreshold'] ?? 10).toDouble(),
+      lowStockThreshold: (data['lowStockThreshold'] ?? 1).toDouble(),
       lastUpdated: (data['lastUpdated'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
