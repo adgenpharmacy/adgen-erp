@@ -1,6 +1,6 @@
 # AdGen Pharmacy ERP
 
-A full-featured pharmacy management system built with Flutter + Firebase, optimized for Android tablets in landscape mode.
+A full-featured pharmacy management system built with Flutter + Firebase, optimized for Android tablets in landscape mode...
 
 ---
 
