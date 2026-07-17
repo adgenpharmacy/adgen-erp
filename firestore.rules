@@ -21,9 +21,10 @@ service cloud.firestore {
     }
 
     function isActiveUser() {
-      return isAuthenticated() &&
-             getUserData().isActive == true &&
-             getUserData().status == 'active';
+      return isAuthenticated() && (
+             isOwner() ||
+             (getUserData().isActive == true && getUserData().status == 'active')
+      );
     }
 
     // ─── Users Collection ──────────────────────────────────────────────────
@@ -101,6 +102,19 @@ service cloud.firestore {
     match /reminders/{reminderId} {
       allow read: if isActiveUser();
       allow create, update, delete: if isActiveUser();
+    }
+
+    // ─── Settings ─────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
+
+    // ─── Returns ──────────────────────────────────────────────────────────
+    match /returns/{returnId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isOwner();
     }
   }
 }

@@ -13,12 +13,14 @@ import '../../features/products/add_product_screen.dart';
 import '../../features/purchase/purchase_list_screen.dart';
 import '../../features/purchase/purchase_entry_screen.dart';
 import '../../features/purchase/purchase_detail_screen.dart';
+import '../../features/purchase/purchase_return_screen.dart';
 import '../../shared/models/purchase_bill_model.dart';
 import '../../shared/models/sales_bill_model.dart';
 import '../../features/sales/sales_list_screen.dart';
 import '../../features/sales/sales_entry_screen.dart';
 import '../../features/sales/invoice_preview_screen.dart';
 import '../../features/sales/sales_detail_screen.dart';
+import '../../features/sales/sale_return_screen.dart';
 import '../../features/inventory/inventory_screen.dart';
 import '../../features/inventory/inventory_detail_screen.dart';
 import '../../features/inventory/stock_correction_screen.dart';
@@ -157,6 +159,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   return PurchaseDetailScreen(bill: bill);
                 },
               ),
+              GoRoute(
+                path: 'return/:id',
+                name: 'purchase-return',
+                builder: (context, state) {
+                  final bill = state.extra as PurchaseBillModel;
+                  return PurchaseReturnScreen(originalBill: bill);
+                },
+              ),
             ],
           ),
           GoRoute(
@@ -187,6 +197,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) {
                   final bill = state.extra as SalesBillModel;
                   return SalesDetailScreen(bill: bill);
+                },
+              ),
+              GoRoute(
+                path: 'return/:id',
+                name: 'sale-return',
+                builder: (context, state) {
+                  final bill = state.extra as SalesBillModel;
+                  return SaleReturnScreen(originalBill: bill);
                 },
               ),
             ],

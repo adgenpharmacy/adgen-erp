@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:table_calendar/table_calendar.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/providers/admin_provider.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/data_ops_provider.dart';
+import '../../core/providers/settings_provider.dart';
 import '../../shared/models/user_model.dart';
 import '../../shared/models/attendance_model.dart';
 import '../../shared/widgets/app_card.dart';
@@ -28,7 +30,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -48,7 +50,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
 
     final usersAsync = ref.watch(allUsersProvider);
     final pendingAsync = ref.watch(pendingUsersProvider);
-    final todayAttn = ref.watch(todayAttendanceProvider);
+    // todayAttendanceProvider is watched elsewhere; no local var needed here
+    ref.watch(todayAttendanceProvider);
 
     final pendingCount = pendingAsync.valueOrNull?.length ?? 0;
 
@@ -86,6 +89,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
             ),
             const Tab(text: 'Attendance'),
             const Tab(text: 'Data Ops'),
+            const Tab(text: 'Settings'),
           ],
         ),
       ],
@@ -181,148 +185,15 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
             },
           ),
 
-          // ── Tab 3: Today's Attendance ────────────────────────────────
-          todayAttn.when(
-            loading: () => const Center(
-                child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
-            error: (e, _) => Center(child: Text('Error: $e')),
-            data: (records) {
-              if (records.isEmpty) {
-                return Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.people_outline_rounded,
-                        size: 36, color: AppColors.textMuted),
-                    const SizedBox(height: AppSpacing.md),
-                    Text('No attendance today', style: AppTypography.bodySmall),
-                  ]),
-                );
-              }
 
-              // Group by user for deduplicated summary
-              final byUser = <String, List<AttendanceModel>>{};
-              for (final r in records) {
-                byUser.putIfAbsent(r.uid, () => []).add(r);
-              }
-
-              return ListView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                children: [
-                  // Summary row
-                  AppCard(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Row(children: [
-                      _AttendanceStat(
-                        label: 'Present', value: byUser.length.toString(),
-                        color: AppColors.success, icon: Icons.check_circle_rounded),
-                      const VerticalDivider(thickness: 1),
-                      _AttendanceStat(
-                        label: 'Sessions', value: records.length.toString(),
-                        color: AppColors.primary, icon: Icons.login_rounded),
-                      const VerticalDivider(thickness: 1),
-                      _AttendanceStat(
-                        label: 'Active',
-                        value: records.where((r) => r.logoutTime == null).length.toString(),
-                        color: AppColors.warning, icon: Icons.access_time_rounded),
-                    ]),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-
-                  Text('Staff Present Today', style: AppTypography.h3),
-                  const SizedBox(height: AppSpacing.md),
-
-                  ...byUser.entries.map((entry) {
-                    final uid = entry.key;
-                    final userRecords = entry.value;
-                    // Sort records newest first
-                    userRecords.sort((a, b) => b.loginTime.compareTo(a.loginTime));
-                    
-                    final userName = userRecords.first.userName;
-                    final isCurrentlyActive = userRecords.any((r) => r.logoutTime == null);
-                    
-                    // Calculate total active time today for this user
-                    Duration totalDuration = Duration.zero;
-                    for (final r in userRecords) {
-                      if (r.sessionDuration != null) {
-                        totalDuration += r.sessionDuration!;
-                      }
-                    }
-                    
-                    final totalStr = totalDuration.inMinutes > 0 
-                      ? '${totalDuration.inHours}h ${totalDuration.inMinutes.remainder(60)}m'
-                      : '< 1m';
-
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: AppCard(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(children: [
-                            Container(
-                              width: 40, height: 40,
-                              decoration: BoxDecoration(
-                                color: isCurrentlyActive ? AppColors.success.withValues(alpha: 0.1) : AppColors.surface2,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(
-                                isCurrentlyActive ? Icons.person_rounded : Icons.person_outline_rounded,
-                                size: 22,
-                                color: isCurrentlyActive ? AppColors.success : AppColors.textMuted,
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(userName, style: AppTypography.labelLarge),
-                                if (isCurrentlyActive)
-                                  StatusChip(label: 'Active Now', type: StatusType.success, small: true)
-                                else
-                                  Text('Clocked Out', style: AppTypography.caption),
-                              ]),
-                            ),
-                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                              Text('Total Time', style: AppTypography.caption),
-                              Text(totalStr, style: AppTypography.numericSmall.copyWith(color: AppColors.primary)),
-                            ]),
-                          ]),
-                          const Divider(height: 24),
-                          ...userRecords.map((r) {
-                            final loginStr = DateFormat('h:mm a').format(r.loginTime);
-                            final logoutStr = r.logoutTime != null
-                                ? DateFormat('h:mm a').format(r.logoutTime!)
-                                : 'Active';
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Row(children: [
-                                const Icon(Icons.login_rounded, size: 14, color: AppColors.success),
-                                const SizedBox(width: 4),
-                                Text(loginStr, style: AppTypography.caption),
-                                const SizedBox(width: 8),
-                                const Icon(Icons.logout_rounded, size: 14, color: AppColors.error),
-                                const SizedBox(width: 4),
-                                Text(
-                                  logoutStr, 
-                                  style: AppTypography.caption.copyWith(
-                                    color: r.logoutTime == null ? AppColors.success : null,
-                                    fontWeight: r.logoutTime == null ? FontWeight.w700 : null
-                                  )
-                                ),
-                                const Spacer(),
-                                if (r.sessionDuration != null)
-                                  Text(r.formattedDuration, style: AppTypography.caption),
-                              ]),
-                            );
-                          }),
-                        ]),
-                      ),
-                    );
-                  }),
-                ],
-              );
-            },
-          ),
+          // ── Tab 3: Attendance Calendar ───────────────────────────────
+          const _AttendanceCalendarTab(),
 
           // ── Tab 4: Data Operations ──────────────────────────────────
           const _DataOpsTab(),
+
+          // ── Tab 5: Settings ─────────────────────────────────────────
+          const _SettingsTab(),
         ],
       ),
     );
@@ -467,6 +338,7 @@ class _PendingUserCard extends StatelessWidget {
 }
 
 // ── Attendance Stat ───────────────────────────────────────────────────────────
+// ignore: unused_element
 class _AttendanceStat extends StatelessWidget {
   final String label;
   final String value;
@@ -648,76 +520,81 @@ class _DataOpsTabState extends ConsumerState<_DataOpsTab> {
                 ),
               ],
               const SizedBox(height: AppSpacing.xl),
-                Text('Export Data (Backup)', style: AppTypography.h3),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Export current database collections as JSON files for backup purposes.',
-                  style: AppTypography.bodySmall,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('products'),
-                        icon: const Icon(Icons.download_rounded, size: 18),
-                        label: const Text('Export Products'),
-                      ),
-                    ),
+
+              // ── ZIP Export ───────────────────────────────────────────────
+              AppCard(
+                backgroundColor: AppColors.primaryContainer,
+                borderColor: AppColors.primary.withValues(alpha: 0.2),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Icon(Icons.archive_rounded, color: AppColors.primary, size: 22),
                     const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('inventory'),
-                        icon: const Icon(Icons.download_rounded, size: 18),
-                        label: const Text('Export Inventory'),
+                    Text('Export All Data — ZIP Backup', style: AppTypography.h3),
+                  ]),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Downloads a single ZIP file containing ALL collections as:\n'
+                    '• CSV files (human-readable, open in Excel/Sheets)\n'
+                    '• JSON files (machine-readable, re-importable to this app)',
+                    style: AppTypography.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () =>
+                          ref.read(dataOpsNotifierProvider.notifier).exportAllAsZip(),
+                      icon: const Icon(Icons.download_rounded, size: 18),
+                      label: const Text('Export All as ZIP'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: AppSpacing.md),
+
+              // ── ZIP Import ───────────────────────────────────────────────
+              AppCard(
+                borderColor: AppColors.warning.withValues(alpha: 0.3),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Icon(Icons.unarchive_rounded, color: AppColors.warning, size: 22),
                     const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).exportCollection('parties'),
-                        icon: const Icon(Icons.download_rounded, size: 18),
-                        label: const Text('Export Parties'),
+                    Text('Import from ZIP Backup', style: AppTypography.h3),
+                  ]),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Pick a previously exported ZIP to restore all records. '
+                    'Uses safe merge — existing data is not deleted, only updated/added. '
+                    'Works with backups made from this app only.',
+                    style: AppTypography.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          ref.read(dataOpsNotifierProvider.notifier).importFromZip(),
+                      icon: const Icon(Icons.upload_rounded, size: 18),
+                      label: const Text('Import from ZIP'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.warning,
+                        side: const BorderSide(color: AppColors.warning),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text('Restore Data (Backup)', style: AppTypography.h3),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Restore a previously exported JSON backup file.',
-                  style: AppTypography.bodySmall,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('products'),
-                        icon: const Icon(Icons.upload_rounded, size: 18),
-                        label: const Text('Restore Products'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('inventory'),
-                        icon: const Icon(Icons.upload_rounded, size: 18),
-                        label: const Text('Restore Inventory'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref.read(dataOpsNotifierProvider.notifier).restoreBackup('parties'),
-                        icon: const Icon(Icons.upload_rounded, size: 18),
-                        label: const Text('Restore Parties'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.xxl),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: AppSpacing.xxl),
                 const Divider(),
                 const SizedBox(height: AppSpacing.md),
                 Text('Danger Zone', style: AppTypography.h3.copyWith(color: AppColors.error)),
@@ -775,3 +652,221 @@ class _DataOpsTabState extends ConsumerState<_DataOpsTab> {
   }
 }
 
+// ─── Attendance Calendar Tab ───────────────────────────────────────────────────
+class _AttendanceCalendarTab extends ConsumerStatefulWidget {
+  const _AttendanceCalendarTab();
+  @override
+  ConsumerState<_AttendanceCalendarTab> createState() => _AttendanceCalendarTabState();
+}
+
+class _AttendanceCalendarTabState extends ConsumerState<_AttendanceCalendarTab> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+
+  @override
+  Widget build(BuildContext context) {
+    final allAttnAsync = ref.watch(allAttendanceProvider);
+
+    return allAttnAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+      error: (e, _) => Center(child: Text('Error: ')),
+      data: (records) {
+        // Build a set of dates that have attendance
+        final daysWithAttendance = records.map((r) {
+          final d = r.loginTime;
+          return DateTime(d.year, d.month, d.day);
+        }).toSet();
+
+        // Records for selected day
+        final selectedRecords = _selectedDay == null ? <AttendanceModel>[] :
+            records.where((r) {
+              final d = r.loginTime;
+              return d.year == _selectedDay!.year && d.month == _selectedDay!.month && d.day == _selectedDay!.day;
+            }).toList();
+
+        return ListView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          children: [
+            TableCalendar(
+              firstDay: DateTime.utc(DateTime.now().year - 2),
+              lastDay: DateTime.utc(DateTime.now().year + 1),
+              focusedDay: _focusedDay,
+              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              calendarStyle: CalendarStyle(
+                todayDecoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                selectedDecoration: BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                ),
+                markerDecoration: BoxDecoration(
+                  color: AppColors.success,
+                  shape: BoxShape.circle,
+                ),
+                defaultTextStyle: AppTypography.body,
+                weekendTextStyle: AppTypography.body.copyWith(color: AppColors.error),
+              ),
+              headerStyle: HeaderStyle(
+                titleTextStyle: AppTypography.h3,
+                formatButtonVisible: false,
+                leftChevronIcon: const Icon(Icons.chevron_left_rounded, color: AppColors.primary),
+                rightChevronIcon: const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
+              ),
+              eventLoader: (day) {
+                final d = DateTime(day.year, day.month, day.day);
+                return daysWithAttendance.contains(d) ? [true] : [];
+              },
+              onDaySelected: (selected, focused) {
+                setState(() {
+                  _selectedDay = selected;
+                  _focusedDay = focused;
+                });
+              },
+              onPageChanged: (focusedDay) => _focusedDay = focusedDay,
+            ),
+            if (_selectedDay != null) ...[
+              const SizedBox(height: AppSpacing.xl),
+              Text(
+                DateFormat('EEEE, dd MMMM yyyy').format(_selectedDay!),
+                style: AppTypography.h3,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (selectedRecords.isEmpty)
+                Center(child: Text('No attendance on this day', style: AppTypography.bodySmall))
+              else
+                ...selectedRecords.map((r) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: AppCard(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Row(children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 20),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(r.userName, style: AppTypography.labelLarge),
+                        Text(
+                          'In:  | Out: ',
+                          style: AppTypography.caption,
+                        ),
+                      ])),
+                      if (r.sessionDuration != null)
+                        Text(r.formattedDuration, style: AppTypography.numericSmall.copyWith(color: AppColors.primary)),
+                    ]),
+                  ),
+                )),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ─── Settings Tab ─────────────────────────────────────────────────────────────
+class _SettingsTab extends ConsumerStatefulWidget {
+  const _SettingsTab();
+  @override
+  ConsumerState<_SettingsTab> createState() => _SettingsTabState();
+}
+
+class _SettingsTabState extends ConsumerState<_SettingsTab> {
+  final _apiKeyCtrl = TextEditingController();
+  bool _obscure = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill with existing key
+    ref.read(geminiApiKeyProvider.future).then((key) {
+      if (key != null && mounted) _apiKeyCtrl.text = key;
+    });
+  }
+
+  @override
+  void dispose() {
+    _apiKeyCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      children: [
+        const SizedBox(height: AppSpacing.lg),
+        Icon(Icons.settings_rounded, size: 40, color: AppColors.primary),
+        const SizedBox(height: AppSpacing.md),
+        Text('App Settings', style: AppTypography.h2, textAlign: TextAlign.center),
+        const SizedBox(height: 4),
+        Text('Configure API keys and preferences', style: AppTypography.bodySmall, textAlign: TextAlign.center),
+        const SizedBox(height: AppSpacing.xl),
+
+        AppCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.auto_awesome_rounded, color: AppColors.primary, size: 18),
+              const SizedBox(width: 8),
+              Text('Gemini AI API Key', style: AppTypography.h3),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              'Enter your Google Gemini API key to enable AI-powered features in this app. Get it from aistudio.google.com',
+              style: AppTypography.bodySmall,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _apiKeyCtrl,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+                hintText: 'AIzaSy...',
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _saving ? null : () async {
+                  setState(() => _saving = true);
+                  final error = await ref.read(settingsNotifierProvider.notifier)
+                      .updateGeminiApiKey(_apiKeyCtrl.text.trim());
+                  setState(() => _saving = false);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(error ?? 'API key saved!'),
+                      backgroundColor: error != null ? AppColors.error : AppColors.success,
+                    ));
+                  }
+                },
+                icon: _saving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.save_rounded),
+                label: Text(_saving ? 'Saving...' : 'Save API Key'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ],
+    );
+  }
+}

@@ -35,24 +35,31 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
 
       // Update inventory for each item (convert pack qty → content qty)
       final inventoryNotifier = _ref.read(inventoryNotifierProvider.notifier);
+      // Group items by productId to allow safe parallel inventory updates
+      final Map<String, List<PurchaseItem>> groupedItems = {};
       for (final item in bill.items) {
-        // Store content units (e.g. tablets) in inventory, not pack units (strips)
-        final batch = InventoryBatch(
-          batchNumber: item.batchNumber,
-          expiryDate: item.expiryDate,
-          quantity: item.totalContentQty, // strips × packSize = tablets
-          mrp: item.mrp,
-          purchaseRate: item.rate,
-          purchaseDate: bill.invoiceDate,
-          purchaseBillId: docRef.id,
-        );
-        await inventoryNotifier.addStock(
-          productId: item.productId,
-          productName: item.productName,
-          batch: batch,
-          lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
-        );
+        groupedItems.putIfAbsent(item.productId, () => []).add(item);
       }
+
+      await Future.wait(groupedItems.values.map((itemsList) async {
+        for (final item in itemsList) {
+          final batch = InventoryBatch(
+            batchNumber: item.batchNumber,
+            expiryDate: item.expiryDate,
+            quantity: item.totalContentQty, // strips × packSize = tablets
+            mrp: item.mrp,
+            purchaseRate: item.rate,
+            purchaseDate: bill.invoiceDate,
+            purchaseBillId: docRef.id,
+          );
+          await inventoryNotifier.addStock(
+            productId: item.productId,
+            productName: item.productName,
+            batch: batch,
+            lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
+          );
+        }
+      }));
 
       // Create ledger entry if credit
       if (bill.ledgerType == LedgerType.credit) {
@@ -94,6 +101,9 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
         await inventoryNotifier.revertPurchaseStock(
           productId: item.productId,
           batchNumber: item.batchNumber,
+          expiryDate: item.expiryDate,
+          mrp: item.mrp,
+          purchaseRate: item.rate,
           quantity: item.totalContentQty,
         );
       }
@@ -101,7 +111,6 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
       // 3. Delete ledger entry & update party balance
       if (oldBill.ledgerType == LedgerType.credit) {
         if (oldBill.partyId.isNotEmpty) {
-          // Subtract balance from Party
           await _db.collection(AppConstants.colParties).doc(oldBill.partyId).update({
             'outstandingBalance': FieldValue.increment(-oldBill.grandTotal),
           }).catchError((_) {});
@@ -111,8 +120,12 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
             .collection(AppConstants.colLedger)
             .where('billId', isEqualTo: id)
             .get();
-        for (final doc in ledgerSnap.docs) {
-          await doc.reference.delete();
+        if (ledgerSnap.docs.isNotEmpty) {
+          final ledgerBatch = _db.batch();
+          for (final doc in ledgerSnap.docs) {
+            ledgerBatch.delete(doc.reference);
+          }
+          await ledgerBatch.commit();
         }
       }
 
@@ -143,6 +156,9 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
         await inventoryNotifier.revertPurchaseStock(
           productId: item.productId,
           batchNumber: item.batchNumber,
+          expiryDate: item.expiryDate,
+          mrp: item.mrp,
+          purchaseRate: item.rate,
           quantity: item.totalContentQty,
         );
       }
@@ -151,23 +167,30 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
       await _db.collection(AppConstants.colPurchaseBills).doc(id).update(bill.toFirestore());
 
       // 4. Add new stock (in content units)
+      final Map<String, List<PurchaseItem>> groupedItems = {};
       for (final item in bill.items) {
-        final batch = InventoryBatch(
-          batchNumber: item.batchNumber,
-          expiryDate: item.expiryDate,
-          quantity: item.totalContentQty,
-          mrp: item.mrp,
-          purchaseRate: item.rate,
-          purchaseDate: bill.invoiceDate,
-          purchaseBillId: id,
-        );
-        await inventoryNotifier.addStock(
-          productId: item.productId,
-          productName: item.productName,
-          batch: batch,
-          lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
-        );
+        groupedItems.putIfAbsent(item.productId, () => []).add(item);
       }
+
+      await Future.wait(groupedItems.values.map((itemsList) async {
+        for (final item in itemsList) {
+          final batch = InventoryBatch(
+            batchNumber: item.batchNumber,
+            expiryDate: item.expiryDate,
+            quantity: item.totalContentQty,
+            mrp: item.mrp,
+            purchaseRate: item.rate,
+            purchaseDate: bill.invoiceDate,
+            purchaseBillId: id,
+          );
+          await inventoryNotifier.addStock(
+            productId: item.productId,
+            productName: item.productName,
+            batch: batch,
+            lowStockThreshold: AppConstants.lowStockDefault.toDouble(),
+          );
+        }
+      }));
 
       // 5. Update or recreate ledger entry
       final ledgerSnap = await _db
@@ -199,9 +222,13 @@ class PurchaseNotifier extends StateNotifier<AsyncValue<void>> {
           await _db.collection(AppConstants.colLedger).add(ledgerData);
         }
       } else {
-        // If changed to cash/bank, remove ledger entry
-        for (final doc in ledgerSnap.docs) {
-          await doc.reference.delete();
+        // Payment type changed to cash/bank — batch-delete ledger entry
+        if (ledgerSnap.docs.isNotEmpty) {
+          final deleteBatch = _db.batch();
+          for (final doc in ledgerSnap.docs) {
+            deleteBatch.delete(doc.reference);
+          }
+          await deleteBatch.commit();
         }
       }
 

@@ -65,6 +65,15 @@ final todayAttendanceProvider = StreamProvider<List<AttendanceModel>>((ref) {
       .map((snap) => snap.docs.map((d) => AttendanceModel.fromFirestore(d)).toList());
 });
 
+final allAttendanceProvider = StreamProvider<List<AttendanceModel>>((ref) {
+  return FirebaseFirestore.instance
+      .collection(AppConstants.colAttendance)
+      .orderBy('loginTime', descending: true)
+      .limit(500)
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => AttendanceModel.fromFirestore(d)).toList());
+});
+
 // ─── Admin Actions Notifier ───────────────────────────────────────────────────
 class AdminNotifier extends StateNotifier<AsyncValue<void>> {
   final FirebaseFirestore _db;

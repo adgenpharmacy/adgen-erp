@@ -19,7 +19,7 @@ import '../../shared/widgets/app_button.dart';
 import '../../shared/widgets/app_text_field.dart';
 import '../../shared/widgets/app_card.dart';
 
-// ─── Item Form State ──────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Item Form State Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 class _PurchaseItemForm {
   // Product reference
   String productId = '';
@@ -75,7 +75,7 @@ class _PurchaseItemForm {
       );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Main Screen Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 class PurchaseEntryScreen extends ConsumerStatefulWidget {
   final String? billId;
   const PurchaseEntryScreen({super.key, this.billId});
@@ -290,7 +290,19 @@ class _PurchaseEntryScreenState extends ConsumerState<PurchaseEntryScreen> {
         content: Text('Add at least one item'), backgroundColor: AppColors.error));
       return;
     }
+    // Block save if any item has rate > MRP
+    final invalidItems = _items.where(
+        (i) => i.productId.isNotEmpty && i.mrp > 0 && i.rate > i.mrp).toList();
+    if (invalidItems.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Rate cannot exceed MRP for: ${invalidItems.map((i) => i.productName).join(", ")}'),
+        backgroundColor: AppColors.error,
+      ));
+      return;
+    }
     setState(() => _isLoading = true);
+
     final user = ref.read(authNotifierProvider).value!;
     final bill = PurchaseBillModel(
       partyId: _selectedParty!.id!,
@@ -379,91 +391,103 @@ class _PurchaseEntryScreenState extends ConsumerState<PurchaseEntryScreen> {
     final saveActions = <Widget>[
       AppButton(
         label: 'Save', icon: Icons.save_rounded,
-        onPressed: _save, isLoading: _isLoading, small: isMobile,
+        onPressed: () => _save(), isLoading: _isLoading, small: isMobile,
       ),
       const SizedBox(width: AppSpacing.lg),
     ];
 
     if (isMobile) {
-      return DefaultTabController(
-        length: 2,
-        child: Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AppBar(
-            backgroundColor: AppColors.surface,
-            elevation: 0,
-            surfaceTintColor: Colors.transparent,
-            title: titleText,
-            leading: IconButton(
-                onPressed: () => context.pop(),
-                icon: const Icon(Icons.arrow_back_rounded)),
-            actions: saveActions,
-            bottom: TabBar(
-              labelStyle: AppTypography.label.copyWith(fontWeight: FontWeight.w700),
-              indicatorColor: AppColors.primary,
-              indicatorWeight: 3,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textSecondary,
-              tabs: const [
-                Tab(icon: Icon(Icons.info_outline_rounded, size: 16), text: 'Bill Details'),
-                Tab(icon: Icon(Icons.inventory_rounded, size: 16), text: 'Items'),
-              ],
-            ),
-          ),
-          body: Form(
-            key: _formKey,
-            child: TabBarView(children: [
-              SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(children: [
-                  _buildBillDetailsPanel(),
-                  const SizedBox(height: AppSpacing.lg),
-                  _buildTotalsPanel(),
-                  const SizedBox(height: AppSpacing.xl),
-                ]),
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyS, control: true): () => _save(),
+          const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () => _save(),
+        },
+        child: DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            backgroundColor: AppColors.background,
+            appBar: AppBar(
+              backgroundColor: AppColors.surface,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              title: titleText,
+              leading: IconButton(
+                  onPressed: () => context.pop(),
+                  icon: const Icon(Icons.arrow_back_rounded)),
+              actions: saveActions,
+              bottom: TabBar(
+                labelStyle: AppTypography.label.copyWith(fontWeight: FontWeight.w700),
+                indicatorColor: AppColors.primary,
+                indicatorWeight: 3,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                tabs: const [
+                  Tab(icon: Icon(Icons.info_outline_rounded, size: 16), text: 'Bill Details'),
+                  Tab(icon: Icon(Icons.inventory_rounded, size: 16), text: 'Items'),
+                ],
               ),
-              Column(children: [
-                _buildItemsHeader(),
-                Expanded(child: _buildItemsList()),
+            ),
+            body: Form(
+              key: _formKey,
+              child: TabBarView(children: [
+                SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(children: [
+                    _buildBillDetailsPanel(),
+                    const SizedBox(height: AppSpacing.lg),
+                    _buildTotalsPanel(),
+                    const SizedBox(height: AppSpacing.xl),
+                  ]),
+                ),
+                Column(children: [
+                  _buildItemsHeader(),
+                  Expanded(child: _buildItemsList()),
+                ]),
               ]),
-            ]),
+            ),
           ),
         ),
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        title: titleText,
-        leading: IconButton(
-            onPressed: () => context.pop(),
-            icon: const Icon(Icons.arrow_back_rounded)),
-        actions: saveActions,
-      ),
-      body: Form(
-        key: _formKey,
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(
-            width: 340,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(children: [
-                _buildBillDetailsPanel(),
-                const SizedBox(height: AppSpacing.lg),
-                _buildTotalsPanel(),
-              ]),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () => _save(),
+        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () => _save(),
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.surface,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          title: titleText,
+          leading: IconButton(
+              onPressed: () => context.pop(),
+              icon: const Icon(Icons.arrow_back_rounded)),
+          actions: saveActions,
+        ),
+        body: Form(
+          key: _formKey,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              width: 340,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(children: [
+                  _buildBillDetailsPanel(),
+                  const SizedBox(height: AppSpacing.lg),
+                  _buildTotalsPanel(),
+                ]),
+              ),
             ),
-          ),
-          const VerticalDivider(color: AppColors.border, width: 1),
-          Expanded(child: Column(children: [
-            _buildItemsHeader(),
-            Expanded(child: _buildItemsList()),
-          ])),
-        ]),
+            const VerticalDivider(color: AppColors.border, width: 1),
+            Expanded(child: Column(children: [
+              _buildItemsHeader(),
+              Expanded(child: _buildItemsList()),
+            ])),
+          ]),
+        ),
       ),
     );
   }
@@ -483,7 +507,7 @@ class _PurchaseEntryScreenState extends ConsumerState<PurchaseEntryScreen> {
             prefixIcon: Icons.business_rounded,
             focusNode: _partySearchFocus,
             onTap: _showAvailableParties,
-            hint: 'Search supplier…',
+            hint: 'Search supplier─Â¦',
             suffix: _selectedParty != null
                 ? const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 18)
                 : null,
@@ -736,18 +760,29 @@ class _PurchaseEntryScreenState extends ConsumerState<PurchaseEntryScreen> {
         onUpdate: () => setState(() {}),
         onRemove: _items.length > 1 ? () => setState(() => _items.removeAt(i)) : null,
         onPickProduct: () => _showProductPicker(i),
+        onNextItem: i < _items.length - 1
+            ? null  // let Tab move naturally in list
+            : () {
+                // Last item: add new item and focus it
+                setState(() => _items.add(_PurchaseItemForm()));
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _showProductPicker(_items.length - 1);
+                });
+              },
       ),
     );
   }
 }
 
-// ─── Item Card ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Item Card Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 class _PurchaseItemCard extends StatefulWidget {
   final _PurchaseItemForm item;
   final int index;
   final VoidCallback onUpdate;
   final VoidCallback? onRemove;
   final VoidCallback onPickProduct;
+  // Next item focus trigger (for Tab-through between items)
+  final VoidCallback? onNextItem;
 
   const _PurchaseItemCard({
     super.key,
@@ -756,6 +791,7 @@ class _PurchaseItemCard extends StatefulWidget {
     required this.onUpdate,
     this.onRemove,
     required this.onPickProduct,
+    this.onNextItem,
   });
 
   @override
@@ -763,20 +799,41 @@ class _PurchaseItemCard extends StatefulWidget {
 }
 
 class _PurchaseItemCardState extends State<_PurchaseItemCard> {
+  // Controllers
+  late TextEditingController _productSearchCtrl;
   late TextEditingController _batchCtrl;
+  late TextEditingController _expiryCtrl;   // MM/YY
   late TextEditingController _qtyCtrl;
   late TextEditingController _freeQtyCtrl;
   late TextEditingController _mrpCtrl;
   late TextEditingController _rateCtrl;
   late TextEditingController _discCtrl;
 
+  // Focus nodes for Tab/Enter chain
+  late FocusNode _productFocus;
+  late FocusNode _batchFocus;
+  late FocusNode _expiryFocus;
+  late FocusNode _qtyFocus;
+  late FocusNode _freeQtyFocus;
+  late FocusNode _mrpFocus;
+  late FocusNode _rateFocus;
+  late FocusNode _discFocus;
+
+  // Product search overlay
+  bool _showProductOverlay = false;
+  List<ProductModel> _filteredProducts = [];
   String _lastProductId = '';
+  String? _rateError;
 
   @override
   void initState() {
     super.initState();
     _lastProductId = widget.item.productId;
+    _productSearchCtrl = TextEditingController(
+        text: widget.item.productId.isNotEmpty ? widget.item.productName : '');
     _batchCtrl = TextEditingController(text: widget.item.batchNumber);
+    _expiryCtrl = TextEditingController(
+        text: _dateToMmYy(widget.item.expiryDate));
     _qtyCtrl = TextEditingController(
         text: widget.item.quantity > 0 ? widget.item.quantity.toString() : '');
     _freeQtyCtrl = TextEditingController(
@@ -789,6 +846,29 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
         text: widget.item.discountPercent > 0
             ? widget.item.discountPercent.toString()
             : '');
+
+    _productFocus = FocusNode();
+    _batchFocus = FocusNode();
+    _expiryFocus = FocusNode();
+    _qtyFocus = FocusNode();
+    _freeQtyFocus = FocusNode();
+    _mrpFocus = FocusNode();
+    _rateFocus = FocusNode();
+    _discFocus = FocusNode();
+
+    _productFocus.addListener(() {
+      if (_productFocus.hasFocus) {
+        setState(() => _showProductOverlay = true);
+        _filterProducts(_productSearchCtrl.text);
+      } else {
+        // Delay so tap on overlay item registers first
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted && !_productFocus.hasFocus) {
+            setState(() => _showProductOverlay = false);
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -796,38 +876,135 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
     super.didUpdateWidget(oldWidget);
     if (widget.item.productId != _lastProductId) {
       _lastProductId = widget.item.productId;
+      _productSearchCtrl.text = widget.item.productName;
       _mrpCtrl.text = widget.item.mrp > 0 ? widget.item.mrp.toStringAsFixed(2) : '';
       _rateCtrl.text = widget.item.rate > 0 ? widget.item.rate.toStringAsFixed(2) : '';
-      
-      // Also reset batch/qty if product changes completely
       if (widget.item.productId.isNotEmpty) {
         _batchCtrl.text = '';
         _qtyCtrl.text = '';
         _freeQtyCtrl.text = '';
+        _expiryCtrl.text = _dateToMmYy(widget.item.expiryDate);
       }
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
+    _productSearchCtrl.dispose();
     _batchCtrl.dispose();
+    _expiryCtrl.dispose();
     _qtyCtrl.dispose();
     _freeQtyCtrl.dispose();
     _mrpCtrl.dispose();
     _rateCtrl.dispose();
     _discCtrl.dispose();
+    _productFocus.dispose();
+    _batchFocus.dispose();
+    _expiryFocus.dispose();
+    _qtyFocus.dispose();
+    _freeQtyFocus.dispose();
+    _mrpFocus.dispose();
+    _rateFocus.dispose();
+    _discFocus.dispose();
     super.dispose();
   }
 
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+  String _dateToMmYy(DateTime d) =>
+      '${d.month.toString().padLeft(2, '0')}/${(d.year % 100).toString().padLeft(2, '0')}';
+
+  DateTime? _parseMmYy(String v) {
+    final clean = v.replaceAll('/', '');
+    if (clean.length != 4) return null;
+    final mm = int.tryParse(clean.substring(0, 2));
+    final yy = int.tryParse(clean.substring(2));
+    if (mm == null || yy == null || mm < 1 || mm > 12) return null;
+    return DateTime(2000 + yy, mm, 28); // last-safe day
+  }
+
+  void _filterProducts(String query) {
+    // Read from context; provider must be available
+    final products = ProviderScope.containerOf(context)
+        .read(productsProvider)
+        .valueOrNull ?? [];
+    final q = query.toLowerCase();
+    setState(() {
+      _filteredProducts = q.isEmpty
+          ? products.take(20).toList()
+          : products
+              .where((p) =>
+                  p.name.toLowerCase().contains(q) ||
+                  (p.genericName?.toLowerCase().contains(q) ?? false) ||
+                  p.companyName.toLowerCase().contains(q) ||
+                  p.hsnCode.contains(q))
+              .take(20)
+              .toList();
+    });
+  }
+
+  void _selectProduct(ProductModel product) {
+    setState(() {
+      widget.item.productId = product.id ?? '';
+      widget.item.productName = product.name;
+      widget.item.hsnCode = product.hsnCode;
+      widget.item.packSize = product.packSize;
+      widget.item.packUnit = product.packUnit;
+      widget.item.contentUnit = product.contentUnit;
+      widget.item.division = product.division.displayName;
+      widget.item.mrp = product.mrp;
+      widget.item.rate = product.rate;
+      widget.item.gstPercent = product.gstPercent;
+      _productSearchCtrl.text = product.name;
+      _mrpCtrl.text = product.mrp > 0 ? product.mrp.toStringAsFixed(2) : '';
+      _rateCtrl.text = product.rate > 0 ? product.rate.toStringAsFixed(2) : '';
+      _batchCtrl.text = '';
+      _qtyCtrl.text = '';
+      _freeQtyCtrl.text = '';
+      _expiryCtrl.text = _dateToMmYy(widget.item.expiryDate);
+      _showProductOverlay = false;
+      _lastProductId = product.id ?? '';
+    });
+    widget.onUpdate();
+    // Move focus to batch field
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (mounted) _batchFocus.requestFocus();
+    });
+  }
+
   void _update() {
+    final mrp = double.tryParse(_mrpCtrl.text) ?? 0;
+    final rate = double.tryParse(_rateCtrl.text) ?? 0;
+    widget.item.mrp = mrp;
+    widget.item.rate = rate;
     widget.item.batchNumber = _batchCtrl.text;
     widget.item.quantity = double.tryParse(_qtyCtrl.text) ?? 0;
     widget.item.freeQuantity = double.tryParse(_freeQtyCtrl.text) ?? 0;
-    widget.item.mrp = double.tryParse(_mrpCtrl.text) ?? 0;
-    widget.item.rate = double.tryParse(_rateCtrl.text) ?? 0;
     widget.item.discountPercent = double.tryParse(_discCtrl.text) ?? 0;
+
+    // Parse expiry
+    final parsed = _parseMmYy(_expiryCtrl.text);
+    if (parsed != null) widget.item.expiryDate = parsed;
+
+    // Rate > MRP validation
+    if (rate > 0 && mrp > 0 && rate > mrp) {
+      setState(() => _rateError = 'Rate (₹${rate.toStringAsFixed(2)}) > MRP (₹${mrp.toStringAsFixed(2)})');
+    } else {
+      setState(() => _rateError = null);
+    }
+
     widget.onUpdate();
   }
+
+  void _moveFocus(FocusNode from, FocusNode to) {
+    from.unfocus();
+    Future.delayed(const Duration(milliseconds: 20), () {
+      if (mounted) to.requestFocus();
+    });
+  }
+
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Build Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   @override
   Widget build(BuildContext context) {
@@ -836,9 +1013,10 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
 
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.md),
+      borderColor: _rateError != null ? AppColors.error.withValues(alpha: 0.4) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // ── Product selector row ───────────────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Product search row Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         Row(children: [
           Container(
             width: 32, height: 32,
@@ -853,38 +1031,115 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
-            child: GestureDetector(
-              onTap: widget.onPickProduct,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: hasProduct ? AppColors.primaryContainer : AppColors.surface2,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  border: Border.all(
-                    color: hasProduct ? AppColors.primary.withValues(alpha: 0.3) : AppColors.border,
-                  ),
-                ),
-                child: Row(children: [
-                  Icon(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Inline search field (keyboard-driven)
+              TextField(
+                controller: _productSearchCtrl,
+                focusNode: _productFocus,
+                decoration: InputDecoration(
+                  hintText: hasProduct ? null : 'Type to search product─Â¦',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  prefixIcon: Icon(
                     hasProduct ? Icons.medication_rounded : Icons.search_rounded,
                     size: 16,
                     color: hasProduct ? AppColors.primary : AppColors.textMuted,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      hasProduct ? item.productName : 'Select product…',
-                      style: AppTypography.label.copyWith(
-                        color: hasProduct ? AppColors.primary : AppColors.textMuted,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  filled: true,
+                  fillColor: hasProduct ? AppColors.primaryContainer : AppColors.surface2,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: BorderSide(
+                        color: hasProduct
+                            ? AppColors.primary.withValues(alpha: 0.3)
+                            : AppColors.border),
                   ),
-                  const Icon(Icons.arrow_drop_down_rounded,
-                      color: AppColors.textMuted, size: 18),
-                ]),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: BorderSide(
+                        color: hasProduct
+                            ? AppColors.primary.withValues(alpha: 0.3)
+                            : AppColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: const BorderSide(color: AppColors.primary),
+                  ),
+                  suffixIcon: hasProduct
+                      ? GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              widget.item.productId = '';
+                              widget.item.productName = '';
+                              _productSearchCtrl.text = '';
+                              _lastProductId = '';
+                            });
+                            _productFocus.requestFocus();
+                          },
+                          child: const Icon(Icons.close_rounded,
+                              size: 16, color: AppColors.textMuted),
+                        )
+                      : null,
+                ),
+                style: AppTypography.label.copyWith(
+                    color: hasProduct ? AppColors.primary : AppColors.textPrimary),
+                onChanged: (v) => _filterProducts(v),
+                onSubmitted: (_) {
+                  if (_filteredProducts.isNotEmpty) {
+                    _selectProduct(_filteredProducts.first);
+                  }
+                },
               ),
-            ),
+
+              // Overlay dropdown
+              if (_showProductOverlay && _filteredProducts.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  margin: const EdgeInsets.only(top: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: [BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 8, offset: const Offset(0, 3))],
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: _filteredProducts.length,
+                    itemBuilder: (_, i) {
+                      final p = _filteredProducts[i];
+                      return InkWell(
+                        onTap: () => _selectProduct(p),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(children: [
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(p.name, style: AppTypography.labelLarge),
+                                Text(
+                                  '${p.companyName}  ·  MRP ₹${p.mrp.toStringAsFixed(2)}',
+                                  style: AppTypography.caption,
+                                ),
+                              ]),
+                            ),
+                            if (p.packSize > 1)
+                              Text(
+                                '${p.packSize} ${p.contentUnit}/${p.packUnit}',
+                                style: AppTypography.caption
+                                    .copyWith(color: AppColors.primary),
+                              ),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ]),
           ),
           if (widget.onRemove != null) ...[
             const SizedBox(width: AppSpacing.sm),
@@ -897,9 +1152,10 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
           ],
         ]),
 
-        if (!hasProduct) const SizedBox(height: 0)
+        if (!hasProduct) const SizedBox.shrink()
         else ...[
           const SizedBox(height: AppSpacing.sm),
+
           // Pack info badge
           if (item.packSize > 1)
             Container(
@@ -919,63 +1175,77 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
 
           const SizedBox(height: AppSpacing.md),
 
-          // ── Batch + Expiry ─────────────────────────────────────────────
+          // Ã¢â€â‚¬Ã¢â€â‚¬ Batch + Expiry (MM/YY text input) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           Row(children: [
-            Expanded(child: _numField('Batch No. *', _batchCtrl, isText: true)),
+            Expanded(
+              child: _numField(
+                label: 'Batch No. *',
+                ctrl: _batchCtrl,
+                focusNode: _batchFocus,
+                isText: true,
+                nextFocus: _expiryFocus,
+                textInputAction: TextInputAction.next,
+              ),
+            ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
-              child: GestureDetector(
-                onTap: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: item.expiryDate,
-                    firstDate: DateTime.now().subtract(const Duration(days: 30)),
-                    lastDate: DateTime(2035),
-                  );
-                  if (picked != null) {
-                    setState(() => item.expiryDate = picked);
-                    widget.onUpdate();
-                  }
-                },
-                child: Container(
-                  height: 52,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface2,
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Expiry Date', style: AppTypography.caption),
-                      Text(AppFormatters.formatDate(item.expiryDate),
-                          style: AppTypography.label),
-                    ],
-                  ),
-                ),
+              child: _expiryField(),
+            ),
+          ]),
+          const SizedBox(height: AppSpacing.sm),
+
+          // Ã¢â€â‚¬Ã¢â€â‚¬ Qty + Free Qty Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+          Row(children: [
+            Expanded(
+              child: _numField(
+                label: 'Qty (${item.packUnit}s) *',
+                ctrl: _qtyCtrl,
+                focusNode: _qtyFocus,
+                nextFocus: _freeQtyFocus,
+                textInputAction: TextInputAction.next,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _numField(
+                label: 'Free ${item.packUnit}s',
+                ctrl: _freeQtyCtrl,
+                focusNode: _freeQtyFocus,
+                nextFocus: _mrpFocus,
+                textInputAction: TextInputAction.next,
               ),
             ),
           ]),
           const SizedBox(height: AppSpacing.sm),
 
-          // ── Qty + Free Qty (Row 1) ─────────────────────────────────────
+          // Ã¢â€â‚¬Ã¢â€â‚¬ MRP + Rate Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
           Row(children: [
-            Expanded(child: _numField('Qty (${item.packUnit}s) *', _qtyCtrl)),
+            Expanded(
+              child: _numField(
+                label: 'MRP/Strip (₹)',
+                ctrl: _mrpCtrl,
+                focusNode: _mrpFocus,
+                nextFocus: _rateFocus,
+                prefix: '₹',
+                textInputAction: TextInputAction.next,
+              ),
+            ),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _numField('Free ${item.packUnit}s', _freeQtyCtrl)),
+            Expanded(
+              child: _numField(
+                label: 'Rate/Strip (₹)',
+                ctrl: _rateCtrl,
+                focusNode: _rateFocus,
+                nextFocus: _discFocus,
+                prefix: '₹',
+                textInputAction: TextInputAction.next,
+                errorText: _rateError,
+              ),
+            ),
           ]),
-          const SizedBox(height: AppSpacing.sm),
-          // ── MRP + Rate per strip (Row 2) ───────────────────────────────
-          Row(children: [
-            Expanded(child: _numField('MRP/Strip (₹)', _mrpCtrl, prefix: '₹')),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _numField('Rate/Strip (₹)', _rateCtrl, prefix: '₹')),
-          ]),
-          const SizedBox(height: AppSpacing.sm),
 
-          // ── GST + Discount + Line Total ────────────────────────────────
+          // Ã¢â€â‚¬Ã¢â€â‚¬ GST + Discount + Line Total Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+          const SizedBox(height: AppSpacing.sm),
           Row(children: [
             SizedBox(
               width: 110,
@@ -1001,20 +1271,34 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
               ]),
             ),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _numField('Disc %', _discCtrl, suffix: '%')),
+            Expanded(
+              child: _numField(
+                label: 'Disc %',
+                ctrl: _discCtrl,
+                focusNode: _discFocus,
+                suffix: '%',
+                textInputAction: TextInputAction.done,
+                onSubmit: () => widget.onNextItem?.call(),
+              ),
+            ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryContainer,
+                  color: _rateError != null
+                      ? AppColors.error.withValues(alpha: 0.08)
+                      : AppColors.primaryContainer,
                   borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Line Total', style: AppTypography.caption.copyWith(color: AppColors.primary)),
+                  Text('Line Total',
+                      style: AppTypography.caption.copyWith(
+                          color: _rateError != null ? AppColors.error : AppColors.primary)),
                   Text(
-                    AppFormatters.formatCurrency(item.lineTotal),
-                    style: AppTypography.numericSmall.copyWith(color: AppColors.primary),
+                    _rateError != null ? 'Error' : AppFormatters.formatCurrency(item.lineTotal),
+                    style: AppTypography.numericSmall.copyWith(
+                        color: _rateError != null ? AppColors.error : AppColors.primary),
                   ),
                 ]),
               ),
@@ -1025,14 +1309,56 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
     );
   }
 
-  Widget _numField(String label, TextEditingController ctrl,
-      {String? prefix, String? suffix, bool isText = false}) {
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Reusable field builder Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+  Widget _expiryField() {
+    return TextFormField(
+      controller: _expiryCtrl,
+      focusNode: _expiryFocus,
+      textInputAction: TextInputAction.next,
+      keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+        _MmYyFormatter(),
+      ],
+      style: AppTypography.body,
+      decoration: InputDecoration(
+        labelText: 'Expiry (MM/YY)',
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        errorText: _expiryCtrl.text.length >= 5 && _parseMmYy(_expiryCtrl.text) == null
+            ? 'Invalid' : null,
+        suffixIcon: _expiryCtrl.text.length == 5 && _parseMmYy(_expiryCtrl.text) != null
+            ? const Icon(Icons.check_rounded, size: 16, color: AppColors.success)
+            : null,
+      ),
+      onChanged: (v) => _update(),
+      onFieldSubmitted: (_) => _moveFocus(_expiryFocus, _qtyFocus),
+    );
+  }
+
+  Widget _numField({
+    required String label,
+    required TextEditingController ctrl,
+    required FocusNode focusNode,
+    FocusNode? nextFocus,
+    String? prefix,
+    String? suffix,
+    bool isText = false,
+    TextInputAction textInputAction = TextInputAction.next,
+    String? errorText,
+    VoidCallback? onSubmit,
+  }) {
     return TextFormField(
       controller: ctrl,
+      focusNode: focusNode,
+      textInputAction: textInputAction,
       onChanged: (_) => _update(),
-      keyboardType: isText ? TextInputType.text
+      keyboardType: isText
+          ? TextInputType.text
           : const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: isText ? null
+      inputFormatters: isText
+          ? null
           : [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
       style: AppTypography.body,
       decoration: InputDecoration(
@@ -1041,12 +1367,43 @@ class _PurchaseItemCardState extends State<_PurchaseItemCard> {
         suffixText: suffix,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        errorText: errorText,
+        errorStyle: const TextStyle(fontSize: 10),
       ),
+      onFieldSubmitted: (_) {
+        if (onSubmit != null) {
+          onSubmit();
+        } else if (nextFocus != null) {
+          _moveFocus(focusNode, nextFocus);
+        }
+      },
     );
   }
 }
 
-// ─── Product Picker Bottom Sheet ──────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ MM/YY Input Formatter Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+/// Automatically inserts '/' after the 2nd digit so user types "0726" Ã¢â€ â€™ "07/26".
+class _MmYyFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digitsOnly = newValue.text.replaceAll('/', '');
+    if (digitsOnly.length > 4) {
+      return oldValue; // max 4 digits
+    }
+    String result;
+    if (digitsOnly.length <= 2) {
+      result = digitsOnly;
+    } else {
+      result = '${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2)}';
+    }
+    return TextEditingValue(
+      text: result,
+      selection: TextSelection.collapsed(offset: result.length),
+    );
+  }
+}
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Product Picker Bottom Sheet Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 class _ProductPickerSheet extends ConsumerStatefulWidget {
   final ValueChanged<ProductModel> onProductSelected;
   final VoidCallback onAddNewProduct;
@@ -1128,7 +1485,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
               autofocus: true,
               onChanged: (v) => setState(() => _search = v),
               decoration: const InputDecoration(
-                hintText: 'Search product…',
+                hintText: 'Search product─Â¦',
                 prefixIcon: Icon(Icons.search_rounded, size: 18),
                 isDense: true,
               ),
@@ -1291,7 +1648,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
   }
 }
 
-// ─── Total Row ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Total Row Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 class _TotalRow extends StatelessWidget {
   final String label;
   final double value;

@@ -1,9 +1,8 @@
-import 'package:pdf/pdf.dart';
+﻿import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import '../../shared/models/sales_bill_model.dart';
-import 'constants.dart';
 import 'formatters.dart';
 
 class PdfGenerator {

@@ -14,7 +14,6 @@ import '../../core/providers/auth_provider.dart';
 import '../../core/providers/inventory_provider.dart';
 import '../../core/providers/sales_provider.dart';
 import '../../core/providers/customer_provider.dart';
-import '../../core/utils/constants.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/product_model.dart';
 import '../../shared/models/sales_bill_model.dart';
@@ -262,6 +261,32 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_items.isEmpty) return;
 
+    // ── Validate: Schedule H/H1/X must have prescription ─────────────────
+    final restrictedItems = _items.where((i) =>
+        i.productId.isNotEmpty &&
+        (i.division == 'Schedule H' ||
+         i.division == 'Schedule H1' ||
+         i.division == 'Schedule X')).toList();
+
+    if (restrictedItems.isNotEmpty && _prescriptionBytes == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Prescription required for: ${restrictedItems.map((i) => i.productName).join(", ")}. '
+            'Upload prescription before saving.',
+          ),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Upload',
+            textColor: Colors.white,
+            onPressed: _pickPrescription,
+          ),
+        ));
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
     final user = ref.read(authNotifierProvider).value!;
 
@@ -276,31 +301,7 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
       invoiceNum = AppFormatters.generateInvoiceNumber('ADG', nextNum);
     }
 
-    final hasRestricted = _items.any((i) => i.division != 'General');
-    if (hasRestricted && prescUrl == null) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Prescription Required'),
-            content: const Text(
-              'This bill contains restricted products (Schedule H/H1/X).\n'
-              'A prescription is required. Continue without one?',
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning),
-                child: const Text('Continue Anyway'),
-              ),
-            ],
-          ),
-        );
-        if (confirm != true) return;
-      }
-    }
+    final hasRestricted = restrictedItems.isNotEmpty;
 
     final bill = SalesBillModel(
       id: widget.billId,
@@ -407,62 +408,68 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
     ];
 
     if (isMobile) {
-      return DefaultTabController(
-        length: 2,
-        child: Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AppBar(
-            backgroundColor: AppColors.surface,
-            elevation: 0,
-            surfaceTintColor: Colors.transparent,
-            title: titleText,
-            leading: IconButton(
-              onPressed: () => context.pop(),
-              icon: const Icon(Icons.arrow_back_rounded),
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyS, control: true): () => _save(),
+          const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () => _save(),
+        },
+        child: DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            backgroundColor: AppColors.background,
+            appBar: AppBar(
+              backgroundColor: AppColors.surface,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              title: titleText,
+              leading: IconButton(
+                onPressed: () => context.pop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+              actions: saveActions,
+              bottom: TabBar(
+                labelStyle: AppTypography.label.copyWith(fontWeight: FontWeight.w700),
+                indicatorColor: AppColors.primary,
+                indicatorWeight: 3,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                tabs: const [
+                  Tab(icon: Icon(Icons.person_outline_rounded, size: 16), text: 'Customer'),
+                  Tab(icon: Icon(Icons.medication_rounded, size: 16), text: 'Items'),
+                ],
+              ),
             ),
-            actions: saveActions,
-            bottom: TabBar(
-              labelStyle: AppTypography.label.copyWith(fontWeight: FontWeight.w700),
-              indicatorColor: AppColors.primary,
-              indicatorWeight: 3,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textSecondary,
-              tabs: const [
-                Tab(icon: Icon(Icons.person_outline_rounded, size: 16), text: 'Customer'),
-                Tab(icon: Icon(Icons.medication_rounded, size: 16), text: 'Items'),
-              ],
-            ),
-          ),
-          body: Form(
-            key: _formKey,
-            child: TabBarView(
-              children: [
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  child: Column(children: [
-                    _buildCustomerPanel(),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildPaymentPanel(),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildPrescriptionPanel(),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildTotalsPanel(),
-                    const SizedBox(height: AppSpacing.xl),
-                  ]),
-                ),
-                Column(children: [
-                  _buildItemsHeader(),
-                  Expanded(
-                    child: inventoryAsync.when(
-                      loading: () => const Center(
-                          child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
-                      error: (e, _) => Center(child: Text('$e')),
-                      data: (_) => _buildItemsList(),
-                    ),
+            body: Form(
+              key: _formKey,
+              child: TabBarView(
+                children: [
+                  SingleChildScrollView(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Column(children: [
+                      _buildCustomerPanel(),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildPaymentPanel(),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildPrescriptionPanel(),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildTotalsPanel(),
+                      const SizedBox(height: AppSpacing.xl),
+                    ]),
                   ),
-                  _buildStickyTotal(),
-                ]),
-              ],
+                  Column(children: [
+                    _buildItemsHeader(),
+                    Expanded(
+                      child: inventoryAsync.when(
+                        loading: () => const Center(
+                            child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+                        error: (e, _) => Center(child: Text('$e')),
+                        data: (_) => _buildItemsList(),
+                      ),
+                    ),
+                    _buildStickyTotal(),
+                  ]),
+                ],
+              ),
             ),
           ),
         ),
@@ -470,52 +477,58 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
     }
 
     // ── Desktop layout ─────────────────────────────────────────────────
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        title: titleText,
-        leading: IconButton(
-          onPressed: () => context.pop(),
-          icon: const Icon(Icons.arrow_back_rounded),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () => _save(),
+        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () => _save(),
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.surface,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          title: titleText,
+          leading: IconButton(
+            onPressed: () => context.pop(),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          actions: saveActions,
         ),
-        actions: saveActions,
-      ),
-      body: Form(
-        key: _formKey,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 300,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
+        body: Form(
+          key: _formKey,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 300,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(children: [
+                    _buildCustomerPanel(),
+                    const SizedBox(height: AppSpacing.lg),
+                    _buildPaymentPanel(),
+                    const SizedBox(height: AppSpacing.lg),
+                    _buildPrescriptionPanel(),
+                  ]),
+                ),
+              ),
+              const VerticalDivider(color: AppColors.border, width: 1),
+              Expanded(
                 child: Column(children: [
-                  _buildCustomerPanel(),
-                  const SizedBox(height: AppSpacing.lg),
-                  _buildPaymentPanel(),
-                  const SizedBox(height: AppSpacing.lg),
-                  _buildPrescriptionPanel(),
+                  _buildItemsHeader(),
+                  Expanded(
+                    child: inventoryAsync.when(
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Text('$e'),
+                      data: (_) => _buildItemsList(),
+                    ),
+                  ),
+                  _buildStickyTotal(),
                 ]),
               ),
-            ),
-            const VerticalDivider(color: AppColors.border, width: 1),
-            Expanded(
-              child: Column(children: [
-                _buildItemsHeader(),
-                Expanded(
-                  child: inventoryAsync.when(
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => Text('$e'),
-                    data: (_) => _buildItemsList(),
-                  ),
-                ),
-                _buildStickyTotal(),
-              ]),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -542,7 +555,7 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (_totalDiscount > 0)
                 Text(
-                  'Discount  −${AppFormatters.formatCurrency(_totalDiscount)}',
+                  'Discount  âˆ’${AppFormatters.formatCurrency(_totalDiscount)}',
                   style: AppTypography.caption.copyWith(color: AppColors.success),
                 ),
               Text(
@@ -774,7 +787,7 @@ class _SalesEntryScreenState extends ConsumerState<SalesEntryScreen> {
             });
           },
           constraints: const BoxConstraints(minHeight: 32, minWidth: 40),
-          children: const [Text('%'), Text('₹')],
+          children: const [Text('%'), Text('â‚¹')],
         ),
       ],
     );
@@ -908,7 +921,7 @@ class _SalesItemForm {
   /// Selected inventory reference (for batch picker).
   InventoryModel? selectedInventory;
 
-  /// Per-unit/tablet MRP = stripMrp ÷ packSize.
+  /// Per-unit/tablet MRP = stripMrp Ã· packSize.
   double get perUnitMrp => packSize > 1 ? stripMrp / packSize : stripMrp;
 
   /// Total content units for inventory deduction.
@@ -917,7 +930,7 @@ class _SalesItemForm {
   /// Gross amount: strips at strip MRP + loose at per-unit MRP.
   double get grossAmount => (stripQty * stripMrp) + (looseQty * perUnitMrp);
 
-  /// MRP is tax-inclusive. lineTotal = gross × (1 − discount%).
+  /// MRP is tax-inclusive. lineTotal = gross Ã— (1 âˆ’ discount%).
   /// No GST added on top of MRP for sales billing.
   double get taxableAmount => grossAmount * (1 - discountPercent / 100);
 
@@ -944,6 +957,7 @@ class _SalesItemForm {
 }
 
 // ─── Sales Item Card ──────────────────────────────────────────────────────────
+// ─── Sales Item Card ──────────────────────────────────────────────────────────
 class _SalesItemCard extends StatefulWidget {
   final _SalesItemForm item;
   final int index;
@@ -965,15 +979,33 @@ class _SalesItemCard extends StatefulWidget {
 }
 
 class _SalesItemCardState extends State<_SalesItemCard> {
+  // Controllers
+  late TextEditingController _productSearchCtrl;
   late TextEditingController _mrpCtrl;
   late TextEditingController _stripQtyCtrl;
   late TextEditingController _looseQtyCtrl;
   late TextEditingController _discCtrl;
+  late TextEditingController _expiryCtrl;
+
+  // Focus nodes for keyboard chain
+  late FocusNode _productFocus;
+  late FocusNode _mrpFocus;
+  late FocusNode _stripQtyFocus;
+  late FocusNode _looseQtyFocus;
+  late FocusNode _discFocus;
+
+  // Inline product search state
+  bool _showProductOverlay = false;
+  List<InventoryModel> _filteredInventory = [];
+  String _lastProductId = '';
 
   @override
   void initState() {
     super.initState();
     final item = widget.item;
+    _lastProductId = item.productId;
+    _productSearchCtrl = TextEditingController(
+        text: item.productId.isNotEmpty ? item.productName : '');
     _mrpCtrl = TextEditingController(
         text: item.stripMrp > 0 ? item.stripMrp.toStringAsFixed(2) : '');
     _stripQtyCtrl = TextEditingController(
@@ -982,36 +1014,145 @@ class _SalesItemCardState extends State<_SalesItemCard> {
         text: item.looseQty > 0 ? item.looseQty.toString() : '');
     _discCtrl = TextEditingController(
         text: item.discountPercent > 0 ? item.discountPercent.toString() : '');
+    _expiryCtrl = TextEditingController(text: _dateToMmYy(item.expiryDate));
+
+    _productFocus = FocusNode();
+    _mrpFocus = FocusNode();
+    _stripQtyFocus = FocusNode();
+    _looseQtyFocus = FocusNode();
+    _discFocus = FocusNode();
+
+    _productFocus.addListener(() {
+      if (_productFocus.hasFocus) {
+        setState(() => _showProductOverlay = true);
+        _filterInventory(_productSearchCtrl.text);
+      } else {
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted && !_productFocus.hasFocus) {
+            setState(() => _showProductOverlay = false);
+          }
+        });
+      }
+    });
   }
 
   @override
   void didUpdateWidget(covariant _SalesItemCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Sync MRP controller when batch is selected from picker
-    final newMrp = widget.item.stripMrp;
-    if (newMrp > 0 && _mrpCtrl.text != newMrp.toStringAsFixed(2)) {
-      _mrpCtrl.text = newMrp.toStringAsFixed(2);
-      // Move cursor to end
-      _mrpCtrl.selection = TextSelection.fromPosition(
-          TextPosition(offset: _mrpCtrl.text.length));
+    // Sync MRP when batch chosen from bottom-sheet picker
+    if (widget.item.productId != _lastProductId) {
+      _lastProductId = widget.item.productId;
+      _productSearchCtrl.text = widget.item.productName;
+      _mrpCtrl.text = widget.item.stripMrp > 0
+          ? widget.item.stripMrp.toStringAsFixed(2)
+          : '';
+      _expiryCtrl.text = _dateToMmYy(widget.item.expiryDate);
+      setState(() {});
+    } else {
+      final newMrp = widget.item.stripMrp;
+      if (newMrp > 0 && _mrpCtrl.text != newMrp.toStringAsFixed(2)) {
+        _mrpCtrl.text = newMrp.toStringAsFixed(2);
+        _mrpCtrl.selection =
+            TextSelection.fromPosition(TextPosition(offset: _mrpCtrl.text.length));
+        _expiryCtrl.text = _dateToMmYy(widget.item.expiryDate);
+      }
     }
   }
 
   @override
   void dispose() {
+    _productSearchCtrl.dispose();
     _mrpCtrl.dispose();
     _stripQtyCtrl.dispose();
     _looseQtyCtrl.dispose();
     _discCtrl.dispose();
+    _expiryCtrl.dispose();
+    _productFocus.dispose();
+    _mrpFocus.dispose();
+    _stripQtyFocus.dispose();
+    _looseQtyFocus.dispose();
+    _discFocus.dispose();
     super.dispose();
   }
 
-  void _update() {
-    widget.item.stripMrp = double.tryParse(_mrpCtrl.text) ?? 0;
-    widget.item.stripQty = double.tryParse(_stripQtyCtrl.text) ?? 0;
-    widget.item.looseQty = double.tryParse(_looseQtyCtrl.text) ?? 0;
-    widget.item.discountPercent = double.tryParse(_discCtrl.text) ?? 0;
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  String _dateToMmYy(DateTime d) =>
+      '${d.month.toString().padLeft(2, '0')}/${(d.year % 100).toString().padLeft(2, '0')}';
+
+  DateTime? _parseMmYy(String v) {
+    final clean = v.replaceAll('/', '');
+    if (clean.length != 4) return null;
+    final mm = int.tryParse(clean.substring(0, 2));
+    final yy = int.tryParse(clean.substring(2));
+    if (mm == null || yy == null || mm < 1 || mm > 12) return null;
+    return DateTime(2000 + yy, mm, 28);
+  }
+
+  void _filterInventory(String query) {
+    final inventory = ProviderScope.containerOf(context)
+            .read(inventoryProvider)
+            .valueOrNull ??
+        [];
+    final q = query.toLowerCase();
+    setState(() {
+      _filteredInventory = inventory
+          .where((inv) =>
+              inv.totalStock > 0 &&
+              (q.isEmpty || inv.productName.toLowerCase().contains(q)))
+          .take(20)
+          .toList()
+        ..sort((a, b) => a.productName.compareTo(b.productName));
+    });
+  }
+
+  void _selectFromInventory(InventoryModel inv) {
+    final products = ProviderScope.containerOf(context)
+            .read(productsProvider)
+            .valueOrNull ??
+        [];
+    final product = products.cast<ProductModel?>().firstWhere(
+        (p) => p?.id == inv.productId,
+        orElse: () => null);
+
+    // Pick best batch (nearest expiry that's not expired)
+    final now = DateTime.now();
+    final batches = inv.availableBatches
+        .where((b) => b.expiryDate.isAfter(now) && b.quantity > 0)
+        .toList()
+      ..sort((a, b) => a.expiryDate.compareTo(b.expiryDate));
+    final bestBatch = batches.isNotEmpty ? batches.first : null;
+
+    setState(() {
+      widget.item.productId = inv.productId;
+      widget.item.productName = inv.productName;
+      widget.item.selectedInventory = inv;
+      if (product != null) {
+        widget.item.packSize = product.packSize;
+        widget.item.packUnit = product.packUnit;
+        widget.item.contentUnit = product.contentUnit;
+        widget.item.hasPack = product.productType.hasPack;
+        widget.item.gstPercent = product.gstPercent;
+        widget.item.division = product.division.displayName;
+      }
+      if (bestBatch != null) {
+        widget.item.batchNumber = bestBatch.batchNumber;
+        widget.item.expiryDate = bestBatch.expiryDate;
+        widget.item.stripMrp = bestBatch.mrp;
+        _mrpCtrl.text = bestBatch.mrp.toStringAsFixed(2);
+        _expiryCtrl.text = _dateToMmYy(bestBatch.expiryDate);
+      } else {
+        _expiryCtrl.text = _dateToMmYy(widget.item.expiryDate);
+      }
+      _productSearchCtrl.text = inv.productName;
+      _lastProductId = inv.productId;
+      _showProductOverlay = false;
+    });
     widget.onChanged();
+    // Move focus to MRP field
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (mounted) _mrpFocus.requestFocus();
+    });
   }
 
   void _selectBatch(InventoryBatch batch) {
@@ -1020,9 +1161,29 @@ class _SalesItemCardState extends State<_SalesItemCard> {
       widget.item.expiryDate = batch.expiryDate;
       widget.item.stripMrp = batch.mrp;
       _mrpCtrl.text = batch.mrp.toStringAsFixed(2);
+      _expiryCtrl.text = _dateToMmYy(batch.expiryDate);
     });
     widget.onChanged();
   }
+
+  void _update() {
+    widget.item.stripMrp = double.tryParse(_mrpCtrl.text) ?? 0;
+    widget.item.stripQty = double.tryParse(_stripQtyCtrl.text) ?? 0;
+    widget.item.looseQty = double.tryParse(_looseQtyCtrl.text) ?? 0;
+    widget.item.discountPercent = double.tryParse(_discCtrl.text) ?? 0;
+    final parsed = _parseMmYy(_expiryCtrl.text);
+    if (parsed != null) widget.item.expiryDate = parsed;
+    widget.onChanged();
+  }
+
+  void _moveFocus(FocusNode from, FocusNode to) {
+    from.unfocus();
+    Future.delayed(const Duration(milliseconds: 20), () {
+      if (mounted) to.requestFocus();
+    });
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -1033,7 +1194,7 @@ class _SalesItemCardState extends State<_SalesItemCard> {
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // ── Row: Index badge + Product selector + Delete ────────────────
+        // ── Index badge + Inline product search + Delete ───────────────────
         Row(children: [
           Container(
             width: 30, height: 30,
@@ -1048,40 +1209,129 @@ class _SalesItemCardState extends State<_SalesItemCard> {
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: GestureDetector(
-              onTap: widget.onPickProduct,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: hasProduct ? AppColors.primaryContainer : AppColors.surface2,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  border: Border.all(
-                    color: hasProduct
-                        ? AppColors.primary.withValues(alpha: 0.3)
-                        : AppColors.border,
-                  ),
-                ),
-                child: Row(children: [
-                  Icon(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Inline search text field
+              TextField(
+                controller: _productSearchCtrl,
+                focusNode: _productFocus,
+                decoration: InputDecoration(
+                  hintText: hasProduct ? null : 'Type to search productâ€¦',
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  prefixIcon: Icon(
                     hasProduct ? Icons.medication_rounded : Icons.search_rounded,
                     size: 16,
                     color: hasProduct ? AppColors.primary : AppColors.textMuted,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      hasProduct ? item.productName : 'Select product…',
-                      style: AppTypography.label.copyWith(
-                        color: hasProduct ? AppColors.primary : AppColors.textMuted,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  filled: true,
+                  fillColor: hasProduct
+                      ? AppColors.primaryContainer
+                      : AppColors.surface2,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: BorderSide(
+                        color: hasProduct
+                            ? AppColors.primary.withValues(alpha: 0.3)
+                            : AppColors.border),
                   ),
-                  const Icon(Icons.arrow_drop_down_rounded,
-                      color: AppColors.textMuted, size: 18),
-                ]),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: BorderSide(
+                        color: hasProduct
+                            ? AppColors.primary.withValues(alpha: 0.3)
+                            : AppColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    borderSide: const BorderSide(color: AppColors.primary),
+                  ),
+                  suffixIcon: hasProduct
+                      ? GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              widget.item.productId = '';
+                              widget.item.productName = '';
+                              widget.item.selectedInventory = null;
+                              _productSearchCtrl.text = '';
+                              _lastProductId = '';
+                            });
+                            _productFocus.requestFocus();
+                          },
+                          child: const Icon(Icons.close_rounded,
+                              size: 16, color: AppColors.textMuted),
+                        )
+                      : null,
+                ),
+                style: AppTypography.label.copyWith(
+                    color: hasProduct ? AppColors.primary : AppColors.textPrimary),
+                onChanged: (v) => _filterInventory(v),
+                onSubmitted: (_) {
+                  if (_filteredInventory.isNotEmpty) {
+                    _selectFromInventory(_filteredInventory.first);
+                  }
+                },
               ),
-            ),
+
+              // Search overlay dropdown
+              if (_showProductOverlay && _filteredInventory.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  margin: const EdgeInsets.only(top: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3))
+                    ],
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: _filteredInventory.length,
+                    itemBuilder: (_, i) {
+                      final inv = _filteredInventory[i];
+                      final isLow = inv.totalStock <= 10 && inv.totalStock > 0;
+                      return InkWell(
+                        onTap: () => _selectFromInventory(inv),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(children: [
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(inv.productName, style: AppTypography.labelLarge),
+                                Text(
+                                  '${inv.totalStock.toStringAsFixed(0)} units in stock  '
+                                  '· ${inv.availableBatches.length} batch${inv.availableBatches.length != 1 ? "es" : ""}',
+                                  style: AppTypography.caption.copyWith(
+                                      color: isLow
+                                          ? AppColors.warning
+                                          : AppColors.textMuted),
+                                ),
+                              ]),
+                            ),
+                            Icon(
+                              isLow
+                                  ? Icons.warning_amber_rounded
+                                  : Icons.check_circle_outline_rounded,
+                              size: 16,
+                              color:
+                                  isLow ? AppColors.warning : AppColors.success,
+                            ),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ]),
           ),
           if (widget.onRemove != null) ...[
             const SizedBox(width: AppSpacing.sm),
@@ -1094,7 +1344,8 @@ class _SalesItemCardState extends State<_SalesItemCard> {
           ],
         ]),
 
-        if (!hasProduct) const SizedBox() else ...[
+        if (!hasProduct) const SizedBox.shrink()
+        else ...[
           const SizedBox(height: AppSpacing.sm),
 
           // Pack info badge
@@ -1108,7 +1359,7 @@ class _SalesItemCardState extends State<_SalesItemCard> {
               ),
               child: Text(
                 '1 ${item.packUnit} = ${item.packSize} ${item.contentUnit}s'
-                '  ·  Per ${item.contentUnit}: ₹${item.perUnitMrp.toStringAsFixed(2)}'
+                '  ·  Per ${item.contentUnit}: â‚¹${item.perUnitMrp.toStringAsFixed(2)}'
                 '  ·  Total: ${item.quantity.toStringAsFixed(0)} ${item.contentUnit}s',
                 style: AppTypography.caption.copyWith(color: AppColors.primary),
               ),
@@ -1116,56 +1367,103 @@ class _SalesItemCardState extends State<_SalesItemCard> {
 
           const SizedBox(height: AppSpacing.sm),
 
-          // ── Batch selector ────────────────────────────────────────────
+          // ── Batch selector (if inventory selected with multiple batches) ──
           if (item.selectedInventory != null &&
-              item.selectedInventory!.availableBatches.isNotEmpty)
+              item.selectedInventory!.availableBatches.length > 1)
             _BatchSelector(
               key: ValueKey('bs_${item.productId}'),
               batches: item.selectedInventory!.availableBatches,
               selectedBatchNumber: item.batchNumber,
               onBatchSelected: _selectBatch,
             )
-          else
+          else ...[
+            // Manual batch + MM/YY expiry
             Row(children: [
               Expanded(
-                child: _field(
-                  label: 'Batch No.',
+                child: TextFormField(
                   initialValue: item.batchNumber,
-                  onChanged: (v) { item.batchNumber = v; widget.onChanged(); },
-                  isText: true,
+                  textInputAction: TextInputAction.next,
+                  onChanged: (v) {
+                    item.batchNumber = v;
+                    widget.onChanged();
+                  },
+                  style: AppTypography.body,
+                  decoration: const InputDecoration(
+                    labelText: 'Batch No.',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              Expanded(child: _DateField(item: item, onChanged: widget.onChanged)),
+              Expanded(
+                child: TextFormField(
+                  controller: _expiryCtrl,
+                  textInputAction: TextInputAction.next,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    _SalesMmYyFormatter(),
+                  ],
+                  style: AppTypography.body,
+                  decoration: InputDecoration(
+                    labelText: 'Expiry (MM/YY)',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                    suffixIcon:
+                        _expiryCtrl.text.length == 5 &&
+                                _parseMmYy(_expiryCtrl.text) != null
+                            ? const Icon(Icons.check_rounded,
+                                size: 16, color: AppColors.success)
+                            : null,
+                  ),
+                  onChanged: (_) => _update(),
+                  onFieldSubmitted: (_) => _moveFocus(
+                      FocusNode(), _mrpFocus), // move to MRP
+                ),
+              ),
             ]),
+          ],
 
           const SizedBox(height: AppSpacing.sm),
 
-          // ── Row 1: MRP/Strip + Discount % ────────────────────────────
+          // ── MRP/Strip + Discount % ─────────────────────────────────────
           Row(children: [
             Expanded(
               child: TextFormField(
                 controller: _mrpCtrl,
+                focusNode: _mrpFocus,
+                textInputAction: TextInputAction.next,
                 onChanged: (_) => _update(),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                ],
                 style: AppTypography.body,
                 decoration: InputDecoration(
-                  labelText: 'MRP/${item.packUnit} (₹)',
-                  prefixText: '₹ ',
+                  labelText: 'MRP/${item.packUnit} (â‚¹)',
+                  prefixText: 'â‚¹ ',
                   isDense: true,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                 ),
+                onFieldSubmitted: (_) => _moveFocus(_mrpFocus, _stripQtyFocus),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: TextFormField(
                 controller: _discCtrl,
+                focusNode: _discFocus,
                 onChanged: (_) => _update(),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                ],
                 style: AppTypography.body,
                 decoration: const InputDecoration(
                   labelText: 'Discount %',
@@ -1180,14 +1478,19 @@ class _SalesItemCardState extends State<_SalesItemCard> {
 
           const SizedBox(height: AppSpacing.sm),
 
-          // ── Row 2: Strips qty + Loose tablets qty ────────────────────
+          // ── Strips qty + Loose tablets qty ─────────────────────────────
           Row(children: [
             Expanded(
               child: TextFormField(
                 controller: _stripQtyCtrl,
+                focusNode: _stripQtyFocus,
+                textInputAction: TextInputAction.next,
                 onChanged: (_) => _update(),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                ],
                 style: AppTypography.body,
                 decoration: InputDecoration(
                   labelText: '${item.packUnit}s',
@@ -1196,21 +1499,23 @@ class _SalesItemCardState extends State<_SalesItemCard> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                 ),
+                onFieldSubmitted: (_) =>
+                    _moveFocus(_stripQtyFocus, _looseQtyFocus),
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
             if (item.hasPack) ...[
-              const Padding(
-                padding: EdgeInsets.only(top: 16),
-                child: Text('+', style: TextStyle(fontSize: 18, color: AppColors.textMuted)),
-              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: TextFormField(
                   controller: _looseQtyCtrl,
+                  focusNode: _looseQtyFocus,
+                  textInputAction: TextInputAction.next,
                   onChanged: (_) => _update(),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                  ],
                   style: AppTypography.body,
                   decoration: InputDecoration(
                     labelText: 'Loose ${item.contentUnit}s',
@@ -1219,101 +1524,54 @@ class _SalesItemCardState extends State<_SalesItemCard> {
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                   ),
+                  onFieldSubmitted: (_) =>
+                      _moveFocus(_looseQtyFocus, _discFocus),
                 ),
               ),
-            ] else
-              Expanded(child: const SizedBox()),
+            ],
           ]),
 
+          // Line total chip
           const SizedBox(height: AppSpacing.sm),
-
-
-            // Line total badge
-            Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primaryContainer,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('Total', style: AppTypography.caption.copyWith(color: AppColors.primaryLight)),
-                  Text(
-                    AppFormatters.formatCurrency(item.lineTotal),
-                    style: AppTypography.numericSmall.copyWith(color: AppColors.primary),
-                  ),
-                ]),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryContainer,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+              child: Text(
+                'Total: ${AppFormatters.formatCurrency(item.lineTotal)}',
+                style: AppTypography.numericSmall
+                    .copyWith(color: AppColors.primary),
               ),
             ),
+          ),
         ],
       ]),
     );
   }
-
-  Widget _field({
-    required String label,
-    required String initialValue,
-    required ValueChanged<String> onChanged,
-    bool isText = false,
-  }) {
-    return TextFormField(
-      initialValue: initialValue,
-      onChanged: onChanged,
-      keyboardType: isText ? TextInputType.text
-          : const TextInputType.numberWithOptions(decimal: true),
-      style: AppTypography.body,
-      decoration: InputDecoration(
-        labelText: label,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      ),
-    );
-  }
 }
 
-// ─── Expiry Date Field ────────────────────────────────────────────────────────
-class _DateField extends StatelessWidget {
-  final _SalesItemForm item;
-  final VoidCallback onChanged;
-  const _DateField({required this.item, required this.onChanged});
-
+// ─── Sales MM/YY Formatter ────────────────────────────────────────────────────
+class _SalesMmYyFormatter extends TextInputFormatter {
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () async {
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: item.expiryDate,
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2035),
-        );
-        if (picked != null) {
-          item.expiryDate = picked;
-          onChanged();
-        }
-      },
-      child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: AppColors.surface2,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Expiry', style: AppTypography.caption),
-            Text(AppFormatters.formatShortDate(item.expiryDate),
-                style: AppTypography.label),
-          ],
-        ),
-      ),
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll('/', '');
+    if (digits.length > 4) return oldValue;
+    final result = digits.length <= 2
+        ? digits
+        : '${digits.substring(0, 2)}/${digits.substring(2)}';
+    return TextEditingValue(
+      text: result,
+      selection: TextSelection.collapsed(offset: result.length),
     );
   }
 }
+
+
 
 // ─── Inventory Picker Modal ───────────────────────────────────────────────────
 /// Two-step picker: first choose product from inventory, then choose batch.
@@ -1409,7 +1667,7 @@ class _InventoryPickerSheetState extends State<_InventoryPickerSheet> {
                 autofocus: true,
                 onChanged: (v) => setState(() => _search = v),
                 decoration: const InputDecoration(
-                  hintText: 'Search product name…',
+                  hintText: 'Search product nameâ€¦',
                   prefixIcon: Icon(Icons.search_rounded, size: 18),
                   isDense: true,
                 ),
@@ -1458,7 +1716,7 @@ class _InventoryPickerSheetState extends State<_InventoryPickerSheet> {
                               style: AppTypography.labelLarge),
                           subtitle: Text(
                             batch != null
-                                ? 'Batch: ${batch.batchNumber}  ·  MRP: ₹${batch.mrp.toStringAsFixed(0)}'
+                                ? 'Batch: ${batch.batchNumber}  ·  MRP: â‚¹${batch.mrp.toStringAsFixed(0)}'
                                 : 'No batch info',
                             style: AppTypography.caption,
                           ),
@@ -1558,7 +1816,7 @@ class _InventoryPickerSheetState extends State<_InventoryPickerSheet> {
                                       Text(
                                         'Exp: ${AppFormatters.formatShortDate(batch.expiryDate)}'
                                         '  ·  Qty: ${batch.quantity.toStringAsFixed(0)} units'
-                                        '  ·  MRP: ₹${batch.mrp.toStringAsFixed(2)}',
+                                        '  ·  MRP: â‚¹${batch.mrp.toStringAsFixed(2)}',
                                         style: AppTypography.caption,
                                       ),
                                     ],
@@ -1650,7 +1908,7 @@ class _BatchSelector extends StatelessWidget {
             Text(
               'Exp: ${AppFormatters.formatShortDate(selected.expiryDate)}'
               '  ·  Qty: ${AppFormatters.formatQuantity(selected.quantity)}'
-              '  ·  MRP: ₹${selected.mrp.toStringAsFixed(0)}',
+              '  ·  MRP: â‚¹${selected.mrp.toStringAsFixed(0)}',
               style: AppTypography.caption,
             ),
           ]),
@@ -1684,7 +1942,7 @@ class _BatchSelector extends StatelessWidget {
                   Text(
                     'Exp: ${AppFormatters.formatShortDate(b.expiryDate)}'
                     '  ·  Qty: ${AppFormatters.formatQuantity(b.quantity)}'
-                    '  ·  ₹${b.mrp.toStringAsFixed(0)}',
+                    '  ·  â‚¹${b.mrp.toStringAsFixed(0)}',
                     style: AppTypography.caption,
                   ),
                 ]),

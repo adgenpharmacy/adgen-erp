@@ -145,8 +145,14 @@ class InventoryNotifier extends StateNotifier<AsyncValue<void>> {
         final existing = InventoryModel.fromFirestore(doc);
         final batches = List<InventoryBatch>.from(existing.batches);
 
-        // Check if batch already exists
-        final idx = batches.indexWhere((b) => b.batchNumber == batch.batchNumber);
+        // Check if batch already exists (match by batch, expiry, mrp, and purchase rate)
+        final idx = batches.indexWhere((b) => 
+            b.batchNumber == batch.batchNumber &&
+            b.expiryDate.year == batch.expiryDate.year &&
+            b.expiryDate.month == batch.expiryDate.month &&
+            b.mrp == batch.mrp &&
+            b.purchaseRate == batch.purchaseRate
+        );
         if (idx >= 0) {
           // Update existing batch qty
           batches[idx] = batches[idx].copyWith(
@@ -255,30 +261,47 @@ class InventoryNotifier extends StateNotifier<AsyncValue<void>> {
   Future<void> revertPurchaseStock({
     required String productId,
     required String batchNumber,
+    required DateTime expiryDate,
+    required double mrp,
+    required double purchaseRate,
     required double quantity,
   }) async {
     try {
       final docRef = _db.collection(AppConstants.colInventory).doc(productId);
-      final doc = await docRef.get();
-      if (!doc.exists) return;
+      await _db.runTransaction((transaction) async {
+        final doc = await transaction.get(docRef);
+        if (!doc.exists) return;
 
-      final existing = InventoryModel.fromFirestore(doc);
-      final batches = List<InventoryBatch>.from(existing.batches);
-      final idx = batches.indexWhere((b) => b.batchNumber == batchNumber);
-
-      if (idx < 0) return;
-
-      if (batches[idx].quantity <= quantity) {
-        // If the remaining stock is less than or equal to the purchase quantity being reverted,
-        // remove the batch completely from inventory.
-        batches.removeAt(idx);
-      } else {
-        batches[idx] = batches[idx].copyWith(
-          quantity: batches[idx].quantity - quantity,
+        final existing = InventoryModel.fromFirestore(doc);
+        final batches = List<InventoryBatch>.from(existing.batches);
+        
+        // Find exact matching batch
+        final idx = batches.indexWhere((b) => 
+            b.batchNumber == batchNumber &&
+            b.expiryDate.year == expiryDate.year &&
+            b.expiryDate.month == expiryDate.month &&
+            b.mrp == mrp &&
+            b.purchaseRate == purchaseRate
         );
-      }
 
-      await _recalculateAndSave(docRef: docRef, batches: batches);
+        if (idx < 0) return;
+
+        if (batches[idx].quantity <= quantity) {
+          batches.removeAt(idx);
+        } else {
+          batches[idx] = batches[idx].copyWith(
+            quantity: batches[idx].quantity - quantity,
+          );
+        }
+
+        final newTotal = batches.fold<double>(0, (acc, b) => acc + b.quantity);
+        transaction.update(docRef, {
+          'batches': batches.map((b) => b.toMap()).toList(),
+          'systemStock': newTotal,
+          'physicalStock': newTotal,
+          'lastUpdated': Timestamp.fromDate(DateTime.now()),
+        });
+      });
     } catch (e) {
       state = AsyncValue.error(e, StackTrace.current);
     }

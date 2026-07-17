@@ -1,8 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/models/sales_bill_model.dart';
-import '../../shared/models/inventory_batch_model.dart';
 import '../utils/constants.dart';
 import 'auth_provider.dart';
 import 'inventory_provider.dart';
@@ -132,19 +131,22 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
       if (oldBill.paymentMethod == PaymentMethod.credit) {
         final partyId = oldBill.customerId ?? oldBill.customerName;
         if (partyId.isNotEmpty) {
-          // Subtract balance from Party
           await _db.collection(AppConstants.colParties).doc(partyId).update({
             'outstandingBalance': FieldValue.increment(-oldBill.grandTotal),
-          }).catchError((_) {}); // Ignore if party was deleted manually
+          }).catchError((_) {});
         }
 
-        // Delete associated ledger entries
+        // Batch-delete associated ledger entries (atomic + faster)
         final ledgerSnap = await _db
             .collection(AppConstants.colLedger)
             .where('billId', isEqualTo: id)
             .get();
-        for (final doc in ledgerSnap.docs) {
-          await doc.reference.delete();
+        if (ledgerSnap.docs.isNotEmpty) {
+          final ledgerBatch = _db.batch();
+          for (final doc in ledgerSnap.docs) {
+            ledgerBatch.delete(doc.reference);
+          }
+          await ledgerBatch.commit();
         }
       }
 
@@ -225,9 +227,13 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
           await _db.collection(AppConstants.colLedger).add(ledgerData);
         }
       } else {
-        // If payment method is no longer credit, remove ledger entry
-        for (final doc in ledgerSnap.docs) {
-          await doc.reference.delete();
+        // If payment method is no longer credit, batch-delete ledger entry
+        if (ledgerSnap.docs.isNotEmpty) {
+          final deleteBatch = _db.batch();
+          for (final doc in ledgerSnap.docs) {
+            deleteBatch.delete(doc.reference);
+          }
+          await deleteBatch.commit();
         }
       }
 
@@ -239,11 +245,12 @@ class SalesNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  Future<String?> markCreditPaid(String billId) async {
+  Future<String?> markCreditPaid(String billId, {required double amount}) async {
     try {
       await _db.collection(AppConstants.colSalesBills).doc(billId).update({
         'isCreditPaid': true,
-        'amountPaid': FieldValue.serverTimestamp(),
+        'amountPaid': amount,          // rupee amount — stays a double
+        'paidAt': FieldValue.serverTimestamp(), // separate timestamp field
       });
       return null;
     } catch (e) {

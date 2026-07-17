@@ -1,11 +1,8 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_spacing.dart';
@@ -17,7 +14,8 @@ import '../../core/utils/pdf_generator.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/sales_provider.dart';
-import '../../core/providers/auth_provider.dart';
+import '../../core/providers/sale_return_provider.dart';
+import '../../shared/models/return_model.dart';
 
 class SalesDetailScreen extends ConsumerStatefulWidget {
   final SalesBillModel bill;
@@ -308,8 +306,23 @@ class _SalesDetailScreenState extends ConsumerState<SalesDetailScreen> {
                   color: AppColors.textSecondary,
                   onTap: () => _copyToClipboard(context),
                 ),
+                _ActionBtn(
+                  icon: Icons.undo_rounded,
+                  label: 'Return / Refund',
+                  color: AppColors.warning,
+                  onTap: () => context.push(
+                    '/sales/return/${bill.id}',
+                    extra: bill,
+                  ),
+                ),
               ],
             ),
+
+            const SizedBox(height: AppSpacing.xl),
+
+            // ── Return History ────────────────────────────────────────────
+            _ReturnHistorySection(billId: bill.id!),
+
             const SizedBox(height: 32),
           ],
         ),
@@ -409,7 +422,7 @@ class _SalesDetailScreenState extends ConsumerState<SalesDetailScreen> {
     buf.writeln('─────────────────────');
     for (final item in bill.items) {
       buf.writeln(
-          '${item.productName}\n  Batch: ${item.batchNumber} | Exp: ${DateFormat('MM/yy').format(item.expiryDate)}\n  Qty: ${item.quantity} | Rate: ₹${item.rate} | MRP: ₹${item.mrp}');
+          '${item.productName}\n  Batch: ${item.batchNumber} | Exp: ${DateFormat('MM/yy').format(item.expiryDate)}\n  Qty: ${item.quantity} | Rate: â‚¹${item.rate} | MRP: â‚¹${item.mrp}');
     }
     buf.writeln('─────────────────────');
     buf.writeln('Subtotal: ${AppFormatters.formatCurrency(bill.subtotal)}');
@@ -468,7 +481,7 @@ class _ItemRow extends StatelessWidget {
                     'Exp: ${DateFormat('MM/yy').format(item.expiryDate)}',
                     _expiryColor(item.expiryDate).withValues(alpha: 0.1),
                     _expiryColor(item.expiryDate)),
-                _chip('MRP: ₹${item.mrp.toStringAsFixed(2)}',
+                _chip('MRP: â‚¹${item.mrp.toStringAsFixed(2)}',
                     AppColors.surface2, AppColors.textSecondary),
                 _chip('Qty: ${item.quantity.toStringAsFixed(0)}',
                     AppColors.surface2, AppColors.textSecondary),
@@ -503,12 +516,12 @@ class _ItemRow extends StatelessWidget {
                   style: AppTypography.body)),
           Expanded(
               child: Text(
-                  '₹${item.mrp.toStringAsFixed(2)}',
+                  'â‚¹${item.mrp.toStringAsFixed(2)}',
                   textAlign: TextAlign.end,
                   style: AppTypography.numericSmall)),
           Expanded(
               child: Text(
-                  '₹${item.rate.toStringAsFixed(2)}',
+                  'â‚¹${item.rate.toStringAsFixed(2)}',
                   textAlign: TextAlign.end,
                   style: AppTypography.numericSmall)),
           Expanded(
@@ -627,3 +640,69 @@ class _ActionBtn extends StatelessWidget {
   }
 }
 
+// ─── Return History Section ───────────────────────────────────────────────────
+class _ReturnHistorySection extends ConsumerWidget {
+  final String billId;
+  const _ReturnHistorySection({required this.billId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final returnsAsync = ref.watch(saleReturnsByBillProvider(billId));
+
+    return returnsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (returns) {
+        if (returns.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.undo_rounded, color: AppColors.warning, size: 16),
+              const SizedBox(width: 6),
+              Text('Returns / Credit Notes',
+                  style: AppTypography.h3.copyWith(color: AppColors.warning)),
+            ]),
+            const SizedBox(height: AppSpacing.md),
+            ...returns.map((r) => Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: AppCard(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(r.creditNoteNumber,
+                        style: AppTypography.labelLarge)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: r.isSettled
+                            ? AppColors.success.withValues(alpha: 0.1)
+                            : AppColors.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(r.isSettled ? 'Settled' : 'Pending',
+                          style: AppTypography.caption.copyWith(
+                            color: r.isSettled ? AppColors.success : AppColors.warning,
+                            fontWeight: FontWeight.w700,
+                          )),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${DateFormat('dd MMM yyyy').format(r.returnDate)} â€¢ ${r.reason.displayName}',
+                    style: AppTypography.caption,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${r.items.length} item(s) returned â€¢ Refund: ${AppFormatters.formatCurrency(r.totalRefundAmount)} via ${r.refundMethod.toUpperCase()}',
+                    style: AppTypography.bodySmall,
+                  ),
+                ]),
+              ),
+            )),
+          ],
+        );
+      },
+    );
+  }
+}

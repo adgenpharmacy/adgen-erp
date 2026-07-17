@@ -16,6 +16,8 @@ import '../../shared/widgets/app_card.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/purchase_provider.dart';
+import '../../core/providers/purchase_return_provider.dart';
+import '../../shared/models/return_model.dart';
 
 class PurchaseDetailScreen extends ConsumerStatefulWidget {
   final PurchaseBillModel bill;
@@ -45,7 +47,7 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
               children: [
                 pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                   pw.Text(AppConstants.shopName,
-                      style: const pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                      style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
                   pw.Text(AppConstants.shopAddress, style: const pw.TextStyle(fontSize: 8)),
                   pw.Text('Ph: ${AppConstants.shopPhone}', style: const pw.TextStyle(fontSize: 8)),
                   pw.Text('GST: ${AppConstants.shopGST}', style: const pw.TextStyle(fontSize: 8)),
@@ -53,7 +55,7 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
                 ]),
                 pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
                   pw.Text('PURCHASE INVOICE',
-                      style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                      style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
                   pw.Text('Invoice: ${bill.invoiceNumber}', style: const pw.TextStyle(fontSize: 8)),
                   pw.Text('Date: ${DateFormat('dd MMM yyyy').format(bill.invoiceDate)}',
                       style: const pw.TextStyle(fontSize: 8)),
@@ -68,14 +70,14 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
               color: PdfColors.grey200,
               padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 3),
               child: pw.Row(children: [
-                pw.Expanded(flex: 3, child: pw.Text('Product', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
-                pw.Expanded(child: pw.Text('Batch', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
-                pw.Expanded(child: pw.Text('Exp', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
-                pw.Expanded(child: pw.Text('Qty', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
-                pw.Expanded(child: pw.Text('Free', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
-                pw.Expanded(child: pw.Text('MRP', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
-                pw.Expanded(child: pw.Text('Rate', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
-                pw.Expanded(child: pw.Text('Amount', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
+                pw.Expanded(flex: 3, child: pw.Text('Product', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
+                pw.Expanded(child: pw.Text('Batch', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
+                pw.Expanded(child: pw.Text('Exp', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7))),
+                pw.Expanded(child: pw.Text('Qty', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
+                pw.Expanded(child: pw.Text('Free', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
+                pw.Expanded(child: pw.Text('MRP', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
+                pw.Expanded(child: pw.Text('Rate', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
+                pw.Expanded(child: pw.Text('Amount', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7), textAlign: pw.TextAlign.right)),
               ]),
             ),
             ...bill.items.map((item) => pw.Container(
@@ -142,11 +144,11 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
           pw.SizedBox(
               width: 100,
               child: pw.Text(label,
-                  style: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
+                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
           pw.SizedBox(
               width: 70,
               child: pw.Text(AppFormatters.formatPdfCurrency(value),
-                  style: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                   textAlign: pw.TextAlign.right)),
         ]),
       );
@@ -407,6 +409,9 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
 
             const SizedBox(height: 32),
 
+            // ── Return History ──────────────────────────────────────────────
+            _ReturnHistorySection(billId: bill.id!),
+
             // ── Action buttons ─────────────────────────────────────────────
             Wrap(
               spacing: 10,
@@ -429,6 +434,12 @@ class _PurchaseDetailScreenState extends ConsumerState<PurchaseDetailScreen> {
                   label: 'Copy',
                   color: AppColors.textSecondary,
                   onTap: () => _copyToClipboard(context),
+                ),
+                _ActionBtn(
+                  icon: Icons.assignment_return_rounded,
+                  label: 'Return / Debit Note',
+                  color: AppColors.error,
+                  onTap: () => context.push('/purchase/return/${bill.id}'),
                 ),
               ],
             ),
@@ -745,6 +756,78 @@ class _ActionBtn extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Return History Section ──────────────────────────────────────────────────
+class _ReturnHistorySection extends ConsumerWidget {
+  final String billId;
+  const _ReturnHistorySection({required this.billId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final returnsAsync = ref.watch(purchaseReturnsByBillProvider(billId));
+
+    return returnsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (returns) {
+        if (returns.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            Text('Purchase Returns / Debit Notes',
+                style: AppTypography.h3.copyWith(color: AppColors.error)),
+            const SizedBox(height: 12),
+            ...returns.map((r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: AppCard(
+                    backgroundColor: AppColors.error.withValues(alpha: 0.05),
+                    borderColor: AppColors.error.withValues(alpha: 0.2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.assignment_return_rounded,
+                            color: AppColors.error, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(child: Text(r.debitNoteNumber,
+                                    style: AppTypography.labelLarge)),
+                                Text(
+                                  AppFormatters.formatCurrency(r.totalReturnAmount),
+                                  style: AppTypography.numeric.copyWith(
+                                    color: AppColors.error,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${DateFormat('dd MMM yyyy').format(r.returnDate)} · ${r.reason}',
+                              style: AppTypography.caption,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${r.items.length} item(s) returned',
+                              style: AppTypography.caption,
+                            ),
+                          ],
+                        )),
+                      ],
+                    ),
+                  ),
+                )),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
     );
   }
 }

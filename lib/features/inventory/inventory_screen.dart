@@ -24,7 +24,8 @@ class InventoryScreen extends ConsumerStatefulWidget {
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   final _searchCtrl = TextEditingController();
   String _search = '';
-  String _stockFilter = 'All';
+  String _stockFilter = 'In Stock';
+  String _sortBy = 'Alphabetical';
 
   @override
   void dispose() {
@@ -42,10 +43,61 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       if (p.id != null) productsMap[p.id!] = p;
     });
 
+    double totalValue = 0;
+    int totalItems = 0;
+    inventoryAsync.whenData((inv) {
+      totalItems = inv.length;
+      for (final item in inv) {
+        final p = productsMap[item.productId];
+        final packSize = p?.packSize ?? 1;
+        for (final b in item.batches) {
+          final packQty = b.quantity / packSize;
+          totalValue += packQty * b.purchaseRate;
+        }
+      }
+    });
+
     return ScreenShell(
       title: 'Inventory',
       subtitle: 'Live stock & batch tracking',
       headerExtras: [
+        if (totalItems > 0) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total Inventory Value', style: AppTypography.caption),
+                    Text(
+                      AppFormatters.formatCurrency(totalValue),
+                      style: AppTypography.h3.copyWith(color: AppColors.primary),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Total Items', style: AppTypography.caption),
+                    Text(
+                      totalItems.toString(),
+                      style: AppTypography.labelLarge,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+
         TextField(
           controller: _searchCtrl,
           onChanged: (v) => setState(() => _search = v),
@@ -134,12 +186,25 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 item.productName.toLowerCase().contains(q) ||
                 item.batches.any((b) => b.batchNumber.toLowerCase().contains(q));
             final matchesFilter = _stockFilter == 'All' ||
-                (_stockFilter == 'In Stock' && !item.isLowStock && !item.isOutOfStock) ||
+                (_stockFilter == 'In Stock' && !item.isOutOfStock) ||
                 (_stockFilter == 'Low Stock' && item.isLowStock && !item.isOutOfStock) ||
                 (_stockFilter == 'Out of Stock' && item.isOutOfStock) ||
                 (_stockFilter == 'Expiring Soon' && item.expiringSoonBatches.isNotEmpty);
             return matchesSearch && matchesFilter;
           }).toList();
+
+          // Sort
+          filtered.sort((a, b) {
+            switch (_sortBy) {
+              case 'Highest Stock':
+                return b.systemStock.compareTo(a.systemStock);
+              case 'Lowest Stock':
+                return a.systemStock.compareTo(b.systemStock);
+              case 'Alphabetical':
+              default:
+                return a.productName.toLowerCase().compareTo(b.productName.toLowerCase());
+            }
+          });
 
           if (filtered.isEmpty) {
             return Center(
@@ -167,7 +232,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 child: Row(
                   children: [
                     Text('${filtered.length} products', style: AppTypography.caption),
-                    const Spacer(),
+                    const SizedBox(width: AppSpacing.md),
                     if (lowCount > 0) ...[
                       const Icon(Icons.warning_amber_rounded,
                           size: 12, color: AppColors.warning),
@@ -183,9 +248,36 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       Text('$outCount out',
                           style: AppTypography.caption.copyWith(color: AppColors.error)),
                     ],
+                    const Spacer(),
+                    // Sort Dropdown
+                    Container(
+                      height: 28,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _sortBy,
+                          icon: const Icon(Icons.sort_rounded, size: 14),
+                          style: AppTypography.caption,
+                          isDense: true,
+                          items: ['Alphabetical', 'Highest Stock', 'Lowest Stock']
+                              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) setState(() => _sortBy = v);
+                          },
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
+
+              // ── Value Summary ────────────────────────────────────────
+              _InventorySummaryCard(inventory: inventory),
 
               Expanded(
                 child: ListView.separated(
@@ -209,7 +301,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       onCorrect: () =>
                           context.push('/inventory/correct/${filtered[i].productId}'),
                       onDelete: () => _confirmDelete(context, ref, filtered[i]),
-                    ).animate(delay: Duration(milliseconds: i * 30)).fadeIn(duration: 200.ms).slideY(begin: 0.04, end: 0);
+                    );
                   },
                 ),
               ),
@@ -485,6 +577,69 @@ class _InventoryCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// --- Inventory Value Summary Card ---
+class _InventorySummaryCard extends StatelessWidget {
+  final List<InventoryModel> inventory;
+  const _InventorySummaryCard({required this.inventory});
+
+  @override
+  Widget build(BuildContext context) {
+    if (inventory.isEmpty) return const SizedBox.shrink();
+    double mrpValue = 0, costValue = 0;
+    int skusWithStock = 0;
+    for (final item in inventory) {
+      if (item.totalStock > 0) skusWithStock++;
+      for (final batch in item.batches) {
+        mrpValue += batch.mrp * batch.quantity;
+        costValue += batch.purchaseRate * batch.quantity;
+      }
+    }
+    final margin = mrpValue > 0 ? (mrpValue - costValue) / mrpValue * 100 : 0.0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+        child: Row(children: [
+          _SummaryPill('SKUs', '$skusWithStock / ${inventory.length}', AppColors.primary),
+          const VerticalDivider(width: 20, thickness: 1),
+          _SummaryPill('@ MRP', '\u20b9${_compact(mrpValue)}', AppColors.secondary),
+          const VerticalDivider(width: 20, thickness: 1),
+          _SummaryPill('@ Cost', '\u20b9${_compact(costValue)}', AppColors.textSecondary),
+          const VerticalDivider(width: 20, thickness: 1),
+          _SummaryPill('Margin', '${margin.toStringAsFixed(1)}%', AppColors.success),
+        ]),
+      ),
+    );
+  }
+
+  String _compact(double v) {
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v.toStringAsFixed(0);
+  }
+}
+
+class _SummaryPill extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _SummaryPill(this.label, this.value, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(children: [
+        Text(value,
+            style: AppTypography.numericSmall.copyWith(
+                color: color, fontSize: 14, fontWeight: FontWeight.w800),
+            textAlign: TextAlign.center),
+        Text(label,
+            style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+            textAlign: TextAlign.center),
+      ]),
     );
   }
 }
