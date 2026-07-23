@@ -5,7 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "build": "npx prisma generate && tsc",
-    "vercel-build": "prisma generate && tsc",
+    "vercel-build": "chmod +x node_modules/.bin/* 2>/dev/null || true; npx prisma generate && tsc",
     "start": "node dist/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "migrate": "ts-node src/scripts/migrate-from-json.ts",
