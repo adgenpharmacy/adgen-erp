@@ -53,25 +53,38 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* User */}
-        {user && (
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded bg-emerald-600 text-white flex items-center justify-center font-semibold text-[10px]">
-                {user.name.charAt(0)}
+        {/* User Card */}
+        {user ? (
+          <div className="px-3.5 py-3 border-b border-gray-100 flex items-center justify-between bg-slate-50/50">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-extrabold text-xs shadow-xs">
+                {user.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <div className="font-medium text-gray-900 text-xs truncate leading-tight">{user.name}</div>
-                <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">{user.role}</div>
+                <div className="font-bold text-slate-900 text-xs truncate leading-tight">{user.name}</div>
+                <span className={`inline-block text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                  user.role === 'OWNER' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {user.role}
+                </span>
               </div>
             </div>
             <button
               onClick={logout}
-              className="p-1 text-gray-400 hover:text-red-500 transition"
-              title="Log Out"
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+              title="Sign Out of Portal"
             >
-              <LogOut className="w-3.5 h-3.5" />
+              <LogOut className="w-4 h-4" />
             </button>
+          </div>
+        ) : (
+          <div className="px-3.5 py-3 border-b border-gray-100">
+            <Link
+              href="/login"
+              className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <span>Sign In</span>
+            </Link>
           </div>
         )}
 

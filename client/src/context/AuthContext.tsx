@@ -34,22 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const storedUser = localStorage.getItem('adgen_user');
-    if (storedUser) {
+    const storedToken = localStorage.getItem('adgen_token');
+    if (storedUser && storedToken) {
       try {
         setUser(JSON.parse(storedUser));
         return;
       } catch {
         localStorage.removeItem('adgen_user');
+        localStorage.removeItem('adgen_token');
       }
     }
-    const defaultOwner: User = {
-      name: 'Pharmacy Owner',
-      email: 'owner@adgenpharmacy.com',
-      role: 'OWNER',
-      isApproved: true,
-    };
-    setUser(defaultOwner);
-    localStorage.setItem('adgen_user', JSON.stringify(defaultOwner));
+    setUser(null);
   }, []);
 
   const login = async (email: string, password?: string) => {

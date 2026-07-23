@@ -34,11 +34,12 @@ export const api = axios.create({
   },
 });
 
-api.interceptors.request.use(async (config) => {
-  const currentUser = auth.currentUser;
-  if (currentUser) {
-    const token = await currentUser.getIdToken();
-    config.headers.Authorization = `Bearer ${token}`;
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('adgen_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 }, (error) => {

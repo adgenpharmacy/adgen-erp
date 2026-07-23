@@ -17,8 +17,13 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AdGen Pharmacy ERP",
-  description: "Enterprise Pharmacy Management — Billing, Inventory, GST Compliance",
+  title: "AdGen Pharmacy ERP | Clinical Billing & Inventory Suite",
+  description: "Enterprise Pharmacy Management System — Billing, FEFO Batch Inventory, GST Compliance",
+  icons: {
+    icon: "/logo-nobg.png",
+    shortcut: "/logo-nobg.png",
+    apple: "/logo-nobg.png",
+  },
 };
 
 export default function RootLayout({
