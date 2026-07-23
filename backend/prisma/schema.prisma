@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -24,44 +25,71 @@ enum ProductType {
   OTHERS
 }
 
-enum ScheduleDivision {
-  GENERAL
-  SCHEDULE_H
-  SCHEDULE_H1
-  SCHEDULE_X
-}
-
-enum PaymentMethod {
-  CASH
-  UPI
-  CARD
-  CREDIT
-}
-
 enum PartyType {
-  CUSTOMER
   SUPPLIER
+  CUSTOMER
 }
 
-enum TransactionType {
+enum LedgerTransactionType {
   DEBIT
   CREDIT
 }
 
 model User {
-  id          String      @id @default(uuid())
-  firebaseUid String      @unique
-  name        String
-  email       String      @unique
-  role        Role        @default(EMPLOYEE)
-  designation String?
-  isActive    Boolean     @default(true)
-  isApproved  Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @default(now()) @updatedAt
-  salesBills  SalesBill[]
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  role         Role          @default(EMPLOYEE)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  salesBills   SalesBill[]
 
   @@map("users")
+}
+
+model Product {
+  id                  String               @id @default(uuid())
+  name                String
+  genericName         String?
+  companyName         String?
+  hsnCode             String?
+  gstPercent          Float                @default(12)
+  productType         ProductType          @default(TABLET)
+  division            String?              @default("GENERAL")
+  packSize            Int                  @default(1)
+  packUnit            String?              @default("Strip")
+  contentUnit         String?              @default("Tablet")
+  requiresColdStorage Boolean              @default(false)
+  lowStockThreshold   Float                @default(1)
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  mrp                 Float?               @default(0)
+  purchaseRate        Float?               @default(0)
+  batches             InventoryBatch[]
+  purchaseBillItems   PurchaseBillItem[]
+  salesBillItems      SalesBillItem[]
+
+  @@map("products")
+}
+
+model Party {
+  id            String         @id @default(uuid())
+  name          String
+  phone         String?
+  email         String?
+  address       String?
+  gstNumber     String?
+  dlNumber      String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  ledgerEntries LedgerEntry[]
+  purchaseBills PurchaseBill[]
+
+  @@map("parties")
 }
 
 model Customer {
@@ -70,82 +98,31 @@ model Customer {
   phone         String?
   email         String?
   address       String?
-  gstNumber     String?
   doctorName    String?
-  isDeleted     Boolean       @default(false)
+  gstNumber     String?
   createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @default(now()) @updatedAt
+  updatedAt     DateTime      @updatedAt
   salesBills    SalesBill[]
-  ledgerEntries LedgerEntry[]
 
   @@map("customers")
 }
 
-model Party {
-  id            String          @id @default(uuid())
-  name          String
-  phone         String?
-  email         String?
-  address       String?
-  gstNumber     String?
-  dlNumber      String?
-  isDeleted     Boolean         @default(false)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @default(now()) @updatedAt
-  purchaseBills PurchaseBill[]
-  ledgerEntries LedgerEntry[]
-
-  @@map("parties")
-}
-
-model Product {
-  id                  String           @id @default(uuid())
-  name                String
-  genericName         String?
-  companyName         String?
-  hsnCode             String
-  gstPercent          Float            @default(12.0)
-  mrp                 Float?           @default(0.0)
-  purchaseRate        Float?           @default(0.0)
-  productType         ProductType      @default(TABLET)
-  division            ScheduleDivision @default(GENERAL)
-  packSize            Int              @default(1)
-  packUnit            String           @default("Strip")
-  contentUnit         String           @default("Tablet")
-  requiresColdStorage Boolean          @default(false)
-  lowStockThreshold   Float            @default(1.0)
-  isActive            Boolean          @default(true)
-  isDeleted           Boolean          @default(false)
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @default(now()) @updatedAt
-
-  batches           InventoryBatch[]
-  salesBillItems    SalesBillItem[]
-  purchaseBillItems PurchaseBillItem[]
-
-  @@map("products")
-}
-
 model InventoryBatch {
-  id                 String    @id @default(uuid())
-  productId          String
-  product            Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
-  batchNumber        String
-  expiryDate         DateTime
-  quantity           Float     // Total content units
-  mrp                Float     // Price per pack
-  purchaseRate       Float     // Cost per pack
-  purchaseDate       DateTime  @default(now())
-  purchaseBillId     String?
-  isManualAdjustment Boolean   @default(false)
-  adjustmentReason   String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @default(now()) @updatedAt
-
+  id             String          @id @default(uuid())
+  productId      String
+  batchNumber    String
+  expiryDate     DateTime
+  quantity       Float           @default(0)
+  mrp            Float
+  purchaseRate   Float
+  purchaseDate   DateTime        @default(now())
+  purchaseBillId String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseBill   PurchaseBill?   @relation(fields: [purchaseBillId], references: [id])
+  product        Product         @relation(fields: [productId], references: [id])
   salesBillItems SalesBillItem[]
 
-  @@index([productId, expiryDate])
-  @@index([batchNumber])
   @@map("inventory_batches")
 }
 
@@ -153,111 +130,104 @@ model PurchaseBill {
   id            String             @id @default(uuid())
   invoiceNumber String
   partyId       String
-  party         Party              @relation(fields: [partyId], references: [id], onDelete: Restrict)
   purchaseDate  DateTime           @default(now())
   subtotal      Float
   taxTotal      Float
   grandTotal    Float
   isPaid        Boolean            @default(false)
-  isDeleted     Boolean            @default(false)
   createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @default(now()) @updatedAt
-
-  items         PurchaseBillItem[]
+  updatedAt     DateTime           @updatedAt
+  batches       InventoryBatch[]
   ledgerEntries LedgerEntry[]
+  party         Party              @relation(fields: [partyId], references: [id])
+  items         PurchaseBillItem[]
 
-  @@unique([partyId, invoiceNumber])
-  @@index([partyId])
-  @@index([purchaseDate])
   @@map("purchase_bills")
 }
 
 model PurchaseBillItem {
   id             String       @id @default(uuid())
   purchaseBillId String
-  purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
   productId      String
-  product        Product      @relation(fields: [productId], references: [id])
   batchNumber    String
   expiryDate     DateTime
   quantity       Float
   freeQuantity   Float        @default(0)
   purchaseRate   Float
   mrp            Float
-  taxPercent     Float
+  taxPercent     Float        @default(0)
+  discountPercent Float       @default(0)
   totalAmount    Float
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  product        Product      @relation(fields: [productId], references: [id])
+  purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
 
   @@map("purchase_bill_items")
 }
 
 model SalesBill {
   id            String          @id @default(uuid())
-  invoiceNumber Int             @default(autoincrement())
   customerId    String?
-  customer      Customer?       @relation(fields: [customerId], references: [id])
-  customerName  String?
+  customerName  String?         @default("Walk-in Customer")
   customerPhone String?
   doctorName    String?
   notes         String?
-  userId        String
-  user          User            @relation(fields: [userId], references: [id])
-  paymentMethod PaymentMethod
-  subtotal      Float
-  taxTotal      Float
+  userId        String?
+  subtotal      Float           @default(0)
+  taxTotal      Float           @default(0)
   discount      Float           @default(0)
+  grandTotal    Float
+  amountPaid    Float           @default(0)
+  paymentMethod String          @default("CASH")
+  isPaid        Boolean         @default(true)
+  isSettled     Boolean         @default(true)
   isRoundOff    Boolean         @default(true)
   roundOffAmount Float          @default(0)
-  grandTotal    Float
-  amountPaid    Float
-  isSettled     Boolean         @default(false)
-  isDeleted     Boolean         @default(false)
   createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @default(now()) @updatedAt
-
-  items         SalesBillItem[]
+  updatedAt     DateTime        @updatedAt
   ledgerEntries LedgerEntry[]
+  customer      Customer?       @relation(fields: [customerId], references: [id])
+  user          User?           @relation(fields: [userId], references: [id])
+  items         SalesBillItem[]
 
-  @@index([customerId])
-  @@index([createdAt])
   @@map("sales_bills")
 }
 
 model SalesBillItem {
-  id          String         @id @default(uuid())
-  salesBillId String
-  salesBill   SalesBill      @relation(fields: [salesBillId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product        @relation(fields: [productId], references: [id])
-  batchId     String
-  batch       InventoryBatch @relation(fields: [batchId], references: [id])
-  quantity    Float
-  unitPrice   Float
-  taxPercent  Float
-  totalAmount Float
+  id              String         @id @default(uuid())
+  salesBillId     String
+  productId       String
+  batchId         String
+  quantity        Float
+  unitPrice       Float
+  taxPercent      Float          @default(0)
+  discountPercent Float          @default(0)
+  totalAmount     Float
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  batch           InventoryBatch @relation(fields: [batchId], references: [id])
+  product         Product        @relation(fields: [productId], references: [id])
+  salesBill       SalesBill      @relation(fields: [salesBillId], references: [id], onDelete: Cascade)
 
   @@map("sales_bill_items")
 }
 
 model LedgerEntry {
-  id              String          @id @default(uuid())
+  id              String                @id @default(uuid())
   partyType       PartyType
-  customerId      String?
-  customer        Customer?       @relation(fields: [customerId], references: [id])
   partyId         String?
-  party           Party?          @relation(fields: [partyId], references: [id])
-  transactionType TransactionType
+  transactionType LedgerTransactionType
   amount          Float
-  salesBillId     String?
-  salesBill       SalesBill?      @relation(fields: [salesBillId], references: [id])
   purchaseBillId  String?
-  purchaseBill    PurchaseBill?   @relation(fields: [purchaseBillId], references: [id])
-  paymentMethod   PaymentMethod?
+  salesBillId     String?
   description     String?
-  isSettled       Boolean         @default(false)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @default(now()) @updatedAt
+  isSettled       Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  party           Party?                @relation(fields: [partyId], references: [id])
+  purchaseBill    PurchaseBill?         @relation(fields: [purchaseBillId], references: [id])
+  salesBill       SalesBill?            @relation(fields: [salesBillId], references: [id])
 
-  @@index([partyId])
-  @@index([customerId])
   @@map("ledger_entries")
 }
