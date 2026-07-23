@@ -14,8 +14,8 @@ import salesRoutes from './routes/sales.routes';
 import purchasesRoutes from './routes/purchases.routes';
 import ledgerRoutes from './routes/ledger.routes';
 import reportsRoutes from './routes/reports.routes';
-
 import usersRoutes from './routes/users.routes';
+import systemRoutes from './routes/system.routes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -36,6 +36,7 @@ app.use('/api/purchases', purchasesRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/system', systemRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -44,16 +45,12 @@ app.get('/health', (req, res) => {
 
 // Centralized Express Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled API Error:', err);
-  const status = err.status || 500;
-  const message = process.env.NODE_ENV === 'production' 
-    ? 'Internal Server Error' 
-    : (err.message || 'An unexpected error occurred');
-  res.status(status).json({ error: message });
+  console.error('Unhandled Server Error:', err);
+  res.status(500).json({ error: err.message || 'Internal Server Error' });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Pharmacy ERP Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Pharmacy ERP API Server running on port ${PORT}`);
 });
 
 export default app;
