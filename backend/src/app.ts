@@ -42,7 +42,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/system', systemRoutes);
 
 // Welcome & Status
-app.get('/', (req, res) => {
+app.get(['/', '/api'], (req, res) => {
   res.json({
     status: 'online',
     service: 'AdGen Pharmacy ERP API Server',
