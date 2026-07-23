@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* ============================================================
+   AdGen Pharmacy ERP — Design System
+   
+   Philosophy: Pharmaceutical Precision. 
+   A tool used 8+ hours a day must feel like a precision instrument —
+   quiet, dense, readable, fast. Not a marketing page.
+   
+   Inspired by: Linear (surgical minimalism), Datadog (data density),
+   PostHog (friendly but functional).
+   
+   Rules:
+   - ONE accent color (emerald-600). Everything else is grayscale.
+   - NO shadows on cards. Border + tonal shift only.
+   - Radii: 6px standard, 8px max. Nothing rounder.
+   - Weights: 400 body, 500 labels, 600 headings, 700 page titles.
+   - No font-extrabold (800) anywhere.
+   - No gradient backgrounds on surfaces.
+   - No colored icon boxes. Icons are gray or accent only.
+   ============================================================ */
+
+@layer base {
+  body {
+    font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  code, kbd, samp, pre, .font-mono {
+    font-family: var(--font-jetbrains), 'SF Mono', 'Cascadia Code', monospace;
+    font-feature-settings: "tnum";
+  }
+
+  /* Tabular numerals globally for data surfaces */
+  table, [data-metric], .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f9fafb;
+  --surface: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary: #9ca3af;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --accent: #059669;
+  --accent-hover: #047857;
+  --accent-subtle: #ecfdf5;
+  --danger: #dc2626;
+  --warning: #d97706;
+}
+
+/* ── Scrollbar ──────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ── Print ──────────────────────────────────── */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .print-area, .print-area * {
+    visibility: visible !important;
+  }
+  .print-area {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    background: white !important;
+    box-shadow: none !important;
+    border: none !important;
+    z-index: 999999 !important;
+  }
+  sidebar, nav, footer, button, .no-print {
+    display: none !important;
+  }
+}
+
+/* ── Receipt Paper (billing) ─────────────── */
+.receipt-paper {
+  background-color: #fafafa;
+  background-image: radial-gradient(#e5e7eb 0.5px, transparent 0.5px);
+  background-size: 10px 10px;
+  border: 1px dashed var(--border-strong);
+}
+
+/* ── Emerald Header (billing print) ──────── */
+.emerald-gradient-header {
+  background: linear-gradient(135deg, #064E3B 0%, #047857 50%, #0D9488 100%);
+}

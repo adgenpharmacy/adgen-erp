@@ -1,0 +1,65 @@
+import { Router, Response } from 'express';
+import { prisma } from '../config/prisma';
+import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+
+const router = Router();
+
+// GET /api/customers — Fetch all customers with dynamically computed credit balance
+router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const customers = await prisma.customer.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        salesBills: {
+          where: { isSettled: false },
+          select: { grandTotal: true, amountPaid: true },
+        },
+      },
+    });
+
+    const result = customers.map((c) => {
+      const creditBalance = c.salesBills.reduce(
+        (sum, bill) => sum + (bill.grandTotal - bill.amountPaid),
+        0
+      );
+      const { salesBills, ...custData } = c;
+      return {
+        ...custData,
+        creditBalance,
+      };
+    });
+
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/customers — Create customer
+router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, phone, email, address, gstNumber } = req.body;
+    const customer = await prisma.customer.create({
+      data: { name, phone, email, address, gstNumber },
+    });
+    res.status(201).json(customer);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// PUT /api/customers/:id — Update customer
+router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = await prisma.customer.update({
+      where: { id },
+      data: req.body,
+    });
+    res.json(updated);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+export default router;

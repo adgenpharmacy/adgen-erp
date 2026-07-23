@@ -55,6 +55,10 @@ lib/core/utils/secrets.dart
 # Environment
 .env
 .env.local
+.env*.local
+backend/.env
+client/.env
+client/.env.local
 
 # Hive (local DB)
 *.hive

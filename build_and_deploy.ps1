@@ -35,11 +35,11 @@ class AppVersion {
 [System.IO.File]::WriteAllText((Join-Path (Get-Location) "lib\core\utils\app_version.dart"), $dartCode, $utf8NoBom)
 
 Write-Host "Building APK..."
-flutter build apk --release
+flutter build apk --release --dart-define=GEMINI_API_KEY=AQ.Ab8RN6J3yVB82VjATNUhYkcvv2SBqHh9NsNgpXnlQW7ADrYxNw
 if ($LASTEXITCODE -ne 0) { Write-Error "APK Build Failed"; exit 1 }
 
 Write-Host "Building Web..."
-flutter build web --release
+flutter build web --release --dart-define=GEMINI_API_KEY=AQ.Ab8RN6J3yVB82VjATNUhYkcvv2SBqHh9NsNgpXnlQW7ADrYxNw
 if ($LASTEXITCODE -ne 0) { Write-Error "Web Build Failed"; exit 1 }
 
 Write-Host "Generating custom version data..."

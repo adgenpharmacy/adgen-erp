@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ──────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isOwner() {
+      return isAuthenticated() && getUserData().role == 'owner';
+    }
+
+    function isStaff() {
+      return isAuthenticated() &&
+        (getUserData().role == 'owner' || getUserData().role == 'employee');
+    }
+
+    function isActiveUser() {
+      return isAuthenticated() && (
+             isOwner() ||
+             (getUserData().isActive == true && getUserData().status == 'active')
+      );
+    }
+
+    // ─── Users Collection ──────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isOwner());
+      allow write: if isOwner();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ─── Parties (Suppliers) ───────────────────────────────────────────────
+    match /parties/{partyId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isOwner();
+    }
+
+    // ─── Products ──────────────────────────────────────────────────────────
+    match /products/{productId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isOwner();
+    }
+
+    // ─── Purchase Bills ─────────────────────────────────────────────────────
+    match /purchase_bills/{billId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser(); // Edit allowed (with 3-dot menu)
+      allow delete: if isOwner();      // Delete: owner only
+    }
+
+    // ─── Sales Bills ──────────────────────────────────────────────────────
+    match /sales_bills/{billId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser();
+      allow delete: if isOwner();
+    }
+
+    // ─── Inventory ────────────────────────────────────────────────────────
+    match /inventory/{productId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      // Stock correction (physicalStock field) — restricted in app to owner,
+      // but Firestore rule allows staff to update inventory during sales.
+      // App-level permission check enforces stock correction access.
+      allow delete: if isOwner();
+    }
+
+    // ─── Ledger ───────────────────────────────────────────────────────────
+    match /ledger/{entryId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isOwner();
+      allow delete: if isOwner();
+    }
+
+    // ─── Customers ────────────────────────────────────────────────────────
+    match /customers/{customerId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isOwner();
+    }
+
+    // ─── Attendance ───────────────────────────────────────────────────────
+    match /attendance/{entryId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser() &&
+        (request.auth.uid == resource.data.uid || isOwner());
+      allow delete: if isOwner();
+    }
+
+    // ─── Reminders ────────────────────────────────────────────────────────
+    match /reminders/{reminderId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isActiveUser();
+    }
+
+    // ─── Settings ─────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
+
+    // ─── Returns ──────────────────────────────────────────────────────────
+    match /returns/{returnId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isOwner();
+    }
+
+    // ─── Meta ─────────────────────────────────────────────────────────────
+    match /meta/{docId} {
+      allow read, write: if isActiveUser();
+    }
+  }
+}
