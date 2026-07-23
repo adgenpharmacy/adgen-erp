@@ -10,17 +10,23 @@
 .svn/
 migrate_working_dir/
 
+# Node & Next.js
+node_modules/
+.next/
+dist/
+build/
+backend/node_modules/
+client/node_modules/
+client/.next/
+
+# Local Data Exports & Backups
+data/
+
 # IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this is
-# not listed by default. Uncomment the following line to ignore the entire
-# idea folder from the repository:
-# .vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -31,7 +37,6 @@ migrate_working_dir/
 .packages
 .pub-cache/
 .pub/
-/build/
 
 # Symbolication related
 app.*.symbols
@@ -39,20 +44,20 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# Android Studio
 /android/app/debug
 /android/app/profile
 /android/app/release
 
-# Firebase — NEVER commit real credentials
+# Firebase credentials
 google-services.json
 GoogleService-Info.plist
 lib/firebase_options.dart
 
-# API Keys
+# API Keys & Secrets
 lib/core/utils/secrets.dart
 
-# Environment
+# Environment Files
 .env
 .env.local
 .env*.local
@@ -60,6 +65,6 @@ backend/.env
 client/.env
 client/.env.local
 
-# Hive (local DB)
+# Local DB files
 *.hive
 *.lock
