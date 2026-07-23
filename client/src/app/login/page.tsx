@@ -27,8 +27,8 @@ export default function LoginPage() {
   const { login, register } = useAuth();
 
   // Primary Login Form State
-  const [email, setEmail] = useState('owner@adgenpharmacy.com');
-  const [password, setPassword] = useState('owner123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
