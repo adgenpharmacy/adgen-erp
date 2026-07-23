@@ -18,6 +18,7 @@ const purchases_routes_1 = __importDefault(require("./routes/purchases.routes"))
 const ledger_routes_1 = __importDefault(require("./routes/ledger.routes"));
 const reports_routes_1 = __importDefault(require("./routes/reports.routes"));
 const users_routes_1 = __importDefault(require("./routes/users.routes"));
+const system_routes_1 = __importDefault(require("./routes/system.routes"));
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 // Security & Middleware
@@ -35,20 +36,17 @@ app.use('/api/purchases', purchases_routes_1.default);
 app.use('/api/ledger', ledger_routes_1.default);
 app.use('/api/reports', reports_routes_1.default);
 app.use('/api/users', users_routes_1.default);
+app.use('/api/system', system_routes_1.default);
 // Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'Pharmacy ERP Backend (Node + Prisma + PostgreSQL 3NF)', timestamp: new Date() });
 });
 // Centralized Express Global Error Handler
 app.use((err, req, res, next) => {
-    console.error('Unhandled API Error:', err);
-    const status = err.status || 500;
-    const message = process.env.NODE_ENV === 'production'
-        ? 'Internal Server Error'
-        : (err.message || 'An unexpected error occurred');
-    res.status(status).json({ error: message });
+    console.error('Unhandled Server Error:', err);
+    res.status(500).json({ error: err.message || 'Internal Server Error' });
 });
 app.listen(PORT, () => {
-    console.log(`🚀 Pharmacy ERP Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Pharmacy ERP API Server running on port ${PORT}`);
 });
 exports.default = app;

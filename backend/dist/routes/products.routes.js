@@ -4,6 +4,32 @@ const express_1 = require("express");
 const prisma_1 = require("../config/prisma");
 const auth_middleware_1 = require("../middlewares/auth.middleware");
 const router = (0, express_1.Router)();
+// Helper function to calculate medical search relevance score
+function calculateSearchRelevance(product, query) {
+    if (!query)
+        return 0;
+    const q = query.toLowerCase().trim();
+    const name = (product.name || '').toLowerCase();
+    const generic = (product.genericName || '').toLowerCase();
+    const company = (product.companyName || '').toLowerCase();
+    // 1. Name starts directly with search query (Highest priority) -> 100 points
+    if (name.startsWith(q))
+        return 100;
+    // 2. A word inside product name starts with query -> 80 points
+    const words = name.split(/\s+/);
+    if (words.some((w) => w.startsWith(q)))
+        return 80;
+    // 3. Generic name or company starts with query -> 60 points
+    if (generic.startsWith(q) || company.startsWith(q))
+        return 60;
+    // 4. Name contains query as a substring -> 40 points
+    if (name.includes(q))
+        return 40;
+    // 5. Generic or company contains query as a substring -> 20 points
+    if (generic.includes(q) || company.includes(q))
+        return 20;
+    return 0;
+}
 // GET /api/products — Fetch active products with server-side query search (q) & pagination limits
 router.get('/', auth_middleware_1.authenticate, async (req, res) => {
     try {
@@ -17,10 +43,9 @@ router.get('/', auth_middleware_1.authenticate, async (req, res) => {
                 { companyName: { contains: searchStr, mode: 'insensitive' } },
             ];
         }
-        const products = await prisma_1.prisma.product.findMany({
+        let products = await prisma_1.prisma.product.findMany({
             where: whereClause,
             take: limit ? parseInt(limit) : 5000,
-            orderBy: { name: 'asc' },
             include: {
                 batches: {
                     orderBy: { createdAt: 'desc' },
@@ -28,6 +53,20 @@ router.get('/', auth_middleware_1.authenticate, async (req, res) => {
                 },
             },
         });
+        // If query string exists, sort by smart medical relevance score (descending) then by name (ascending)
+        if (searchStr) {
+            products = products.sort((a, b) => {
+                const scoreA = calculateSearchRelevance(a, searchStr);
+                const scoreB = calculateSearchRelevance(b, searchStr);
+                if (scoreB !== scoreA) {
+                    return scoreB - scoreA; // Highest relevance score first
+                }
+                return a.name.localeCompare(b.name);
+            });
+        }
+        else {
+            products = products.sort((a, b) => a.name.localeCompare(b.name));
+        }
         res.json(products);
     }
     catch (e) {

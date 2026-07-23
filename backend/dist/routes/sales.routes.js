@@ -93,9 +93,11 @@ router.post('/', auth_middleware_1.authenticate, validation_middleware_1.validat
             if (!cleanCustName || cleanCustName === '?' || cleanCustName.length < 2) {
                 cleanCustName = 'Walk-in Retail Customer';
             }
+            const generatedInvoiceNum = `INV-${Date.now().toString().slice(-6)}`;
             // 4. Create SalesBill with customer metadata & FEFO line items
             const bill = await tx.salesBill.create({
                 data: {
+                    invoiceNumber: generatedInvoiceNum,
                     customerId: customerId || null,
                     customerName: cleanCustName,
                     customerPhone: customerPhone || null,

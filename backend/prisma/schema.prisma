@@ -38,9 +38,12 @@ enum LedgerTransactionType {
 model User {
   id           String        @id @default(uuid())
   email        String        @unique
-  passwordHash String
+  passwordHash String?
   name         String
   role         Role          @default(EMPLOYEE)
+  firebaseUid  String?
+  designation  String?       @default("Pharmacist")
+  isApproved   Boolean       @default(true)
   isActive     Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -72,6 +75,7 @@ model Product {
   purchaseBillItems   PurchaseBillItem[]
   salesBillItems      SalesBillItem[]
 
+  @@index([name])
   @@map("products")
 }
 
@@ -103,6 +107,7 @@ model Customer {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   salesBills    SalesBill[]
+  ledgerEntries LedgerEntry[]
 
   @@map("customers")
 }
@@ -123,6 +128,8 @@ model InventoryBatch {
   product        Product         @relation(fields: [productId], references: [id])
   salesBillItems SalesBillItem[]
 
+  @@index([productId])
+  @@index([batchNumber])
   @@map("inventory_batches")
 }
 
@@ -142,6 +149,7 @@ model PurchaseBill {
   party         Party              @relation(fields: [partyId], references: [id])
   items         PurchaseBillItem[]
 
+  @@index([createdAt])
   @@map("purchase_bills")
 }
 
@@ -168,6 +176,7 @@ model PurchaseBillItem {
 
 model SalesBill {
   id            String          @id @default(uuid())
+  invoiceNumber String?
   customerId    String?
   customerName  String?         @default("Walk-in Customer")
   customerPhone String?
@@ -191,6 +200,7 @@ model SalesBill {
   user          User?           @relation(fields: [userId], references: [id])
   items         SalesBillItem[]
 
+  @@index([createdAt])
   @@map("sales_bills")
 }
 
@@ -217,8 +227,10 @@ model LedgerEntry {
   id              String                @id @default(uuid())
   partyType       PartyType
   partyId         String?
+  customerId      String?
   transactionType LedgerTransactionType
   amount          Float
+  paymentMethod   String?
   purchaseBillId  String?
   salesBillId     String?
   description     String?
@@ -226,8 +238,12 @@ model LedgerEntry {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   party           Party?                @relation(fields: [partyId], references: [id])
+  customer        Customer?             @relation(fields: [customerId], references: [id])
   purchaseBill    PurchaseBill?         @relation(fields: [purchaseBillId], references: [id])
   salesBill       SalesBill?            @relation(fields: [salesBillId], references: [id])
 
+  @@index([partyId])
+  @@index([customerId])
   @@map("ledger_entries")
 }
+

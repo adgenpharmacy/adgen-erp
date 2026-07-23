@@ -4,6 +4,32 @@ const express_1 = require("express");
 const prisma_1 = require("../config/prisma");
 const auth_middleware_1 = require("../middlewares/auth.middleware");
 const router = (0, express_1.Router)();
+// Helper function to calculate medical search relevance score
+function calculateSearchRelevance(product, query) {
+    if (!query)
+        return 0;
+    const q = query.toLowerCase().trim();
+    const name = (product.name || '').toLowerCase();
+    const generic = (product.genericName || '').toLowerCase();
+    const company = (product.companyName || '').toLowerCase();
+    // 1. Name starts directly with search query (Highest priority) -> 100 points
+    if (name.startsWith(q))
+        return 100;
+    // 2. A word inside product name starts with query -> 80 points
+    const words = name.split(/\s+/);
+    if (words.some((w) => w.startsWith(q)))
+        return 80;
+    // 3. Generic name or company starts with query -> 60 points
+    if (generic.startsWith(q) || company.startsWith(q))
+        return 60;
+    // 4. Name contains query as a substring -> 40 points
+    if (name.includes(q))
+        return 40;
+    // 5. Generic or company contains query as a substring -> 20 points
+    if (generic.includes(q) || company.includes(q))
+        return 20;
+    return 0;
+}
 // GET /api/inventory — Fetch inventory with server-side query search (q) & pagination limits
 router.get('/', auth_middleware_1.authenticate, async (req, res) => {
     try {
@@ -18,10 +44,9 @@ router.get('/', auth_middleware_1.authenticate, async (req, res) => {
                 { companyName: { contains: searchStr, mode: 'insensitive' } },
             ];
         }
-        const products = await prisma_1.prisma.product.findMany({
+        let products = await prisma_1.prisma.product.findMany({
             where: whereClause,
             take,
-            orderBy: { name: 'asc' },
             include: {
                 batches: {
                     where: { quantity: { gt: 0 } },
@@ -29,6 +54,20 @@ router.get('/', auth_middleware_1.authenticate, async (req, res) => {
                 },
             },
         });
+        // If search query exists, sort by medical relevance score first, then name
+        if (searchStr) {
+            products = products.sort((a, b) => {
+                const scoreA = calculateSearchRelevance(a, searchStr);
+                const scoreB = calculateSearchRelevance(b, searchStr);
+                if (scoreB !== scoreA) {
+                    return scoreB - scoreA; // Highest relevance score first
+                }
+                return a.name.localeCompare(b.name);
+            });
+        }
+        else {
+            products = products.sort((a, b) => a.name.localeCompare(b.name));
+        }
         const inventoryList = products.map((prod) => {
             const totalStock = prod.batches.reduce((sum, b) => sum + b.quantity, 0);
             const packSize = prod.packSize || 1;
@@ -53,55 +92,15 @@ router.get('/', auth_middleware_1.authenticate, async (req, res) => {
                 mrp,
                 purchaseRate,
                 lowStockThreshold: prod.lowStockThreshold,
-                totalStock,
-                totalMrpValue,
-                isLowStock: totalStock > 0 && totalStock <= prod.lowStockThreshold,
-                isOutOfStock: totalStock <= 0,
+                systemStock: totalStock,
+                totalMrpValue: Math.round(totalMrpValue * 100) / 100,
                 batches: prod.batches,
-                product: prod,
             };
         });
         res.json(inventoryList);
     }
     catch (e) {
         res.status(500).json({ error: e.message });
-    }
-});
-// GET /api/inventory/fefo/:productId — Fetch batches in FEFO order for sale dispensing
-router.get('/fefo/:productId', auth_middleware_1.authenticate, async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const now = new Date();
-        const batches = await prisma_1.prisma.inventoryBatch.findMany({
-            where: {
-                productId,
-                quantity: { gt: 0 },
-                expiryDate: { gt: now },
-            },
-            orderBy: { expiryDate: 'asc' },
-        });
-        res.json(batches);
-    }
-    catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-// POST /api/inventory/adjust — Manual stock adjustment (Owner Only)
-router.post('/adjust', auth_middleware_1.authenticate, auth_middleware_1.requireOwner, async (req, res) => {
-    try {
-        const { batchId, newQuantity, reason } = req.body;
-        const updatedBatch = await prisma_1.prisma.inventoryBatch.update({
-            where: { id: batchId },
-            data: {
-                quantity: parseFloat(newQuantity),
-                isManualAdjustment: true,
-                adjustmentReason: reason || 'Manual audit correction',
-            },
-        });
-        res.json(updatedBatch);
-    }
-    catch (e) {
-        res.status(400).json({ error: e.message });
     }
 });
 exports.default = router;

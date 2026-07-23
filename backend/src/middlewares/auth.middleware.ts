@@ -25,7 +25,7 @@ export const authenticate = async (
           email: 'owner@adgen.com',
           passwordHash: '$2a$10$abcdef1234567890dummyhash',
           role: 'OWNER',
-        },
+        } as any,
       });
     }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
@@ -16,150 +17,142 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
 
 export default function PurchasesPage() {
   const router = useRouter();
+  const { purchases: cachedPurchases, parties: cachedParties, loading, refreshData } = useErpData();
   const [purchases, setPurchases] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [inspectBill, setInspectBill] = useState<any>(null);
   const [selectedPurchaseForPrint, setSelectedPurchaseForPrint] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchPurchases = async () => {
-    try {
-      setLoading(true);
-      const [pRes, partyRes] = await Promise.all([
-        api.get('/purchases'),
-        api.get('/parties')
-      ]);
-      setPurchases(pRes.data);
-      setParties(partyRes.data);
-    } catch (e) {
-      console.error('Failed to fetch purchases:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    fetchPurchases();
-  }, []);
+    setPurchases(cachedPurchases);
+    setParties(cachedParties);
+  }, [cachedPurchases, cachedParties]);
 
-  const handleDeleteBill = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this purchase bill? Inventory stock will be adjusted.')) return;
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this purchase bill?')) return;
     try {
       await api.delete(`/purchases/${id}`);
-      setInspectBill(null);
-      fetchPurchases();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to delete purchase bill');
+      await refreshData();
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Failed to delete purchase bill');
     }
   };
 
-  const openEditModal = (p: any, e: React.MouseEvent) => {
-    e.stopPropagation();
-    router.push(`/purchases/new?id=${p.id}`);
-  };
-
-  const filtered = purchases.filter((p) => {
-    const term = search.toLowerCase();
-    const invNum = (p.invoiceNumber || '').toString().toLowerCase();
-    const partyName = (p.party?.name || '').toLowerCase();
-    return invNum.includes(term) || partyName.includes(term);
+  const filteredPurchases = purchases.filter((p) => {
+    const q = search.toLowerCase();
+    const partyName = p.party?.name || '';
+    return (
+      (p.invoiceNumber || '').toLowerCase().includes(q) ||
+      partyName.toLowerCase().includes(q)
+    );
   });
 
   return (
-    <div className="flex bg-white text-gray-900 min-h-screen font-sans">
+    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto">
-        {/* Page Header */}
-        <div className="border-b border-gray-200 bg-white sticky top-0 z-10">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 tracking-tight">Purchases</h1>
-              <p className="text-xs text-gray-500 mt-0.5">{filtered.length} purchase bills</p>
-            </div>
-            <Link
-              href="/purchases/new"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md text-xs transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New Purchase
-            </Link>
+      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Purchase Entry Bills</h1>
+            <p className="text-xs text-slate-500 mt-0.5">{filteredPurchases.length} total purchase bills</p>
           </div>
+          <Link
+            href="/purchases/new"
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Purchase</span>
+          </Link>
+        </div>
 
-          {/* Search */}
-          <div className="px-6 pb-3">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by invoice # or supplier name..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-md pl-9 pr-4 py-2 text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:border-emerald-500 focus:bg-white transition"
-              />
-            </div>
+        {/* Search Bar */}
+        <div className="bg-white border border-slate-200 p-3 rounded-2xl shadow-2xs mb-6">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by invoice # or supplier name..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+            />
           </div>
         </div>
 
-        <div className="p-6 pb-24 md:pb-6">
-          {filtered.length === 0 ? (
-            <div className="py-16 text-center text-gray-400 text-sm">
-              No purchase bills found.
-            </div>
-          ) : (
-            <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-              <table className="w-full text-left">
+        {/* Table / Cards */}
+        {filteredPurchases.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs font-medium">
+            {loading ? 'Loading purchase bills...' : 'No purchase bills found.'}
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Invoice</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Supplier</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Date</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Status</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right">Amount</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider w-20"></th>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3.5 px-4">Invoice #</th>
+                    <th className="py-3.5 px-4">Date</th>
+                    <th className="py-3.5 px-4">Supplier Party</th>
+                    <th className="py-3.5 px-4">Payment</th>
+                    <th className="py-3.5 px-4 text-right">Grand Total</th>
+                    <th className="py-3.5 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filtered.map((p) => (
-                    <tr
-                      key={p.id}
-                      onClick={() => setInspectBill(p)}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-mono font-semibold text-gray-900">{p.invoiceNumber}</span>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {filteredPurchases.map((p) => (
+                    <tr key={p.id} className="hover:bg-emerald-50/40 transition">
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                        <button
+                          onClick={() => setInspectBill(p)}
+                          className="hover:text-emerald-600 hover:underline"
+                        >
+                          {p.invoiceNumber || p.id.slice(0, 8)}
+                        </button>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-gray-900">{p.party?.name || 'Supplier'}</div>
+                      <td className="py-3.5 px-4 text-slate-500">
+                        {formatDate(p.purchaseDate || p.createdAt)}
                       </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        <span className="text-xs text-gray-500">{formatDate(p.purchaseDate || p.createdAt)}</span>
+                      <td className="py-3.5 px-4 font-bold text-slate-900">
+                        {p.party?.name || 'Supplier'}
                       </td>
-                      <td className="px-4 py-3 hidden md:table-cell">
-                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${
-                          p.isPaid 
-                            ? 'bg-emerald-50 text-emerald-700' 
-                            : 'bg-amber-50 text-amber-700'
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                          p.isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                         }`}>
-                          {p.isPaid ? 'Paid' : 'Credit'}
+                          {p.isPaid ? 'CASH' : 'CREDIT'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-sm font-semibold font-mono text-gray-900">₹{p.grandTotal?.toFixed(2)}</span>
+                      <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900">
+                        ₹{(p.grandTotal || 0).toFixed(2)}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 justify-end">
+                      <td className="py-3.5 px-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
                           <button
-                            onClick={(e) => openEditModal(p, e)}
-                            className="p-1.5 text-gray-400 hover:text-emerald-600 rounded hover:bg-gray-100 transition"
-                            title="Edit"
+                            onClick={() => setSelectedPurchaseForPrint(p)}
+                            className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                            title="Print Purchase Memo"
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => router.push(`/purchases/new?id=${p.id}`)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                            title="Edit Purchase Entry"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                            title="Delete Purchase Entry"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -168,136 +161,36 @@ export default function PurchasesPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-
-        {/* Inspector Drawer */}
-        <AnimatePresence>
-          {inspectBill && (
-            <div className="fixed inset-0 z-50 overflow-hidden">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setInspectBill(null)}
-                className="absolute inset-0 bg-black/20"
-              />
-
-              <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
-                <motion.div
-                  initial={{ x: '100%' }}
-                  animate={{ x: 0 }}
-                  exit={{ x: '100%' }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                  className="w-screen max-w-lg bg-white border-l border-gray-200 flex flex-col overflow-y-auto"
-                >
-                  {/* Drawer Header */}
-                  <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
-                    <div>
-                      <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Purchase Bill</div>
-                      <h2 className="text-lg font-bold text-gray-900 font-mono">{inspectBill.invoiceNumber}</h2>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => { setSelectedPurchaseForPrint(inspectBill); setInspectBill(null); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md text-xs transition"
-                      >
-                        <Printer className="w-3.5 h-3.5" /> Print
-                      </button>
-                      <button
-                        onClick={() => handleDeleteBill(inspectBill.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-gray-100 transition"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setInspectBill(null)}
-                        className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="p-6 space-y-6 flex-1">
-                    {/* Meta */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-1">Supplier</div>
-                        <div className="text-sm font-medium text-gray-900">{inspectBill.party?.name || 'Unknown'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-1">Date</div>
-                        <div className="text-sm text-gray-900">{formatDate(inspectBill.purchaseDate || inspectBill.createdAt)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider mb-1">Status</div>
-                        <div className={`text-sm font-medium ${inspectBill.isPaid ? 'text-emerald-600' : 'text-amber-600'}`}>
-                          {inspectBill.isPaid ? 'Paid' : 'Credit'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Items Table */}
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-left text-xs">
-                        <thead>
-                          <tr className="bg-gray-50 border-b border-gray-200">
-                            <th className="py-2 px-3 text-[11px] font-semibold text-gray-500 uppercase">Item</th>
-                            <th className="py-2 px-3 text-[11px] font-semibold text-gray-500 uppercase">Batch</th>
-                            <th className="py-2 px-3 text-[11px] font-semibold text-gray-500 uppercase text-right">Qty</th>
-                            <th className="py-2 px-3 text-[11px] font-semibold text-gray-500 uppercase text-right">Rate</th>
-                            <th className="py-2 px-3 text-[11px] font-semibold text-gray-500 uppercase text-right">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {inspectBill.items?.map((item: any, idx: number) => {
-                            const rawBatch = item.batchNumber || '—';
-                            const cleanBatch = rawBatch.replace(/\(.*\)/g, '').trim();
-                            return (
-                              <tr key={idx} className="hover:bg-gray-50">
-                                <td className="py-2 px-3 font-medium text-gray-900">{item.productName || item.product?.name}</td>
-                                <td className="py-2 px-3 font-mono text-gray-500 text-[11px]">{cleanBatch}</td>
-                                <td className="py-2 px-3 text-right font-mono font-medium text-gray-900">{item.quantity}</td>
-                                <td className="py-2 px-3 text-right font-mono text-gray-600">₹{item.purchaseRate?.toFixed(2) || item.unitPrice?.toFixed(2)}</td>
-                                <td className="py-2 px-3 text-right font-mono font-semibold text-gray-900">₹{(item.quantity * (item.purchaseRate || item.unitPrice)).toFixed(2)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Totals */}
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between text-gray-500">
-                        <span>Subtotal</span>
-                        <span className="font-mono font-medium text-gray-900">₹{(inspectBill.subtotal || inspectBill.grandTotal || 0).toFixed(2)}</span>
-                      </div>
-                      {inspectBill.taxTotal > 0 && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>GST</span>
-                          <span className="font-mono font-medium text-gray-900">₹{inspectBill.taxTotal.toFixed(2)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between pt-2 border-t border-gray-200 text-base font-bold text-gray-900">
-                        <span>Total</span>
-                        <span className="font-mono">₹{(inspectBill.grandTotal || 0).toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              </div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* Purchase Print Modal */}
-        {selectedPurchaseForPrint && (
-          <PurchasePrintModal purchase={selectedPurchaseForPrint} onClose={() => setSelectedPurchaseForPrint(null)} />
+          </div>
         )}
       </main>
+
+      {/* Inspect Purchase Modal */}
+      {inspectBill && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-900 text-sm">Purchase Bill: {inspectBill.invoiceNumber}</h3>
+              <button onClick={() => setInspectBill(null)} className="p-1 text-slate-400 hover:text-slate-900 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-2 text-xs text-slate-600">
+              <div><span className="font-bold text-slate-700">Supplier:</span> {inspectBill.party?.name || 'Supplier'}</div>
+              <div><span className="font-bold text-slate-700">Date:</span> {formatDate(inspectBill.purchaseDate || inspectBill.createdAt)}</div>
+              <div><span className="font-bold text-slate-700">Grand Total:</span> <span className="font-mono font-bold text-emerald-600">₹{(inspectBill.grandTotal || 0).toFixed(2)}</span></div>
+            </div>
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button onClick={() => setInspectBill(null)} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-xl">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Purchase Print Modal */}
+      {selectedPurchaseForPrint && (
+        <PurchasePrintModal purchase={selectedPurchaseForPrint} onClose={() => setSelectedPurchaseForPrint(null)} />
+      )}
 
       <BottomNav />
     </div>

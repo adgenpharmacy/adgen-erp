@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
-import { Search, Plus, Edit2 } from 'lucide-react';
+import { Search, Plus, Edit2, X } from 'lucide-react';
 
 export default function CustomersPage() {
+  const { customers: cachedCustomers, loading, refreshData } = useErpData();
   const [customers, setCustomers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -14,16 +16,9 @@ export default function CustomersPage() {
   const [formData, setFormData] = useState({ name: '', phone: '', email: '', address: '', gstNumber: '', doctorName: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchCustomers = async () => {
-    try {
-      const res = await api.get('/customers');
-      setCustomers(res.data);
-    } catch (e) {
-      console.error('Failed to fetch customers:', e);
-    }
-  };
-
-  useEffect(() => { fetchCustomers(); }, []);
+  useEffect(() => {
+    setCustomers(cachedCustomers);
+  }, [cachedCustomers]);
 
   const openAddModal = () => {
     setEditingCustomer(null);
@@ -41,82 +36,92 @@ export default function CustomersPage() {
     e.preventDefault();
     try {
       setIsSubmitting(true);
-      if (editingCustomer) { await api.put(`/customers/${editingCustomer.id}`, formData); }
-      else { await api.post('/customers', formData); }
+      if (editingCustomer) {
+        await api.put(`/customers/${editingCustomer.id}`, formData);
+      } else {
+        await api.post('/customers', formData);
+      }
       setShowAddModal(false);
-      fetchCustomers();
+      await refreshData();
     } catch (e: any) {
       alert(e.response?.data?.error || 'Failed to save customer');
-    } finally { setIsSubmitting(false); }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const filtered = customers.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone && c.phone.includes(search))
-  );
+  const filteredCustomers = customers.filter((c) => {
+    const q = search.toLowerCase();
+    return (
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.phone || '').includes(q) ||
+      (c.doctorName || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
-    <div className="flex bg-white text-gray-900 min-h-screen font-sans">
+    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
-        <div className="border-b border-gray-200 bg-white sticky top-0 z-10">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 tracking-tight">Customers</h1>
-              <p className="text-xs text-gray-500 mt-0.5">{filtered.length} customers</p>
-            </div>
-            <button onClick={openAddModal} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md text-xs transition">
-              <Plus className="w-3.5 h-3.5" /> Add Customer
-            </button>
+
+      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Customer Directory</h1>
+            <p className="text-xs text-slate-500 mt-0.5">{filteredCustomers.length} registered customer accounts</p>
           </div>
-          <div className="px-6 pb-3">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-              <input type="text" placeholder="Search by name or phone..." value={search} onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-md pl-9 pr-4 py-2 text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:border-emerald-500 focus:bg-white transition" />
-            </div>
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Customer</span>
+          </button>
+        </div>
+
+        <div className="bg-white border border-slate-200 p-3 rounded-2xl shadow-2xs mb-6">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by Customer Name, Phone, or Doctor..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+            />
           </div>
         </div>
 
-        <div className="p-6 pb-24 md:pb-6">
-          {filtered.length === 0 ? (
-            <div className="py-16 text-center text-gray-400 text-sm">No customers found.</div>
-          ) : (
-            <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-              <table className="w-full text-left">
+        {filteredCustomers.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs font-medium">
+            {loading ? 'Loading customers...' : 'No customers found.'}
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Phone</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Doctor</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Email</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider text-right">Credit</th>
-                    <th className="px-4 py-2.5 w-16"></th>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3.5 px-4">Customer Name</th>
+                    <th className="py-3.5 px-4">Phone</th>
+                    <th className="py-3.5 px-4">Doctor</th>
+                    <th className="py-3.5 px-4">Address</th>
+                    <th className="py-3.5 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filtered.map((cust) => (
-                    <tr key={cust.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-gray-900">{cust.name}</div>
-                        {cust.address && <div className="text-[11px] text-gray-400 mt-0.5 truncate max-w-[200px]">{cust.address}</div>}
-                      </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        <span className="text-xs font-mono text-gray-600">{cust.phone || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell">
-                        <span className="text-xs text-gray-500">{cust.doctorName ? `Dr. ${cust.doctorName}` : '—'}</span>
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className="text-xs text-gray-500">{cust.email || '—'}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`text-sm font-semibold font-mono ${cust.creditBalance > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
-                          ₹{cust.creditBalance?.toFixed(2) || '0.00'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => openEditModal(cust)} className="p-1.5 text-gray-400 hover:text-emerald-600 rounded hover:bg-gray-100 transition" title="Edit">
-                          <Edit2 className="w-3.5 h-3.5" />
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {filteredCustomers.map((c) => (
+                    <tr key={c.id} className="hover:bg-emerald-50/40 transition">
+                      <td className="py-3.5 px-4 font-bold text-slate-900">{c.name}</td>
+                      <td className="py-3.5 px-4 font-mono">{c.phone || '—'}</td>
+                      <td className="py-3.5 px-4">{c.doctorName || '—'}</td>
+                      <td className="py-3.5 px-4 text-slate-500 truncate max-w-[200px]">{c.address || '—'}</td>
+                      <td className="py-3.5 px-4 text-center">
+                        <button
+                          onClick={() => openEditModal(c)}
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                          title="Edit Customer"
+                        >
+                          <Edit2 className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
@@ -124,40 +129,50 @@ export default function CustomersPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-
-        {showAddModal && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
-            <div className="bg-white border border-gray-200 p-6 rounded-lg max-w-md w-full shadow-lg">
-              <h2 className="text-base font-semibold text-gray-900 mb-4">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h2>
-              <form onSubmit={handleSubmit} className="space-y-3 text-sm">
-                {[
-                  { label: 'Name *', key: 'name', required: true },
-                  { label: 'Phone', key: 'phone' },
-                  { label: 'Email', key: 'email', type: 'email' },
-                  { label: 'Doctor', key: 'doctorName', placeholder: 'e.g. Dr. Verma' },
-                  { label: 'Address', key: 'address' },
-                ].map((field) => (
-                  <div key={field.key}>
-                    <label className="text-xs text-gray-500 font-medium block mb-1">{field.label}</label>
-                    <input type={field.type || 'text'} required={field.required} placeholder={field.placeholder}
-                      value={(formData as any)[field.key]}
-                      onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-gray-900 focus:outline-none focus:border-emerald-500" />
-                  </div>
-                ))}
-                <div className="flex gap-2 pt-3 border-t border-gray-100">
-                  <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 bg-white text-gray-700 font-medium rounded-md border border-gray-200 hover:bg-gray-50 transition text-sm">Cancel</button>
-                  <button type="submit" disabled={isSubmitting} className="flex-1 py-2 bg-emerald-600 text-white font-medium rounded-md hover:bg-emerald-700 transition text-sm">
-                    {isSubmitting ? 'Saving...' : editingCustomer ? 'Update' : 'Create'}
-                  </button>
-                </div>
-              </form>
-            </div>
           </div>
         )}
       </main>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-900 text-sm">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
+              <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-slate-900 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-600 font-bold mb-1">Customer Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g. Rahul Sharma"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-600 font-bold mb-1">Phone Number</label>
+                <input
+                  type="text"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="9826012345"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl">Cancel</button>
+                <button type="submit" disabled={isSubmitting} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20">{isSubmitting ? 'Saving...' : 'Save'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </div>
   );

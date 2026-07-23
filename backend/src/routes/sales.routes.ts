@@ -111,9 +111,12 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         cleanCustName = 'Walk-in Retail Customer';
       }
 
+      const generatedInvoiceNum = `INV-${Date.now().toString().slice(-6)}`;
+
       // 4. Create SalesBill with customer metadata & FEFO line items
       const bill = await tx.salesBill.create({
         data: {
+          invoiceNumber: generatedInvoiceNum,
           customerId: customerId || null,
           customerName: cleanCustName,
           customerPhone: customerPhone || null,
@@ -132,7 +135,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           items: {
             create: billItemsToCreate,
           },
-        } as any,
+        },
         include: {
           items: true,
           customer: true,

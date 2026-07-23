@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { api } from '@/lib/api-client';
+import { getCachedProducts, invalidateCatalogCache } from '@/lib/catalog-cache';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import { 
@@ -147,17 +148,17 @@ function NewPurchasePageContent() {
     }
   }, [editId]);
 
+  // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (search.trim()) {
-        api.get(`/products?q=${encodeURIComponent(search.trim())}`)
-          .then((r) => setProducts(r.data))
-          .catch(console.error);
-      } else {
-        setProducts([]);
-      }
-    }, 150);
-    return () => clearTimeout(timer);
+    let isCurrent = true;
+    if (search.trim()) {
+      getCachedProducts(search.trim()).then((res) => {
+        if (isCurrent) setProducts(res);
+      });
+    } else {
+      setProducts([]);
+    }
+    return () => { isCurrent = false; };
   }, [search]);
 
   const addEmptyItem = () => {
@@ -314,6 +315,7 @@ function NewPurchasePageContent() {
         await api.post('/purchases', payload);
         alert('Purchase Entry saved successfully!');
       }
+      invalidateCatalogCache();
       router.push('/purchases');
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to save purchase bill');
@@ -556,7 +558,7 @@ function NewPurchasePageContent() {
                               value={activeSearchIndex === idx ? search : ''}
                               onFocus={() => setActiveSearchIndex(idx)}
                               onChange={(e) => setSearch(e.target.value)}
-                              placeholder="Search medicine catalog by name..."
+                              placeholder="Search medicine catalog instantly..."
                               className="w-full bg-slate-50 border-2 border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:bg-white focus:ring-3 focus:ring-emerald-500/20"
                             />
                           </div>
