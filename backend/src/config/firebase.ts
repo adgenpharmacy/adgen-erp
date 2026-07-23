@@ -1,10 +1,4 @@
-import * as admin from 'firebase-admin';
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: process.env.FIREBASE_PROJECT_ID || 'adgen-pharmacy',
-  });
-}
-
-export const firebaseAuth = admin.auth();
-export const firebaseDb = admin.firestore();
+// Deprecated: Firebase is no longer used for auth or database storage.
+// Authentication runs 100% on PostgreSQL + Prisma + bcrypt + JWT.
+export const firebaseAuth = null;
+export const firebaseDb = null;

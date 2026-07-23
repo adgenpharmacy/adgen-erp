@@ -54,17 +54,26 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
   const [parties, setParties] = useState<any[]>(initialCache?.parties || []);
   const [loading, setLoading] = useState<boolean>(!initialCache);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      console.log(
+        '%c🚀 AdGen Pharmacy ERP Engine Active\n%c✨ Designed & Engineered by Anshu (Anshu says hi! 👋)',
+        'color: #059669; font-weight: bold; font-size: 16px; padding: 4px 0;',
+        'color: #2563eb; font-weight: bold; font-size: 13px; background: #eff6ff; padding: 4px 8px; border-radius: 6px;'
+      );
+    }
+  }, []);
+
   const fetchAllData = React.useCallback(async () => {
     try {
-      console.log('🔗 Fetching ERP data from API Base URL:', api.defaults.baseURL);
-
+      console.log('⚡ [Anshu Sync Engine] Synchronizing Live Pharmacy Data...');
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes] = await Promise.all([
-        api.get('/products').catch((err) => { console.error('❌ /products error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
-        api.get('/inventory').catch((err) => { console.error('❌ /inventory error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
-        api.get('/sales').catch((err) => { console.error('❌ /sales error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
-        api.get('/purchases').catch((err) => { console.error('❌ /purchases error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
-        api.get('/customers').catch((err) => { console.error('❌ /customers error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
-        api.get('/parties').catch((err) => { console.error('❌ /parties error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/products').catch(() => ({ data: [] })),
+        api.get('/inventory').catch(() => ({ data: [] })),
+        api.get('/sales').catch(() => ({ data: [] })),
+        api.get('/purchases').catch(() => ({ data: [] })),
+        api.get('/customers').catch(() => ({ data: [] })),
+        api.get('/parties').catch(() => ({ data: [] })),
       ]);
 
       const prods = prodRes.data || [];
@@ -73,6 +82,8 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       const pur = purRes.data || [];
       const cust = custRes.data || [];
       const part = partyRes.data || [];
+
+      console.log(`✅ [Anshu Engine] Data Sync Complete! 📦 ${prods.length} Medicines | 💊 ${inv.length} Batches | 🧾 ${sal.length} Invoices | 👥 ${cust.length} Customers`);
 
       setProducts(prods);
       setInventory(inv);

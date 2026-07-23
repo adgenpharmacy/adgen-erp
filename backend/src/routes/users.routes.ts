@@ -46,7 +46,6 @@ router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
 
     const newUser = await prisma.user.create({
       data: {
-        firebaseUid: `uid_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: name.trim(),
         email: cleanEmail,
         passwordHash: hashedPassword,
@@ -72,7 +71,7 @@ router.post('/register', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// POST /api/users/login — Verify employee login & issue signed JWT token
+// POST /api/users/login — Pure database login & signed JWT token generation
 router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -82,26 +81,7 @@ router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    let user = await prisma.user.findUnique({ where: { email: cleanEmail } });
-
-    // Seed default owner account if no users exist in database
-    if (!user && (cleanEmail === 'owner@adgenpharmacy.com' || cleanEmail === 'owner@adgen.com')) {
-      const defaultPassword = password || 'owner123password';
-      const hashedPassword = await bcrypt.hash(defaultPassword, 10);
-
-      user = await prisma.user.create({
-        data: {
-          firebaseUid: 'owner_firebase_uid_001',
-          name: 'Pharmacy Owner',
-          email: cleanEmail,
-          passwordHash: hashedPassword,
-          role: 'OWNER',
-          designation: 'Owner & Chief Pharmacist',
-          isActive: true,
-          isApproved: true,
-        },
-      });
-    }
+    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -111,19 +91,21 @@ router.post('/login', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: 'Account is deactivated. Please contact pharmacy admin.' });
     }
 
-    // Verify bcrypt password hash
-    if (user.passwordHash) {
-      const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-      if (!isPasswordValid) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
-      }
-    }
-
     if (user.role === 'EMPLOYEE' && !user.isApproved) {
       return res.status(403).json({ error: 'Account pending owner approval. Please contact pharmacy admin.' });
     }
 
-    // Generate signed JWT Token
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // Verify password strictly using bcrypt against PostgreSQL DB
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // Issue signed JWT Token
     const token = signToken({
       userId: user.id,
       email: user.email,

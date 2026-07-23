@@ -1,21 +1,4 @@
 import axios from 'axios';
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDummyKeyForLocalDev",
-  authDomain: "adgen-pharmacy.firebaseapp.com",
-  projectId: "adgen-pharmacy",
-  storageBucket: "adgen-pharmacy.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
-};
-
-if (!getApps().length) {
-  initializeApp(firebaseConfig);
-}
-
-export const auth = getAuth();
 
 const getBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {

@@ -48,7 +48,9 @@ export default function Sidebar() {
               <h1 className="font-bold text-gray-900 text-sm tracking-tight leading-none">
                 AdGen <span className="text-emerald-600 font-mono text-[11px] font-semibold ml-0.5">ERP</span>
               </h1>
-              <span className="text-[10px] text-gray-400 font-medium tracking-wide uppercase leading-none">Pharmacy</span>
+              <span className="text-[10px] text-gray-400 font-medium tracking-wide uppercase leading-none block" title="Crafted with excellence by Anshu — Anshu says hi! 👋">
+                Pharmacy • By Anshu
+              </span>
             </div>
           </div>
         </div>

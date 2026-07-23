@@ -6,7 +6,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
   const { method, originalUrl, ip } = req;
 
   // Log incoming request
-  console.log(`[${timestamp}] 📥 HTTP ${method} ${originalUrl} from ${ip || 'unknown'}`);
+  console.log(`[${timestamp}] 📥 [Anshu Engine] HTTP ${method} ${originalUrl} from ${ip || 'client'}`);
 
   // Intercept response finish to log status code and execution duration
   res.on('finish', () => {
@@ -15,7 +15,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
     const statusIcon = statusCode >= 500 ? '💥' : statusCode >= 400 ? '⚠️' : '✅';
     
     console.log(
-      `[${new Date().toISOString()}] ${statusIcon} HTTP ${method} ${originalUrl} -> Status ${statusCode} (${duration}ms)`
+      `[${new Date().toISOString()}] ${statusIcon} [Anshu Engine] HTTP ${method} ${originalUrl} -> Status ${statusCode} (${duration}ms)`
     );
   });
 

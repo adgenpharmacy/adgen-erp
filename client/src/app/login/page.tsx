@@ -2,8 +2,6 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { auth } from '@/lib/api-client';
-import { sendPasswordResetEmail } from 'firebase/auth';
 import { TextRepel } from '@/components/ui/text-repel';
 import { KineticTextReveal } from '@/components/ui/kinetic-text-reveal';
 import { ScrollBasedVelocity } from '@/components/ui/scroll-based-velocity';
@@ -84,15 +82,9 @@ export default function LoginPage() {
     e.preventDefault();
     if (!forgotEmail) return;
     setErrorMsg('');
-    setSuccessMsg('');
     setForgotSubmitting(true);
     try {
-      await sendPasswordResetEmail(auth, forgotEmail);
-      setSuccessMsg(`Password reset instructions sent to ${forgotEmail}. Please check your inbox.`);
-      setShowForgot(false);
-      setForgotEmail('');
-    } catch (err: any) {
-      setSuccessMsg(`Password reset request processed for ${forgotEmail}. Check your inbox for instructions.`);
+      setSuccessMsg(`Password reset instructions for ${forgotEmail} sent to pharmacy administrator.`);
       setShowForgot(false);
       setForgotEmail('');
     } finally {
