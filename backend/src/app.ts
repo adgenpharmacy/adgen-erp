@@ -38,6 +38,22 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/system', systemRoutes);
 
+// Welcome & Status
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    service: 'AdGen Pharmacy ERP API Server',
+    endpoints: {
+      health: '/health',
+      products: '/api/products',
+      sales: '/api/sales',
+      inventory: '/api/inventory',
+      reports: '/api/reports'
+    },
+    timestamp: new Date()
+  });
+});
+
 // Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Pharmacy ERP Backend (Node + Prisma + PostgreSQL 3NF)', timestamp: new Date() });
