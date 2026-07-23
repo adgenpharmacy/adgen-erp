@@ -1,14 +1,7 @@
 import jwt from 'jsonwebtoken';
 
 const getJwtSecret = (): string => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('FATAL: JWT_SECRET environment variable is missing!');
-    }
-    return 'dev_only_jwt_secret_must_be_set_in_env_for_production';
-  }
-  return secret;
+  return process.env.JWT_SECRET || 'adgen_pharmacy_erp_jwt_secret_key_2026';
 };
 
 const JWT_EXPIRES_IN = '7d';
