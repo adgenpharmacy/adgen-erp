@@ -17,6 +17,8 @@ import reportsRoutes from './routes/reports.routes';
 import usersRoutes from './routes/users.routes';
 import systemRoutes from './routes/system.routes';
 
+import { requestLogger } from './middlewares/logger.middleware';
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -25,6 +27,7 @@ app.use(helmet());
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
+app.use(requestLogger);
 
 // API Routes
 app.use('/api/products', productsRoutes);

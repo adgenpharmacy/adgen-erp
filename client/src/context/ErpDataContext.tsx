@@ -56,13 +56,15 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
 
   const fetchAllData = React.useCallback(async () => {
     try {
+      console.log('🔗 Fetching ERP data from API Base URL:', api.defaults.baseURL);
+
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes] = await Promise.all([
-        api.get('/products').catch(() => ({ data: [] })),
-        api.get('/inventory').catch(() => ({ data: [] })),
-        api.get('/sales').catch(() => ({ data: [] })),
-        api.get('/purchases').catch(() => ({ data: [] })),
-        api.get('/customers').catch(() => ({ data: [] })),
-        api.get('/parties').catch(() => ({ data: [] })),
+        api.get('/products').catch((err) => { console.error('❌ /products error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/inventory').catch((err) => { console.error('❌ /inventory error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/sales').catch((err) => { console.error('❌ /sales error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/purchases').catch((err) => { console.error('❌ /purchases error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/customers').catch((err) => { console.error('❌ /customers error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
+        api.get('/parties').catch((err) => { console.error('❌ /parties error:', err.response?.status, err.response?.data || err.message); return { data: [] }; }),
       ]);
 
       const prods = prodRes.data || [];

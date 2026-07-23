@@ -5,12 +5,11 @@ import { prisma } from '../src/config/prisma';
 async function importFirebaseBackup() {
   console.log('🚀 Starting full Firebase backup import (including historical bills & exact timestamps)...');
 
-  const backupDir = path.join(__dirname, '../../data/pharmacy_backup_1784661202209');
-
-  if (!fs.existsSync(backupDir)) {
-    console.error(`❌ Backup directory not found at ${backupDir}`);
-    process.exit(1);
-  }
+  const dataDir = path.join(__dirname, '../../data');
+  const backupFolders = fs.existsSync(dataDir) ? fs.readdirSync(dataDir).filter(f => f.startsWith('pharmacy_backup_')) : [];
+  const backupDir = backupFolders.length > 0 
+    ? path.join(dataDir, backupFolders[0]) 
+    : path.join(dataDir, 'pharmacy_backup_1784797554644');
 
   // 1. Import Parties (Suppliers & Customers)
   const partiesFilePath = path.join(backupDir, 'parties.json');
