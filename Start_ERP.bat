@@ -14,8 +14,8 @@ echo [2/2] Starting Frontend Next.js Web App (Port 3000)...
 start /min cmd /c "cd client && npm run dev"
 
 echo.
-echo Waiting 5 seconds for servers to start...
-timeout /t 5 /nobreak >nul
+echo Waiting for servers to initialize...
+timeout /t 8 /nobreak >nul
 
 echo.
 echo Opening Pharmacy ERP Billing Counter in Web Browser...
@@ -23,6 +23,7 @@ start http://localhost:3000/billing
 
 echo ========================================================
 echo  AdGen Pharmacy ERP is running in the background!
+echo  If browser says "Connecting", wait 5 seconds & refresh.
 echo  Do not close this window while operating the pharmacy.
 echo ========================================================
 pause
