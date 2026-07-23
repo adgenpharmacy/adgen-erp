@@ -4,8 +4,7 @@
   "description": "Enterprise Node.js TypeScript REST API Backend for Pharmacy ERP with PostgreSQL 3NF & Prisma ORM",
   "main": "dist/app.js",
   "scripts": {
-    "build": "tsc",
-    "postinstall": "prisma generate",
+    "build": "npx prisma generate && tsc",
     "start": "node dist/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "migrate": "ts-node src/scripts/migrate-from-json.ts",
