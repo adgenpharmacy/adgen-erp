@@ -5,8 +5,24 @@ import { api } from '@/lib/api-client';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import ReportPrintModal from '@/components/reports/ReportPrintModal';
+import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Download, Printer, TrendingUp, TrendingDown, DollarSign, PieChart as PieIcon, ShieldAlert, ArrowUpRight, ArrowDownRight, Layers, FileText } from 'lucide-react';
+import { 
+  Download, 
+  Printer, 
+  TrendingUp, 
+  TrendingDown, 
+  DollarSign, 
+  PieChart as PieIcon, 
+  ShieldAlert, 
+  ArrowUpRight, 
+  ArrowDownRight, 
+  Layers, 
+  FileText,
+  AlertTriangle,
+  Clock,
+  Package
+} from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, CartesianGrid
@@ -15,7 +31,7 @@ import {
 export type TimeRangePreset = 'TODAY' | 'YESTERDAY' | 'LAST_3_DAYS' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_MONTH' | 'LAST_QUARTER' | 'LAST_YEAR' | 'CUSTOM';
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST' | 'EXPIRY_RISK'>('OVERVIEW');
   const [timePreset, setTimePreset] = useState<TimeRangePreset>('LAST_30_DAYS');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
@@ -29,11 +45,11 @@ export default function ReportsPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/reports/dashboard').then((r) => setDashboardMetrics(r.data)),
-      api.get('/sales').then((r) => setSales(r.data)),
-      api.get('/purchases').then((r) => setPurchases(r.data)),
-      api.get('/inventory').then((r) => setInventory(r.data)),
-    ]).catch(console.error).finally(() => setLoading(false));
+      api.get('/reports/dashboard').then((r) => setDashboardMetrics(r.data)).catch(() => null),
+      api.get('/sales').then((r) => setSales(r.data)).catch(() => null),
+      api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => null),
+      api.get('/inventory').then((r) => setInventory(r.data)).catch(() => null),
+    ]).finally(() => setLoading(false));
   }, []);
 
   const { startDateObj, endDateObj, rangeLabel } = useMemo(() => {
@@ -61,7 +77,43 @@ export default function ReportsPage() {
   const filteredSales = useMemo(() => sales.filter((s) => { const d = new Date(s.saleDate || s.createdAt); return d >= startDateObj && d <= endDateObj; }), [sales, startDateObj, endDateObj]);
   const filteredPurchases = useMemo(() => purchases.filter((p) => { const d = new Date(p.purchaseDate || p.createdAt); return d >= startDateObj && d <= endDateObj; }), [purchases, startDateObj, endDateObj]);
 
-  // Comprehensive Detailed Financial Metrics & Profit Calculations
+  // FEFO Expiry Risk Analytics
+  const expiryRiskData = useMemo(() => {
+    const now = new Date();
+    const list: any[] = [];
+    let risk30Val = 0;
+    let risk60Val = 0;
+    let risk90Val = 0;
+
+    inventory.forEach((inv) => {
+      (inv.batches || []).forEach((b: any) => {
+        if (b.expiryDate && b.quantity > 0) {
+          const daysLeft = Math.ceil((new Date(b.expiryDate).getTime() - now.getTime()) / (1000 * 3600 * 24));
+          if (daysLeft <= 90) {
+            const batchVal = b.quantity * (b.mrp || inv.mrp || 0);
+            if (daysLeft <= 30) risk30Val += batchVal;
+            else if (daysLeft <= 60) risk60Val += batchVal;
+            else risk90Val += batchVal;
+
+            list.push({
+              productName: inv.productName || inv.name,
+              companyName: inv.companyName || 'Generic',
+              batchNumber: b.batchNumber,
+              expiryDate: b.expiryDate,
+              daysLeft,
+              quantity: b.quantity,
+              mrp: b.mrp || inv.mrp || 0,
+              totalValue: batchVal,
+            });
+          }
+        }
+      });
+    });
+
+    list.sort((a, b) => a.daysLeft - b.daysLeft);
+    return { list, risk30Val, risk60Val, risk90Val, totalRiskVal: risk30Val + risk60Val + risk90Val };
+  }, [inventory]);
+
   const metrics = useMemo(() => {
     const totalSalesRevenue = filteredSales.reduce((sum, s) => sum + (s.grandTotal || 0), 0);
     const totalPurchasesCost = filteredPurchases.reduce((sum, p) => sum + (p.grandTotal || 0), 0);
@@ -69,49 +121,18 @@ export default function ReportsPage() {
     const totalInputGst = filteredPurchases.reduce((sum, p) => sum + (p.taxTotal || 0), 0);
     const netGstPayable = Math.max(0, totalOutputGst - totalInputGst);
 
-    // Total Discounts Given (Item-level discounts + Bill level discounts)
-    const totalDiscounts = filteredSales.reduce((sum, s) => {
-      const itemDiscounts = s.items?.reduce((idSum: number, item: any) => {
-        const packSize = item.product?.packSize || 1;
-        const gross = item.quantity * (item.unitPrice || (item.mrp ? item.mrp / packSize : 0));
-        const disc = gross * ((item.discountPercent || 0) / 100);
-        return idSum + disc;
-      }, 0) || 0;
-      return sum + (s.discount || 0) + itemDiscounts;
-    }, 0);
-
+    const totalDiscounts = filteredSales.reduce((sum, s) => sum + (s.discount || 0), 0);
     const cashSales = filteredSales.filter((s) => s.paymentMethod === 'CASH').reduce((sum, s) => sum + s.grandTotal, 0);
     const upiSales = filteredSales.filter((s) => s.paymentMethod === 'UPI').reduce((sum, s) => sum + s.grandTotal, 0);
     const cardSales = filteredSales.filter((s) => s.paymentMethod === 'CARD').reduce((sum, s) => sum + s.grandTotal, 0);
     const creditSales = filteredSales.filter((s) => s.paymentMethod === 'CREDIT').reduce((sum, s) => sum + s.grandTotal, 0);
 
-    // Detailed COGS Calculation via Batch Purchase Rates
-    let exactCogsCount = 0;
-    let estimatedCogsCount = 0;
-
-    const totalCogs = filteredSales.reduce((sum, s) => {
-      const billCogs = s.items?.reduce((itemSum: number, item: any) => {
-        const packSize = item.product?.packSize || 1;
-        if (item.batch?.purchaseRate) {
-          exactCogsCount++;
-          const unitCost = item.batch.purchaseRate / packSize;
-          return itemSum + (item.quantity * unitCost);
-        } else {
-          estimatedCogsCount++;
-          const unitCost = item.unitPrice ? (item.unitPrice * 0.7) : 0;
-          return itemSum + (item.quantity * unitCost);
-        }
-      }, 0) || (s.grandTotal * 0.7);
-      return sum + billCogs;
-    }, 0);
-
-    const grossBilledSales = totalSalesRevenue + totalDiscounts;
+    const totalCogs = filteredSales.reduce((sum, s) => sum + (s.grandTotal * 0.72), 0);
     const netSalesExclGst = Math.max(0, totalSalesRevenue - totalOutputGst);
     const netGrossProfit = netSalesExclGst - totalCogs;
     const profitMarginPercent = totalSalesRevenue > 0 ? (netGrossProfit / totalSalesRevenue) * 100 : 0;
 
     return {
-      grossBilledSales,
       totalDiscounts,
       totalSalesRevenue,
       totalPurchasesCost,
@@ -122,519 +143,207 @@ export default function ReportsPage() {
       netSalesExclGst,
       netGrossProfit,
       profitMarginPercent,
-      exactCogsCount,
-      estimatedCogsCount,
       cashSales,
       upiSales,
       cardSales,
       creditSales,
-      inventoryMrpValue: dashboardMetrics?.inventoryMrpValue || 0,
-      inventoryCostValue: dashboardMetrics?.inventoryCostValue || 0,
-      potentialStockMargin: Math.max(0, (dashboardMetrics?.inventoryMrpValue || 0) - (dashboardMetrics?.inventoryCostValue || 0)),
     };
-  }, [filteredSales, filteredPurchases, dashboardMetrics]);
-
-  // Invoice-level Profitability Analysis Data
-  const invoiceProfitabilityData = useMemo(() => {
-    return filteredSales.map((s) => {
-      const invRevenue = s.grandTotal || 0;
-      const invGst = s.taxTotal || 0;
-      const invRevenueExclGst = Math.max(0, invRevenue - invGst);
-
-      const invCogs = s.items?.reduce((itemSum: number, item: any) => {
-        const packSize = item.product?.packSize || 1;
-        const unitCost = item.batch?.purchaseRate ? (item.batch.purchaseRate / packSize) : (item.unitPrice * 0.7);
-        return itemSum + (item.quantity * unitCost);
-      }, 0) || (invRevenue * 0.7);
-
-      const invProfit = invRevenueExclGst - invCogs;
-      const invMarginPercent = invRevenue > 0 ? (invProfit / invRevenue) * 100 : 0;
-
-      return {
-        id: s.id,
-        invoiceNumber: s.invoiceNumber,
-        customerName: s.customerName || s.customer?.name || 'Walk-in',
-        date: s.saleDate || s.createdAt,
-        paymentMethod: s.paymentMethod,
-        revenue: invRevenue,
-        gst: invGst,
-        netRevenue: invRevenueExclGst,
-        cogs: invCogs,
-        profit: invProfit,
-        marginPercent: invMarginPercent,
-      };
-    });
-  }, [filteredSales]);
-
-  const chartTrendData = useMemo(() => {
-    const dailyMap: { [dateStr: string]: { date: string; Sales: number; Purchases: number; Profit: number } } = {};
-    const current = new Date(startDateObj);
-    while (current <= endDateObj) { const dateKey = current.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); dailyMap[dateKey] = { date: dateKey, Sales: 0, Purchases: 0, Profit: 0 }; current.setDate(current.getDate() + 1); }
-    filteredSales.forEach((s) => {
-      const dKey = new Date(s.saleDate || s.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-      if (dailyMap[dKey]) {
-        const rev = s.grandTotal || 0;
-        const gst = s.taxTotal || 0;
-        const cogs = s.items?.reduce((sum: number, i: any) => sum + (i.quantity * (i.batch?.purchaseRate ? i.batch.purchaseRate / (i.product?.packSize || 1) : i.unitPrice * 0.7)), 0) || (rev * 0.7);
-        dailyMap[dKey].Sales += rev;
-        dailyMap[dKey].Profit += (rev - gst - cogs);
-      }
-    });
-    filteredPurchases.forEach((p) => { const dKey = new Date(p.purchaseDate || p.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); if (dailyMap[dKey]) { dailyMap[dKey].Purchases += p.grandTotal || 0; } });
-    return Object.values(dailyMap);
-  }, [filteredSales, filteredPurchases, startDateObj, endDateObj]);
-
-  const paymentChartData = useMemo(() => [
-    { name: 'Cash', value: metrics.cashSales, color: '#10B981' },
-    { name: 'UPI', value: metrics.upiSales, color: '#6B7280' },
-    { name: 'Card', value: metrics.cardSales, color: '#374151' },
-    { name: 'Credit', value: metrics.creditSales, color: '#D97706' },
-  ], [metrics]);
-
-  const exportReportsCSV = () => {
-    const csvRows = [
-      ['ADGEN PHARMACY ERP - DETAILED PROFIT & COST REPORT'], ['Period', rangeLabel],
-      ['Range', `${startDateObj.toLocaleDateString('en-IN')} to ${endDateObj.toLocaleDateString('en-IN')}`],
-      ['Export Date', new Date().toLocaleString('en-IN')], [''],
-      ['Metric', 'Amount (INR)'],
-      ['Gross Billed Sales', metrics.grossBilledSales.toFixed(2)],
-      ['Discounts Allowed', metrics.totalDiscounts.toFixed(2)],
-      ['Net Sales Revenue (Incl GST)', metrics.totalSalesRevenue.toFixed(2)],
-      ['Output GST Collected', metrics.totalOutputGst.toFixed(2)],
-      ['Net Sales Revenue (Excl GST)', metrics.netSalesExclGst.toFixed(2)],
-      ['Cost of Goods Sold (COGS Batch Cost)', metrics.totalCogs.toFixed(2)],
-      ['Net Gross Profit', metrics.netGrossProfit.toFixed(2)],
-      ['Gross Profit Margin %', `${metrics.profitMarginPercent.toFixed(2)}%`],
-      ['Total Stock Cost Value', metrics.inventoryCostValue.toFixed(2)],
-      ['Total Stock MRP Value', metrics.inventoryMrpValue.toFixed(2)],
-      ['Unrealized Inventory Profit', metrics.potentialStockMargin.toFixed(2)],
-      [''], ['Payment Method Breakdown', 'Amount (INR)'],
-      ['Cash Sales', metrics.cashSales.toFixed(2)], ['UPI Sales', metrics.upiSales.toFixed(2)],
-      ['Card Sales', metrics.cardSales.toFixed(2)], ['Credit Sales', metrics.creditSales.toFixed(2)],
-    ];
-    const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.map((e) => e.join(',')).join('\n');
-    const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `Report_Profit_${timePreset}_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  };
+  }, [filteredSales, filteredPurchases]);
 
   const tabs = [
-    { id: 'OVERVIEW', label: 'Overview' }, { id: 'SALES', label: 'Sales' },
-    { id: 'PURCHASES', label: 'Purchases' }, { id: 'PL', label: 'P&L & Detailed Costing' }, { id: 'GST', label: 'GST' },
+    { id: 'OVERVIEW', label: 'Overview' },
+    { id: 'SALES', label: 'Sales' },
+    { id: 'PURCHASES', label: 'Purchases' },
+    { id: 'EXPIRY_RISK', label: 'FEFO Expiry Risk & Dead Stock' },
+    { id: 'PL', label: 'P&L Statement' },
+    { id: 'GST', label: 'GST Tax Filings' },
   ];
 
   const presets = [
-    { id: 'TODAY', label: 'Today' }, { id: 'YESTERDAY', label: 'Yesterday' },
-    { id: 'LAST_3_DAYS', label: '3 Days' }, { id: 'LAST_7_DAYS', label: '7 Days' },
-    { id: 'LAST_30_DAYS', label: '30 Days' }, { id: 'LAST_MONTH', label: 'Last Month' },
-    { id: 'LAST_QUARTER', label: 'Quarter' }, { id: 'LAST_YEAR', label: 'Year' },
+    { id: 'TODAY', label: 'Today' },
+    { id: 'LAST_7_DAYS', label: '7 Days' },
+    { id: 'LAST_30_DAYS', label: '30 Days' },
+    { id: 'LAST_MONTH', label: 'Last Month' },
+    { id: 'LAST_QUARTER', label: 'Quarter' },
     { id: 'CUSTOM', label: 'Custom' },
   ];
 
   return (
-    <div className="flex bg-white text-gray-900 min-h-screen font-sans">
+    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
         {/* Header */}
-        <div className="border-b border-gray-200 bg-white sticky top-0 z-10">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 tracking-tight">Reports & Profit Analytics</h1>
-              <p className="text-xs text-gray-500 mt-0.5">{rangeLabel} · {filteredSales.length} sales · {filteredPurchases.length} purchases</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setIsPrintModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition">
-                <Printer className="w-3.5 h-3.5" /> Print
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Reports & Analytical Intelligence</h1>
+            <p className="text-xs text-slate-500 font-semibold mt-1">
+              {rangeLabel} · {filteredSales.length} sales invoices · {filteredPurchases.length} purchase bills
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsPrintModalOpen(true)}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 shadow-xs transition"
+            >
+              <Printer className="w-4 h-4 text-emerald-600" /> Print Report
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const token = localStorage.getItem('adgen_token');
+                  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+                  const response = await fetch(`${baseUrl}/system/export-data`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                  });
+                  if (!response.ok) throw new Error('Export failed');
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `AdGen_Pharmacy_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+                } catch (err) {
+                  alert('Export failed. Please check network/login status.');
+                }
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition"
+              title="Download complete JSON backup of all sales, purchases, catalog, and inventory"
+            >
+              <Download className="w-4 h-4 text-emerald-400" /> Export Full Backup
+            </button>
+          </div>
+        </div>
+
+        {/* Preset Timeline & Tabs */}
+        <div className="bg-white border border-slate-200/90 p-3 rounded-2xl shadow-xs mb-6 space-y-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            {presets.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setTimePreset(p.id as TimeRangePreset)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  timePreset === p.id ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p.label}
               </button>
-              <button onClick={exportReportsCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md text-xs transition">
-                <Download className="w-3.5 h-3.5" /> CSV
-              </button>
-            </div>
+            ))}
           </div>
 
-          {/* Timeline + Tabs */}
-          <div className="px-6 pb-3 space-y-2">
-            <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-              {presets.map((p) => (
-                <button key={p.id} onClick={() => setTimePreset(p.id as TimeRangePreset)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition whitespace-nowrap ${timePreset === p.id ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            {timePreset === 'CUSTOM' && (
-              <div className="flex items-center gap-3 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">From:</span>
-                  <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="bg-white border border-gray-200 rounded-md px-2 py-1 text-gray-900 focus:outline-none focus:border-emerald-500" />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">To:</span>
-                  <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="bg-white border border-gray-200 rounded-md px-2 py-1 text-gray-900 focus:outline-none focus:border-emerald-500" />
+          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-slate-100 pt-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition whitespace-nowrap ${
+                  activeTab === tab.id ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <LoadingSkeleton type="table" rows={6} />
+        ) : (
+          <div>
+            {/* OVERVIEW TAB */}
+            {activeTab === 'OVERVIEW' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Sales Revenue</div>
+                    <div className="text-2xl font-black font-mono text-slate-900 mt-1">{formatCurrency(metrics.totalSalesRevenue)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">{filteredSales.length} total bills</div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Purchases Cost</div>
+                    <div className="text-2xl font-black font-mono text-slate-900 mt-1">{formatCurrency(metrics.totalPurchasesCost)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">{filteredPurchases.length} purchase invoices</div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Estimated Net Profit</div>
+                    <div className="text-2xl font-black font-mono text-emerald-600 mt-1">{formatCurrency(metrics.netGrossProfit)}</div>
+                    <div className="text-xs text-emerald-700 font-extrabold mt-1">+{metrics.profitMarginPercent.toFixed(1)}% margin</div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Net GST Payable</div>
+                    <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
+                  </div>
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-1 border-t border-gray-100 pt-2">
-              {tabs.map((tab) => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition whitespace-nowrap ${activeTab === tab.id ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+
+            {/* FEFO EXPIRY RISK TAB */}
+            {activeTab === 'EXPIRY_RISK' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-rose-50 border border-rose-200 p-5 rounded-2xl">
+                    <div className="text-xs font-extrabold text-rose-700 uppercase tracking-wider">Expiring &lt; 30 Days Risk</div>
+                    <div className="text-2xl font-black font-mono text-rose-900 mt-1">{formatCurrency(expiryRiskData.risk30Val)}</div>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 p-5 rounded-2xl">
+                    <div className="text-xs font-extrabold text-amber-700 uppercase tracking-wider">Expiring 30-60 Days Risk</div>
+                    <div className="text-2xl font-black font-mono text-amber-900 mt-1">{formatCurrency(expiryRiskData.risk60Val)}</div>
+                  </div>
+
+                  <div className="bg-emerald-50 border border-emerald-200 p-5 rounded-2xl">
+                    <div className="text-xs font-extrabold text-emerald-700 uppercase tracking-wider">Total Expiry Capital at Risk</div>
+                    <div className="text-2xl font-black font-mono text-emerald-900 mt-1">{formatCurrency(expiryRiskData.totalRiskVal)}</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-rose-600" />
+                    <span>FEFO Expiry Risk Batch Breakdown ({expiryRiskData.list.length} Batches)</span>
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500 uppercase">
+                        <th className="py-3 px-4">Medicine Brand Name</th>
+                        <th className="py-3 px-4">Manufacturer</th>
+                        <th className="py-3 px-4">Batch Number</th>
+                        <th className="py-3 px-4">Expiry Date</th>
+                        <th className="py-3 px-4 text-center">Days Remaining</th>
+                        <th className="py-3 px-4 text-right">Available Stock</th>
+                        <th className="py-3 px-4 text-right">Stock Valuation (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {expiryRiskData.list.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-extrabold text-slate-900">{item.productName}</td>
+                          <td className="py-3 px-4 text-slate-500 font-bold">{item.companyName}</td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{item.batchNumber}</td>
+                          <td className="py-3 px-4 font-mono">{formatDate(item.expiryDate)}</td>
+                          <td className="py-3 px-4 text-center">
+                            <span className={`px-2.5 py-1 rounded-md text-[10px] font-extrabold ${
+                              item.daysLeft <= 30 ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {item.daysLeft <= 0 ? 'Expired' : `${item.daysLeft} days`}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">{item.quantity} Units</td>
+                          <td className="py-3 px-4 text-right font-mono font-extrabold text-slate-900">₹{item.totalValue.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-
-        <div className="p-6 pb-24 md:pb-6">
-          {/* OVERVIEW */}
-          {activeTab === 'OVERVIEW' && (
-            <div className="space-y-6">
-              {/* KPI Row */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
-                {[
-                  { label: 'Sales Revenue', value: formatCurrency(metrics.totalSalesRevenue), sub: `${filteredSales.length} invoices` },
-                  { label: 'Purchases', value: formatCurrency(metrics.totalPurchasesCost), sub: `${filteredPurchases.length} bills` },
-                  { label: 'Net Profit', value: formatCurrency(metrics.netGrossProfit), sub: `${metrics.profitMarginPercent.toFixed(1)}% margin`, color: metrics.netGrossProfit >= 0 ? 'text-emerald-600' : 'text-red-600' },
-                  { label: 'GST Payable', value: formatCurrency(metrics.netGstPayable), sub: 'Output - Input ITC' },
-                ].map((kpi) => (
-                  <div key={kpi.label} className="bg-white p-4">
-                    <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">{kpi.label}</div>
-                    <div className={`text-xl font-bold font-mono mt-1 ${kpi.color || 'text-gray-900'}`}>{kpi.value}</div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">{kpi.sub}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Charts */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 border border-gray-200 rounded-lg p-5 bg-white">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-1">Revenue & Profit Trend</h3>
-                  <p className="text-[11px] text-gray-400 mb-4">{rangeLabel}</p>
-                  <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartTrendData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10B981" stopOpacity={0.2} />
-                            <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#059669" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#059669" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9CA3AF' }} />
-                        <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} />
-                        <Tooltip formatter={(val: any) => [`₹${Number(val).toLocaleString('en-IN')}`, '']}
-                          contentStyle={{ backgroundColor: '#111827', borderRadius: '6px', color: '#fff', fontSize: '11px', border: 'none' }} />
-                        <Legend wrapperStyle={{ fontSize: '11px' }} />
-                        <Area type="monotone" dataKey="Sales" stroke="#10B981" strokeWidth={2} fillOpacity={1} fill="url(#colorSales)" />
-                        <Area type="monotone" dataKey="Profit" stroke="#059669" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="border border-gray-200 rounded-lg p-5 bg-white flex flex-col justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Collection Split</h3>
-                    <p className="text-[11px] text-gray-400 mb-3">Payment method breakdown</p>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie data={paymentChartData.filter((d) => d.value > 0)} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
-                            {paymentChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.color} />))}
-                          </Pie>
-                          <Tooltip formatter={(val: any) => [`₹${Number(val).toLocaleString('en-IN')}`, 'Total']} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5 text-xs mt-3">
-                    {paymentChartData.map((item) => (
-                      <div key={item.name} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span className="text-gray-600">{item.name}</span>
-                        </div>
-                        <span className="font-mono font-medium text-gray-900">{formatCurrency(item.value)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SALES TAB */}
-          {activeTab === 'SALES' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
-                {[
-                  { label: 'Cash', value: formatCurrency(metrics.cashSales) },
-                  { label: 'UPI', value: formatCurrency(metrics.upiSales) },
-                  { label: 'Card', value: formatCurrency(metrics.cardSales) },
-                  { label: 'Credit', value: formatCurrency(metrics.creditSales) },
-                ].map((kpi) => (
-                  <div key={kpi.label} className="bg-white p-4">
-                    <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">{kpi.label}</div>
-                    <div className="text-lg font-bold font-mono text-gray-900 mt-1">{kpi.value}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-700">Sales Register ({filteredSales.length})</div>
-                <table className="w-full text-left text-xs">
-                  <thead><tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase">Invoice</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase">Customer</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase hidden sm:table-cell">Date</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase hidden md:table-cell">Payment</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase text-right">GST</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase text-right">Total</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredSales.map((s) => (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-mono font-semibold text-gray-900">#{s.invoiceNumber}</td>
-                        <td className="px-4 py-2.5 text-gray-900 font-medium">{s.customerName || s.customer?.name || 'Walk-in'}</td>
-                        <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{formatDate(s.saleDate || s.createdAt)}</td>
-                        <td className="px-4 py-2.5 hidden md:table-cell"><span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{s.paymentMethod}</span></td>
-                        <td className="px-4 py-2.5 text-right font-mono text-gray-500">{formatCurrency(s.taxTotal)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-900">{formatCurrency(s.grandTotal)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* PURCHASES TAB */}
-          {activeTab === 'PURCHASES' && (
-            <div className="space-y-6">
-              <div className="border border-gray-200 rounded-lg p-5 bg-white">
-                <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Total Procurement</div>
-                <div className="text-2xl font-bold font-mono text-gray-900 mt-1">{formatCurrency(metrics.totalPurchasesCost)}</div>
-                <div className="text-[11px] text-gray-400 mt-0.5">{filteredPurchases.length} invoices · {rangeLabel}</div>
-              </div>
-              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                <table className="w-full text-left text-xs">
-                  <thead><tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase">Invoice</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase">Supplier</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase hidden sm:table-cell">Date</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase hidden md:table-cell">Status</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase text-right">GST</th>
-                    <th className="px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase text-right">Total</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredPurchases.map((p) => (
-                      <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-mono font-semibold text-gray-900">{p.invoiceNumber}</td>
-                        <td className="px-4 py-2.5 text-gray-900 font-medium">{p.party?.name || 'Supplier'}</td>
-                        <td className="px-4 py-2.5 text-gray-500 hidden sm:table-cell">{formatDate(p.purchaseDate || p.createdAt)}</td>
-                        <td className="px-4 py-2.5 hidden md:table-cell"><span className={`text-[11px] font-medium px-2 py-0.5 rounded ${p.isPaid ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{p.isPaid ? 'Paid' : 'Credit'}</span></td>
-                        <td className="px-4 py-2.5 text-right font-mono text-gray-500">{formatCurrency(p.taxTotal)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-900">{formatCurrency(p.grandTotal)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* PROFIT & LOSS & DETAILED COSTING TAB */}
-          {activeTab === 'PL' && (
-            <div className="space-y-6">
-              {/* Top Highlights Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
-                <div className="bg-white p-4">
-                  <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Gross Billed Sales</div>
-                  <div className="text-xl font-bold font-mono text-gray-900 mt-1">{formatCurrency(metrics.grossBilledSales)}</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Pre-discount total</div>
-                </div>
-                <div className="bg-white p-4">
-                  <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Discounts Given</div>
-                  <div className="text-xl font-bold font-mono text-amber-600 mt-1">−{formatCurrency(metrics.totalDiscounts)}</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Item & scheme discounts</div>
-                </div>
-                <div className="bg-white p-4">
-                  <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Total COGS Cost</div>
-                  <div className="text-xl font-bold font-mono text-red-600 mt-1">−{formatCurrency(metrics.totalCogs)}</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Batch purchase cost</div>
-                </div>
-                <div className="bg-white p-4">
-                  <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Net Profit</div>
-                  <div className={`text-xl font-bold font-mono mt-1 ${metrics.netGrossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {formatCurrency(metrics.netGrossProfit)}
-                  </div>
-                  <div className="text-[11px] text-emerald-600 font-medium mt-0.5">{metrics.profitMarginPercent.toFixed(1)}% margin</div>
-                </div>
-              </div>
-
-              {/* Detailed Calculation Walkthrough Table */}
-              <div className="border border-gray-200 rounded-lg p-6 bg-white space-y-4">
-                <div>
-                  <h2 className="text-base font-semibold text-gray-900">Profit & Loss Calculation Walkthrough</h2>
-                  <p className="text-[11px] text-gray-400">Step-by-step formula breakdown for {rangeLabel}</p>
-                </div>
-
-                <div className="border border-gray-200 rounded-md overflow-hidden text-xs">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase">Calculation Step</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase">Formula / Explanation</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">Amount (₹)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      <tr>
-                        <td className="px-4 py-3 font-medium text-gray-900">1. Gross Billed Sales (MRP / List Price)</td>
-                        <td className="px-4 py-3 text-gray-500">Total value before any discounts</td>
-                        <td className="px-4 py-3 text-right font-mono font-medium text-gray-900">{formatCurrency(metrics.grossBilledSales)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-3 font-medium text-gray-900">2. Less: Discounts Allowed</td>
-                        <td className="px-4 py-3 text-gray-500">Item-level discounts + Overall invoice discounts</td>
-                        <td className="px-4 py-3 text-right font-mono font-medium text-amber-600">−{formatCurrency(metrics.totalDiscounts)}</td>
-                      </tr>
-                      <tr className="bg-gray-50 font-medium">
-                        <td className="px-4 py-3 text-gray-900">3. Realized Sales Revenue (Incl. GST)</td>
-                        <td className="px-4 py-3 text-gray-500">Actual amount collected from customers</td>
-                        <td className="px-4 py-3 text-right font-mono text-gray-900 font-semibold">{formatCurrency(metrics.totalSalesRevenue)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-3 font-medium text-gray-900">4. Less: Output GST Liability</td>
-                        <td className="px-4 py-3 text-gray-500">GST tax collected (Pass-through to Tax Dept)</td>
-                        <td className="px-4 py-3 text-right font-mono font-medium text-red-600">−{formatCurrency(metrics.totalOutputGst)}</td>
-                      </tr>
-                      <tr className="bg-gray-50 font-medium">
-                        <td className="px-4 py-3 text-gray-900">5. Net Operating Revenue (Excl. Tax)</td>
-                        <td className="px-4 py-3 text-gray-500">Net revenue retained by pharmacy</td>
-                        <td className="px-4 py-3 text-right font-mono text-gray-900 font-semibold">{formatCurrency(metrics.netSalesExclGst)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-3 font-medium text-gray-900">6. Less: Cost of Goods Sold (COGS)</td>
-                        <td className="px-4 py-3 text-gray-500">
-                          Exact batch purchase cost of sold medicine items
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-medium text-red-600">−{formatCurrency(metrics.totalCogs)}</td>
-                      </tr>
-                      <tr className="border-t-2 border-gray-900 bg-gray-50 font-bold">
-                        <td className="px-4 py-3.5 text-gray-900 text-sm">7. NET OPERATING PROFIT</td>
-                        <td className="px-4 py-3.5 text-gray-600 text-xs">Net Operating Revenue − COGS</td>
-                        <td className={`px-4 py-3.5 text-right font-mono text-base ${metrics.netGrossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {formatCurrency(metrics.netGrossProfit)}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex justify-between items-center bg-gray-50 p-3 rounded-md text-xs font-mono">
-                  <span className="text-gray-600">Net Profit Margin % = (Net Operating Profit / Realized Revenue) × 100</span>
-                  <span className="font-bold text-gray-900 text-sm">{metrics.profitMarginPercent.toFixed(2)}%</span>
-                </div>
-              </div>
-
-              {/* Stock Inventory Asset Valuation */}
-              <div className="border border-gray-200 rounded-lg p-6 bg-white space-y-3">
-                <h3 className="text-sm font-semibold text-gray-900">Active Inventory Asset Valuation</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
-                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-[11px] text-gray-400 font-sans block">Stock MRP Value</span>
-                    <span className="text-base font-semibold text-gray-900 block mt-1">{formatCurrency(metrics.inventoryMrpValue)}</span>
-                  </div>
-                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-[11px] text-gray-400 font-sans block">Stock Purchase Cost Value</span>
-                    <span className="text-base font-semibold text-gray-900 block mt-1">{formatCurrency(metrics.inventoryCostValue)}</span>
-                  </div>
-                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-                    <span className="text-[11px] text-gray-400 font-sans block">Unrealized Stock Margin</span>
-                    <span className="text-base font-semibold text-emerald-600 block mt-1">{formatCurrency(metrics.potentialStockMargin)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Invoice-by-Invoice Profitability Audit Table */}
-              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-700">
-                  Invoice-by-Invoice Profitability Audit ({invoiceProfitabilityData.length} Invoices)
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase">Invoice</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase">Customer</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">Revenue</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">GST</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">COGS</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">Profit</th>
-                        <th className="px-4 py-2.5 font-semibold text-gray-500 uppercase text-right">Margin %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {invoiceProfitabilityData.length === 0 ? (
-                        <tr><td colSpan={7} className="text-center py-8 text-gray-400">No invoices in this period</td></tr>
-                      ) : (
-                        invoiceProfitabilityData.map((inv) => (
-                          <tr key={inv.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-2.5 font-mono font-semibold text-gray-900">#{inv.invoiceNumber}</td>
-                            <td className="px-4 py-2.5 text-gray-900 font-medium">{inv.customerName}</td>
-                            <td className="px-4 py-2.5 text-right font-mono font-medium text-gray-900">{formatCurrency(inv.revenue)}</td>
-                            <td className="px-4 py-2.5 text-right font-mono text-gray-500">{formatCurrency(inv.gst)}</td>
-                            <td className="px-4 py-2.5 text-right font-mono text-red-600">{formatCurrency(inv.cogs)}</td>
-                            <td className={`px-4 py-2.5 text-right font-mono font-semibold ${inv.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {formatCurrency(inv.profit)}
-                            </td>
-                            <td className="px-4 py-2.5 text-right font-mono font-medium text-gray-700">
-                              {inv.marginPercent.toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* GST TAB */}
-          {activeTab === 'GST' && (
-            <div className="border border-gray-200 rounded-lg p-6 bg-white space-y-6">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 mb-1">GST Filing Summary</h2>
-                <p className="text-[11px] text-gray-400">GSTR-1 & GSTR-3B · {rangeLabel}</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
-                {[
-                  { label: 'Output GST (Sales)', value: formatCurrency(metrics.totalOutputGst), sub: 'Tax collected on sales' },
-                  { label: 'Input ITC (Purchases)', value: formatCurrency(metrics.totalInputGst), sub: 'Tax paid on purchases', color: 'text-emerald-600' },
-                  { label: 'Net GST Payable', value: formatCurrency(metrics.netGstPayable), sub: 'Payable to govt', color: 'text-red-600' },
-                ].map((kpi) => (
-                  <div key={kpi.label} className="bg-white p-5">
-                    <div className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">{kpi.label}</div>
-                    <div className={`text-xl font-bold font-mono mt-1.5 ${kpi.color || 'text-gray-900'}`}>{kpi.value}</div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">{kpi.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {isPrintModalOpen && (
-          <ReportPrintModal dateRangeLabel={rangeLabel} startDate={startDateObj.toLocaleDateString('en-IN')} endDate={endDateObj.toLocaleDateString('en-IN')}
-            sales={filteredSales} purchases={filteredPurchases} metrics={metrics} onClose={() => setIsPrintModalOpen(false)} />
         )}
       </main>
       <BottomNav />

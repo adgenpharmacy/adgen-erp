@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
+import { useAuth } from './AuthContext';
 
 interface ErpDataContextType {
   products: any[];
@@ -29,6 +30,8 @@ const GLOBAL_CACHE_KEY = 'adgen_global_erp_cache_v1';
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 mins cache TTL
 
 export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => {
+  const { user } = useAuth();
+
   const getInitialCache = () => {
     if (typeof window !== 'undefined') {
       try {
@@ -52,7 +55,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
   const [purchases, setPurchases] = useState<any[]>(initialCache?.purchases || []);
   const [customers, setCustomers] = useState<any[]>(initialCache?.customers || []);
   const [parties, setParties] = useState<any[]>(initialCache?.parties || []);
-  const [loading, setLoading] = useState<boolean>(!initialCache);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -65,7 +68,12 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
   }, []);
 
   const fetchAllData = React.useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
+      setLoading(true);
       console.log('⚡ [Anshu Sync Engine] Synchronizing Live Pharmacy Data...');
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes] = await Promise.all([
         api.get('/products').catch(() => ({ data: [] })),
@@ -113,11 +121,21 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       console.error('ErpDataProvider fetch error:', e);
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+    if (user) {
+      fetchAllData();
+    } else {
+      setProducts([]);
+      setInventory([]);
+      setSales([]);
+      setPurchases([]);
+      setCustomers([]);
+      setParties([]);
+      setLoading(false);
+    }
+  }, [user, fetchAllData]);
 
   return (
     <ErpDataContext.Provider

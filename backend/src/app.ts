@@ -29,6 +29,8 @@ app.use(express.json());
 app.use(morgan('dev'));
 app.use(requestLogger);
 
+import returnsRoutes from './routes/returns.routes';
+
 // API Routes
 app.use('/api/products', productsRoutes);
 app.use('/api/inventory', inventoryRoutes);
@@ -36,6 +38,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/parties', partiesRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/purchases', purchasesRoutes);
+app.use('/api/returns', returnsRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/users', usersRoutes);

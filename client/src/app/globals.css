@@ -1,16 +1,13 @@
 @import "tailwindcss";
 
 /* ============================================================
-   AdGen Pharmacy ERP — Modern Typography & Visual System
-   
-   Designed for effortless readability, smooth visual flow, 
-   and comfortable viewing across long pharmacy shifts.
+   AdGen Pharmacy ERP — Linear/Stripe Modern Design System
    ============================================================ */
 
 @layer base {
   html {
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 14.5px;
+    line-height: 1.5;
     letter-spacing: -0.01em;
   }
 
@@ -20,7 +17,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color: #0f172a;
-    background-color: #f4f8f6;
+    background-color: #f8fafc;
   }
   
   code, kbd, samp, pre, .font-mono {
@@ -28,46 +25,21 @@
     font-feature-settings: "tnum";
   }
 
-  /* Tabular numerals globally for data surfaces */
   table, [data-metric], .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Improved table typography & row height */
   th {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     line-height: 1rem;
     font-weight: 700;
-    letter-spacing: 0.05em;
-    color: #475569;
+    letter-spacing: 0.04em;
+    color: #64748b;
   }
 
   td {
-    font-size: 0.875rem;
-    line-height: 1.25rem;
-  }
-
-  h1 {
-    font-size: 1.75rem;
-    line-height: 2.25rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: #0f172a;
-  }
-
-  h2 {
-    font-size: 1.35rem;
-    line-height: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: #0f172a;
-  }
-
-  h3 {
-    font-size: 1.1rem;
-    line-height: 1.5rem;
-    font-weight: 700;
-    color: #0f172a;
+    font-size: 0.84rem;
+    line-height: 1.2rem;
   }
 }
 
@@ -87,10 +59,36 @@
   --warning: #d97706;
 }
 
+/* ── Urgency Border Stripes ─────────────────── */
+.stripe-rose {
+  border-left: 4px solid #f43f5e !important;
+}
+
+.stripe-amber {
+  border-left: 4px solid #f59e0b !important;
+}
+
+.stripe-yellow {
+  border-left: 4px solid #eab308 !important;
+}
+
+.stripe-emerald {
+  border-left: 4px solid #10b981 !important;
+}
+
+/* ── Linear Row Hover Elevation ─────────────── */
+.linear-row {
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.linear-row:hover {
+  background-color: #f1f5f9 !important;
+}
+
 /* ── Scrollbar ──────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -129,7 +127,7 @@
   }
 }
 
-/* ── Receipt Paper (billing) ─────────────── */
+/* ── Receipt Paper ───────────────────────── */
 .receipt-paper {
   background-color: #fafafa;
   background-image: radial-gradient(#e2e8f0 0.75px, transparent 0.75px);
@@ -137,7 +135,6 @@
   border: 1px dashed #cbd5e1;
 }
 
-/* ── Emerald Header (billing print) ──────── */
 .emerald-gradient-header {
   background: linear-gradient(135deg, #064E3B 0%, #047857 50%, #0D9488 100%);
 }

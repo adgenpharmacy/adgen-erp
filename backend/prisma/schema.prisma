@@ -135,71 +135,78 @@ model InventoryBatch {
 }
 
 model PurchaseBill {
-  id            String             @id @default(uuid())
-  invoiceNumber String
-  partyId       String
-  purchaseDate  DateTime           @default(now())
-  subtotal      Float
-  taxTotal      Float
-  grandTotal    Float
-  isPaid        Boolean            @default(false)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  batches       InventoryBatch[]
-  ledgerEntries LedgerEntry[]
-  party         Party              @relation(fields: [partyId], references: [id])
-  items         PurchaseBillItem[]
+  id              String             @id @default(uuid())
+  invoiceNumber   String
+  partyId         String
+  purchaseDate    DateTime           @default(now())
+  subtotal        Float
+  taxTotal        Float
+  grandTotal      Float
+  isPaid          Boolean            @default(false)
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  batches         InventoryBatch[]
+  ledgerEntries   LedgerEntry[]
+  party           Party              @relation(fields: [partyId], references: [id])
+  items           PurchaseBillItem[]
+  purchaseReturns PurchaseReturn[]
 
   @@index([createdAt])
   @@map("purchase_bills")
 }
 
 model PurchaseBillItem {
-  id             String       @id @default(uuid())
-  purchaseBillId String
-  productId      String
-  batchNumber    String
-  expiryDate     DateTime
-  quantity       Float
-  freeQuantity   Float        @default(0)
-  purchaseRate   Float
-  mrp            Float
-  taxPercent     Float        @default(0)
-  discountPercent Float       @default(0)
-  totalAmount    Float
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  product        Product      @relation(fields: [productId], references: [id])
-  purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
+  id              String       @id @default(uuid())
+  purchaseBillId  String
+  productId       String
+  batchNumber     String
+  expiryDate      DateTime
+  quantity        Float
+  freeQuantity    Float        @default(0)
+  purchaseRate    Float
+  mrp             Float
+  taxPercent      Float        @default(0)
+  discountPercent Float        @default(0)
+  totalAmount     Float
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  product         Product      @relation(fields: [productId], references: [id])
+  purchaseBill    PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
 
   @@map("purchase_bill_items")
 }
 
 model SalesBill {
-  id            String          @id @default(uuid())
-  invoiceNumber String?
-  customerId    String?
-  customerName  String?         @default("Walk-in Customer")
-  customerPhone String?
-  doctorName    String?
-  notes         String?
-  userId        String?
-  subtotal      Float           @default(0)
-  taxTotal      Float           @default(0)
-  discount      Float           @default(0)
-  grandTotal    Float
-  amountPaid    Float           @default(0)
-  paymentMethod String          @default("CASH")
-  isPaid        Boolean         @default(true)
-  isSettled     Boolean         @default(true)
-  isRoundOff    Boolean         @default(true)
-  roundOffAmount Float          @default(0)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  ledgerEntries LedgerEntry[]
-  customer      Customer?       @relation(fields: [customerId], references: [id])
-  user          User?           @relation(fields: [userId], references: [id])
-  items         SalesBillItem[]
+  id             String          @id @default(uuid())
+  invoiceNumber  String?
+  customerId     String?
+  customerName   String?         @default("Walk-in Customer")
+  customerPhone  String?
+  doctorName     String?
+  notes          String?
+  userId         String?
+  subtotal       Float           @default(0)
+  taxTotal       Float           @default(0)
+  discount       Float           @default(0)
+  grandTotal     Float
+  amountPaid     Float           @default(0)
+  cashAmount     Float           @default(0)
+  upiAmount      Float           @default(0)
+  cardAmount     Float           @default(0)
+  creditAmount   Float           @default(0)
+  paymentMethod  String          @default("CASH")
+  isPaid         Boolean         @default(true)
+  isSettled      Boolean         @default(true)
+  isRoundOff     Boolean         @default(true)
+  roundOffAmount Float           @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  ledgerEntries  LedgerEntry[]
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  user           User?           @relation(fields: [userId], references: [id])
+  items          SalesBillItem[]
+  salesReturns   SalesReturn[]
 
   @@index([createdAt])
   @@map("sales_bills")
@@ -246,5 +253,70 @@ model LedgerEntry {
   @@index([partyId])
   @@index([customerId])
   @@map("ledger_entries")
+}
+
+model SalesReturn {
+  id                String            @id @default(uuid())
+  returnNumber      String
+  salesBillId       String?
+  customerId        String?
+  totalReturnAmount Float
+  refundMethod      String            @default("CASH")
+  notes             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  salesBill         SalesBill?        @relation(fields: [salesBillId], references: [id])
+  items             SalesReturnItem[]
+
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id            String      @id @default(uuid())
+  salesReturnId String
+  productId     String
+  batchNumber   String?
+  quantity      Float
+  unitPrice     Float
+  totalAmount   Float
+  condition     String      @default("RESTOCK") // RESTOCK or DAMAGED
+  reason        String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+
+  @@map("sales_return_items")
+}
+
+model PurchaseReturn {
+  id                String               @id @default(uuid())
+  returnNumber      String
+  purchaseBillId    String?
+  partyId           String?
+  totalReturnAmount Float
+  refundMethod      String               @default("DEBIT_NOTE")
+  notes             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  purchaseBill      PurchaseBill?        @relation(fields: [purchaseBillId], references: [id])
+  items             PurchaseReturnItem[]
+
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id               String         @id @default(uuid())
+  purchaseReturnId String
+  productId        String
+  batchNumber      String?
+  quantity         Float
+  purchaseRate     Float
+  totalAmount      Float
+  reason           String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_return_items")
 }
 

@@ -25,3 +25,30 @@ export function formatCurrency(amount: number | null | undefined): string {
     maximumFractionDigits: 2,
   }).format(amount);
 }
+
+export function formatPackQuantity(
+  quantity: number | null | undefined,
+  packSize?: number | null,
+  packUnit?: string | null,
+  contentUnit?: string | null
+): string {
+  const qty = Math.max(0, Number(quantity) || 0);
+  const pack = Math.max(1, Number(packSize) || 1);
+  const pUnit = packUnit || 'Strip';
+  const cUnit = contentUnit || 'Tablet';
+
+  if (pack <= 1) {
+    return `${qty} ${qty === 1 ? 'Unit' : 'Units'}`;
+  }
+
+  const strips = Math.floor(qty / pack);
+  const loose = Math.round(qty % pack);
+
+  if (strips > 0 && loose > 0) {
+    return `${strips} ${strips === 1 ? pUnit : pUnit + 's'} + ${loose} Loose`;
+  }
+  if (strips > 0) {
+    return `${strips} ${strips === 1 ? pUnit : pUnit + 's'} (${qty} ${cUnit}s)`;
+  }
+  return `${loose} Loose ${loose === 1 ? cUnit : cUnit + 's'}`;
+}

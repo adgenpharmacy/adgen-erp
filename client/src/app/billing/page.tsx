@@ -47,7 +47,11 @@ function NewSalePageContent() {
   const [address, setAddress] = useState('');
 
   // Payment Method State
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'CREDIT'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'SPLIT'>('CASH');
+  const [cashAmount, setCashAmount] = useState<number>(0);
+  const [upiAmount, setUpiAmount] = useState<number>(0);
+  const [cardAmount, setCardAmount] = useState<number>(0);
+  const [creditAmount, setCreditAmount] = useState<number>(0);
 
   // Discount & Round Off State
   const [schemeDiscountType, setSchemeDiscountType] = useState<'amount' | 'percent'>('percent');
@@ -315,6 +319,10 @@ function NewSalePageContent() {
         doctorName: doctorName.trim() || null,
         notes: address.trim() || null,
         paymentMethod,
+        cashAmount: paymentMethod === 'SPLIT' ? cashAmount : (paymentMethod === 'CASH' ? grandTotal : 0),
+        upiAmount: paymentMethod === 'SPLIT' ? upiAmount : (paymentMethod === 'UPI' ? grandTotal : 0),
+        cardAmount: paymentMethod === 'SPLIT' ? cardAmount : (paymentMethod === 'CARD' ? grandTotal : 0),
+        creditAmount: paymentMethod === 'SPLIT' ? creditAmount : (paymentMethod === 'CREDIT' ? grandTotal : 0),
         discount: schemeDiscountAmount,
         isRoundOff,
         roundOffAmount: grandTotal - rawGrandTotal,
@@ -431,12 +439,13 @@ function NewSalePageContent() {
               {/* Payment Mode */}
               <div>
                 <label className="text-xs text-slate-500 block mb-1.5 font-medium">Payment Mode</label>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-5 gap-1">
                   {[
                     { id: 'CASH', label: 'Cash', icon: Banknote },
                     { id: 'UPI', label: 'UPI', icon: Smartphone },
                     { id: 'CARD', label: 'Card', icon: CreditCard },
                     { id: 'CREDIT', label: 'Credit', icon: Clock },
+                    { id: 'SPLIT', label: 'Split', icon: Plus },
                   ].map((m) => (
                     <button
                       key={m.id}
@@ -451,6 +460,80 @@ function NewSalePageContent() {
                     </button>
                   ))}
                 </div>
+
+                {/* Split Payment Breakdown Inputs */}
+                {paymentMethod === 'SPLIT' && (
+                  <div className="mt-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                    <div className="font-extrabold text-emerald-900 text-[11px] uppercase tracking-wider">
+                      Multi-Mode Split Breakdown
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Cash Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={cashAmount || ''}
+                          onChange={(e) => setCashAmount(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">UPI Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={upiAmount || ''}
+                          onChange={(e) => setUpiAmount(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Card Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={cardAmount || ''}
+                          onChange={(e) => setCardAmount(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Credit Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={creditAmount || ''}
+                          onChange={(e) => setCreditAmount(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-1.5 border-t border-emerald-200 flex justify-between items-center text-[11px] font-bold">
+                      <span>Total Allocated:</span>
+                      <span className={`font-mono ${
+                        (cashAmount + upiAmount + cardAmount + creditAmount) === grandTotal
+                          ? 'text-emerald-700'
+                          : 'text-amber-700'
+                      }`}>
+                        ₹{(cashAmount + upiAmount + cardAmount + creditAmount).toFixed(2)} / ₹{grandTotal.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

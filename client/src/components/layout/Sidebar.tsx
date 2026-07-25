@@ -15,15 +15,17 @@ import {
   UserCheck,
   Boxes,
   LogOut,
-  Search
+  Search,
+  RotateCcw,
+  Download
 } from 'lucide-react';
-import CommandPalette from '@/components/common/CommandPalette';
 import UpdateNotifier from '@/components/layout/UpdateNotifier';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Sales', href: '/sales', icon: Receipt },
   { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
+  { name: 'Returns', href: '/returns', icon: RotateCcw },
   { name: 'Products', href: '/products', icon: Boxes },
   { name: 'Inventory', href: '/inventory', icon: Package },
   { name: 'Customers', href: '/customers', icon: Users },
@@ -48,8 +50,8 @@ export default function Sidebar() {
               <h1 className="font-extrabold text-slate-900 text-base tracking-tight leading-none">
                 AdGen <span className="text-emerald-600 font-mono text-xs font-bold ml-0.5">ERP</span>
               </h1>
-              <span className="text-[11px] text-slate-500 font-bold tracking-wider uppercase leading-none block mt-1" title="Crafted with excellence by Anshu — Anshu says hi! 👋">
-                Pharmacy • By Anshu
+              <span className="text-[11px] text-slate-500 font-bold tracking-wider uppercase leading-none block mt-1">
+                Clinical & POS Suite
               </span>
             </div>
           </div>
@@ -90,15 +92,6 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* Search hint */}
-        <div className="px-3.5 pt-3.5 pb-1">
-          <div className="flex items-center gap-2.5 px-3 py-2 text-slate-500 text-xs bg-slate-50 border border-slate-200/90 rounded-xl cursor-pointer hover:border-slate-300 transition">
-            <Search className="w-4 h-4 text-slate-400" />
-            <span className="flex-1 font-semibold text-slate-500">Search...</span>
-            <kbd className="text-[10px] font-mono font-bold bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-400">⌘K</kbd>
-          </div>
-        </div>
-
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-1">
           {navigation.map((item) => {
@@ -119,10 +112,38 @@ export default function Sidebar() {
               </Link>
             );
           })}
+
+          <button
+            onClick={async () => {
+              try {
+                const token = localStorage.getItem('adgen_token');
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+                const response = await fetch(`${baseUrl}/system/export-data`, {
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!response.ok) throw new Error('Export failed');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `AdGen_Pharmacy_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                alert('Export failed. Please check network/login status.');
+              }
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-slate-600 hover:bg-slate-900 hover:text-white group mt-2"
+            title="Download complete JSON backup of all ERP data"
+          >
+            <Download className="w-4.5 h-4.5 shrink-0 text-slate-400 group-hover:text-emerald-400" />
+            <span>Export Data</span>
+          </button>
         </nav>
       </aside>
 
-      <CommandPalette />
       <UpdateNotifier />
     </>
   );

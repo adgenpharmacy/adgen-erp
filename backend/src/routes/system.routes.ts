@@ -66,4 +66,53 @@ router.post('/apply-update', authenticate, async (req: AuthenticatedRequest, res
   }
 });
 
+// GET /api/system/export-data — Secure Full Database JSON Export
+router.get('/export-data', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { prisma } = await import('../config/prisma');
+
+    const [parties, products, inventoryBatches, purchaseBills, salesBills, customers, ledgerEntries] = await Promise.all([
+      prisma.party.findMany(),
+      prisma.product.findMany(),
+      prisma.inventoryBatch.findMany({ include: { product: true } }),
+      prisma.purchaseBill.findMany({ include: { party: true, items: { include: { product: true } } } }),
+      prisma.salesBill.findMany({ include: { customer: true, items: { include: { product: true, batch: true } } } }),
+      prisma.customer.findMany(),
+      prisma.ledgerEntry.findMany(),
+    ]);
+
+    const exportPayload = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: req.user?.email || 'Authenticated User',
+      system: 'AdGen Pharmacy ERP Engine',
+      version: '1.0.0',
+      recordCounts: {
+        parties: parties.length,
+        products: products.length,
+        inventoryBatches: inventoryBatches.length,
+        purchaseBills: purchaseBills.length,
+        salesBills: salesBills.length,
+        customers: customers.length,
+        ledgerEntries: ledgerEntries.length,
+      },
+      data: {
+        parties,
+        products,
+        inventoryBatches,
+        purchaseBills,
+        salesBills,
+        customers,
+        ledgerEntries,
+      },
+    };
+
+    const fileName = `AdGen_Pharmacy_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(JSON.stringify(exportPayload, null, 2));
+  } catch (e: any) {
+    res.status(500).json({ error: 'Export failed: ' + e.message });
+  }
+});
+
 export default router;

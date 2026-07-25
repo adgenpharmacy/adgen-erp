@@ -9,7 +9,7 @@ const router = Router();
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const bills = await prisma.purchaseBill.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ purchaseDate: 'desc' }, { createdAt: 'desc' }],
       include: {
         party: true,
         items: {
@@ -192,17 +192,19 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { invoiceNumber, partyId, purchaseDate, isPaid, items } = req.body;
+    const { invoiceNumber, partyId, purchaseDate, isPaid, grandTotal, notes, items } = req.body;
 
     const updated = await prisma.$transaction(async (tx) => {
       // 1. Update purchase bill header
       const bill = await tx.purchaseBill.update({
         where: { id },
         data: {
-          invoiceNumber,
-          partyId,
-          isPaid: Boolean(isPaid),
+          invoiceNumber: invoiceNumber !== undefined ? invoiceNumber : undefined,
+          partyId: partyId !== undefined ? partyId : undefined,
+          isPaid: isPaid !== undefined ? Boolean(isPaid) : undefined,
           purchaseDate: purchaseDate ? new Date(purchaseDate) : undefined,
+          grandTotal: grandTotal !== undefined ? parseFloat(grandTotal) : undefined,
+          notes: notes !== undefined ? notes : undefined,
         },
       });
 

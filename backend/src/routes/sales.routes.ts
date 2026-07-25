@@ -103,8 +103,13 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
          }
       }
 
-      const isCredit = paymentMethod === 'CREDIT';
-      const amountPaid = isCredit ? 0 : grandTotal;
+      const cAmt = parseFloat(req.body.cashAmount || (paymentMethod === 'CASH' ? grandTotal : 0));
+      const uAmt = parseFloat(req.body.upiAmount || (paymentMethod === 'UPI' ? grandTotal : 0));
+      const cardAmt = parseFloat(req.body.cardAmount || (paymentMethod === 'CARD' ? grandTotal : 0));
+      const credAmt = parseFloat(req.body.creditAmount || (paymentMethod === 'CREDIT' ? grandTotal : 0));
+
+      const isCredit = paymentMethod === 'CREDIT' || (paymentMethod === 'SPLIT' && credAmt > 0);
+      const amountPaid = paymentMethod === 'SPLIT' ? (cAmt + uAmt + cardAmt) : (isCredit ? 0 : grandTotal);
 
       let cleanCustName = (customerName || '').trim();
       if (!cleanCustName || cleanCustName === '?' || cleanCustName.length < 2) {
@@ -126,6 +131,10 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           roundOffAmount: rOffAmt,
           userId,
           paymentMethod,
+          cashAmount: cAmt,
+          upiAmount: uAmt,
+          cardAmount: cardAmt,
+          creditAmount: credAmt,
           subtotal,
           taxTotal,
           discount: discountAmount,
@@ -335,12 +344,13 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         where: { id },
         data: {
           customerId: customerId || null,
-          customerName,
-          customerPhone,
-          doctorName,
-          notes,
-          paymentMethod,
-          isRoundOff: Boolean(isRoundOff),
+          customerName: customerName !== undefined ? customerName : undefined,
+          customerPhone: customerPhone !== undefined ? customerPhone : undefined,
+          doctorName: doctorName !== undefined ? doctorName : undefined,
+          notes: notes !== undefined ? notes : undefined,
+          paymentMethod: paymentMethod !== undefined ? paymentMethod : undefined,
+          grandTotal: req.body.grandTotal !== undefined ? parseFloat(req.body.grandTotal) : undefined,
+          isRoundOff: isRoundOff !== undefined ? Boolean(isRoundOff) : undefined,
         },
         include: { customer: true, items: true },
       });
