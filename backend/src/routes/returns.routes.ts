@@ -41,6 +41,22 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
     }, 0);
 
     const salesReturn = await prisma.$transaction(async (tx) => {
+      // Validate return item quantities if linked to a sales bill
+      if (salesBillId) {
+        const originalBill = await tx.salesBill.findUnique({
+          where: { id: salesBillId },
+          include: { items: true },
+        });
+        if (originalBill) {
+          for (const retItem of items) {
+            const soldItem = originalBill.items.find((i: any) => i.productId === retItem.productId);
+            if (soldItem && parseFloat(retItem.quantity) > soldItem.quantity) {
+              throw new Error(`Return quantity (${retItem.quantity}) cannot exceed original invoice quantity (${soldItem.quantity})`);
+            }
+          }
+        }
+      }
+
       const record = await tx.salesReturn.create({
         data: {
           returnNumber,
@@ -161,6 +177,27 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
     }, 0);
 
     const purchaseReturn = await prisma.$transaction(async (tx) => {
+      // Validate purchase return quantities if linked to a purchase bill
+      if (purchaseBillId) {
+        const originalBill = await tx.purchaseBill.findUnique({
+          where: { id: purchaseBillId },
+          include: { items: true },
+        });
+        if (originalBill) {
+          for (const retItem of items) {
+            const purItem = originalBill.items.find((i: any) => i.productId === retItem.productId);
+            if (purItem) {
+              const prod = await tx.product.findUnique({ where: { id: retItem.productId } });
+              const packSize = prod?.packSize || 1;
+              const totalPurchasedUnits = (purItem.quantity + (purItem.freeQuantity || 0)) * packSize;
+              if (parseFloat(retItem.quantity) > totalPurchasedUnits) {
+                throw new Error(`Purchase return quantity (${retItem.quantity}) cannot exceed total purchased units (${totalPurchasedUnits})`);
+              }
+            }
+          }
+        }
+      }
+
       const record = await tx.purchaseReturn.create({
         data: {
           returnNumber,

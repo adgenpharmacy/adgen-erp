@@ -360,10 +360,16 @@ function NewSalePageContent() {
       if (editId) {
         await api.put(`/sales/${editId}`, payload);
         alert('Sales invoice updated successfully!');
+        setItems([]);
         router.push('/sales');
       } else {
         const res = await api.post('/sales', payload);
         invalidateCatalogCache();
+        setItems([]);
+        setCustomerName('');
+        setCustomerPhone('');
+        setDoctorName('');
+        setAddress('');
         setCreatedBillForPrint(res.data);
       }
     } catch (err: any) {

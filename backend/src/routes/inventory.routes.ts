@@ -115,4 +115,75 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
+// PUT /api/inventory/adjust — Manual Stock Adjustment & Reconciliation
+router.put('/adjust', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { batchId, productId, newQuantity, adjustmentType, reason } = req.body;
+
+    if (!batchId && !productId) {
+      return res.status(400).json({ error: 'batchId or productId is required' });
+    }
+
+    const updatedBatch = await prisma.$transaction(async (tx) => {
+      let targetBatch = null;
+
+      if (batchId) {
+        targetBatch = await tx.inventoryBatch.findUnique({
+          where: { id: batchId },
+          include: { product: true },
+        });
+      } else if (productId) {
+        targetBatch = await tx.inventoryBatch.findFirst({
+          where: { productId },
+          orderBy: { expiryDate: 'asc' },
+          include: { product: true },
+        });
+      }
+
+      if (!targetBatch) {
+        throw new Error('Target inventory batch not found for adjustment');
+      }
+
+      let finalQty = targetBatch.quantity;
+      const parsedVal = parseFloat(newQuantity);
+
+      if (isNaN(parsedVal)) {
+        throw new Error('Valid newQuantity is required');
+      }
+
+      if (adjustmentType === 'ADD_STOCK') {
+        finalQty += parsedVal;
+      } else if (adjustmentType === 'SUBTRACT_STOCK') {
+        finalQty = Math.max(0, finalQty - parsedVal);
+      } else {
+        // SET_QUANTITY
+        finalQty = Math.max(0, parsedVal);
+      }
+
+      const updated = await tx.inventoryBatch.update({
+        where: { id: targetBatch.id },
+        data: {
+          quantity: finalQty,
+          updatedAt: new Date(),
+        },
+        include: { product: true },
+      });
+
+      console.log(
+        `[Anshu Engine] Stock Adjustment on Batch ${targetBatch.batchNumber} (${targetBatch.product?.name}): Old=${targetBatch.quantity} -> New=${finalQty} (${reason || 'Manual Correction'}) by User ${req.user?.name || req.user?.id}`
+      );
+
+      return updated;
+    });
+
+    res.json({
+      message: 'Inventory stock adjusted successfully!',
+      batch: updatedBatch,
+    });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 export default router;
+

@@ -22,6 +22,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { api } from '@/lib/api-client';
+import { invalidateCatalogCache } from '@/lib/catalog-cache';
+
 export default function InventoryPage() {
   const { inventory: cachedInventory, loading, refreshData } = useErpData();
   const [inventory, setInventory] = useState<any[]>([]);
@@ -31,10 +34,49 @@ export default function InventoryPage() {
   const [sortBy, setSortBy] = useState<'NAME' | 'STOCK_HIGH' | 'STOCK_LOW' | 'VALUATION'>('STOCK_HIGH');
   const [inspectInventory, setInspectInventory] = useState<any>(null);
 
+  // Manual Stock Adjustment State
+  const [adjustModalItem, setAdjustModalItem] = useState<{ inv: any; batch: any } | null>(null);
+  const [adjType, setAdjType] = useState<'SET_QUANTITY' | 'ADD_STOCK' | 'SUBTRACT_STOCK'>('SET_QUANTITY');
+  const [adjUnitType, setAdjUnitType] = useState<'LOOSE_UNITS' | 'PACKS'>('PACKS');
+  const [adjVal, setAdjVal] = useState<string>('');
+  const [adjReason, setAdjReason] = useState<string>('PHYSICAL_AUDIT_COUNT');
+  const [isSubmittingAdj, setIsSubmittingAdj] = useState(false);
+
   useEffect(() => {
     setIsMounted(true);
     setInventory(cachedInventory);
   }, [cachedInventory]);
+
+  const handleStockAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustModalItem || !adjVal || isNaN(parseFloat(adjVal))) return;
+
+    try {
+      setIsSubmittingAdj(true);
+      const packSize = adjustModalItem.inv.packSize || 1;
+      const numInput = parseFloat(adjVal);
+      const contentUnits = adjUnitType === 'PACKS' ? numInput * packSize : numInput;
+
+      await api.put('/inventory/adjust', {
+        batchId: adjustModalItem.batch?.id,
+        productId: adjustModalItem.inv.id || adjustModalItem.inv.productId,
+        newQuantity: contentUnits,
+        adjustmentType: adjType,
+        reason: adjReason,
+      });
+
+      invalidateCatalogCache();
+      await refreshData();
+      setAdjustModalItem(null);
+      setInspectInventory(null);
+      setAdjVal('');
+      alert('Inventory stock adjusted successfully!');
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.message || 'Failed to adjust stock');
+    } finally {
+      setIsSubmittingAdj(false);
+    }
+  };
 
   const now = new Date();
 
@@ -334,6 +376,17 @@ export default function InventoryPage() {
                             >
                               <Eye className="w-3.5 h-3.5" /> Batches
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const firstBatch = (inv.batches || [])[0];
+                                setAdjustModalItem({ inv, batch: firstBatch });
+                                setAdjVal('');
+                              }}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-700 border border-amber-200 font-bold rounded-lg text-[11px] transition flex items-center gap-1"
+                            >
+                              <Edit className="w-3.5 h-3.5" /> Adjust
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -393,15 +446,151 @@ export default function InventoryPage() {
                       <div className="font-bold font-mono text-slate-900">Batch: {b.batchNumber}</div>
                       <div className="text-[10px] text-slate-500">Exp: {formatDate(b.expiryDate)}</div>
                     </div>
-                    <div className="text-right font-mono font-bold">
-                      <div className="text-emerald-700">
-                        {formatPackQuantity(b.quantity, inspectInventory.packSize, inspectInventory.packUnit, inspectInventory.contentUnit)}
+                    <div className="flex items-center gap-3">
+                      <div className="text-right font-mono font-bold">
+                        <div className="text-emerald-700">
+                          {formatPackQuantity(b.quantity, inspectInventory.packSize, inspectInventory.packUnit, inspectInventory.contentUnit)}
+                        </div>
+                        <div className="text-slate-600">MRP: ₹{b.mrp}</div>
                       </div>
-                      <div className="text-slate-600">MRP: ₹{b.mrp}</div>
+                      <button
+                        onClick={() => {
+                          setAdjustModalItem({ inv: inspectInventory, batch: b });
+                          setAdjVal('');
+                        }}
+                        className="px-2 py-1 bg-amber-500 text-white font-bold rounded-lg text-[10px] hover:bg-amber-600 transition"
+                      >
+                        Adjust Batch
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MANUAL STOCK ADJUSTMENT MODAL */}
+      <AnimatePresence>
+        {adjustModalItem && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Edit className="w-5 h-5 text-amber-600" />
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-base">
+                      Adjust Stock: {toTitleCase(adjustModalItem.inv.productName || adjustModalItem.inv.name)}
+                    </h3>
+                    {adjustModalItem.batch && (
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        Batch: {adjustModalItem.batch.batchNumber} (Current: {formatPackQuantity(adjustModalItem.batch.quantity, adjustModalItem.inv.packSize, adjustModalItem.inv.packUnit, adjustModalItem.inv.contentUnit)})
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => setAdjustModalItem(null)} className="p-1 text-slate-400 hover:text-slate-800">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleStockAdjustment} className="space-y-4 text-xs">
+                <div>
+                  <label className="text-slate-600 font-bold block mb-1.5 uppercase tracking-wider text-[10px]">Adjustment Action</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAdjType('SET_QUANTITY')}
+                      className={`py-2 px-3 rounded-xl font-bold border transition ${
+                        adjType === 'SET_QUANTITY' ? 'bg-amber-600 text-white border-amber-600' : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      Set Exact Count
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjType('ADD_STOCK')}
+                      className={`py-2 px-3 rounded-xl font-bold border transition ${
+                        adjType === 'ADD_STOCK' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      + Add Stock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjType('SUBTRACT_STOCK')}
+                      className={`py-2 px-3 rounded-xl font-bold border transition ${
+                        adjType === 'SUBTRACT_STOCK' ? 'bg-rose-600 text-white border-rose-600' : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      - Subtract Stock
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-slate-600 font-bold block mb-1 uppercase tracking-wider text-[10px]">Unit Designation</label>
+                    <select
+                      value={adjUnitType}
+                      onChange={(e: any) => setAdjUnitType(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="PACKS">{adjustModalItem.inv.packUnit || 'Strips / Packs'} (x{adjustModalItem.inv.packSize || 1})</option>
+                      <option value="LOOSE_UNITS">{adjustModalItem.inv.contentUnit || 'Loose Units (Tablets)'}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-slate-600 font-bold block mb-1 uppercase tracking-wider text-[10px]">Quantity Value *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      placeholder="e.g. 10"
+                      value={adjVal}
+                      onChange={(e) => setAdjVal(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-slate-600 font-bold block mb-1 uppercase tracking-wider text-[10px]">Adjustment Reason</label>
+                  <select
+                    value={adjReason}
+                    onChange={(e) => setAdjReason(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="PHYSICAL_AUDIT_COUNT">Physical Audit Count Verification</option>
+                    <option value="DAMAGED_EXPIRED">Damaged / Expired Removal</option>
+                    <option value="FOUND_EXTRA">Unrecorded Supplier Sample / Found Extra</option>
+                    <option value="CORRECTION">General Inventory Correction</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setAdjustModalItem(null)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingAdj}
+                    className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl transition disabled:opacity-50"
+                  >
+                    {isSubmittingAdj ? 'Adjusting...' : 'Confirm Stock Adjustment'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

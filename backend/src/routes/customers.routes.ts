@@ -56,14 +56,14 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         (sum: number, bill: any) => sum + ((bill.grandTotal || 0) - (bill.amountPaid || 0)),
         0
       );
-      const creditNotes = (c.salesReturns || [])
-        .filter((sr: any) => sr.refundMethod === 'CREDIT_NOTE')
+      const unlinkedCreditNotes = (c.salesReturns || [])
+        .filter((sr: any) => sr.refundMethod === 'CREDIT_NOTE' && !sr.salesBillId)
         .reduce((sum: number, sr: any) => sum + (sr.totalReturnAmount || 0), 0);
 
       const { salesBills, salesReturns, ...custData } = c;
       return {
         ...custData,
-        creditBalance: Math.max(0, grossDebt - creditNotes),
+        creditBalance: Math.max(0, grossDebt - unlinkedCreditNotes),
       };
     });
 

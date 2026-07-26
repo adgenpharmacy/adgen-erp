@@ -191,8 +191,11 @@ router.post('/settle', authenticate, async (req: AuthenticatedRequest, res: Resp
       if (salesBillId) {
         const bill = await tx.salesBill.findUnique({ where: { id: salesBillId } });
         if (bill) {
-          const newAmountPaid = bill.amountPaid + parseFloat(amountPaid);
-          const isSettled = newAmountPaid >= bill.grandTotal;
+          const due = Math.max(0, bill.grandTotal - bill.amountPaid);
+          const payVal = parseFloat(amountPaid);
+          const actualPay = !isNaN(payVal) && payVal > 0 ? Math.min(due, payVal) : due;
+          const newAmountPaid = Math.min(bill.grandTotal, bill.amountPaid + actualPay);
+          const isSettled = newAmountPaid >= bill.grandTotal - 0.01;
           await tx.salesBill.update({
             where: { id: salesBillId },
             data: {
@@ -205,10 +208,22 @@ router.post('/settle', authenticate, async (req: AuthenticatedRequest, res: Resp
 
       // 3. Update Purchase Bill if supplier payment
       if (purchaseBillId) {
-        await tx.purchaseBill.update({
-          where: { id: purchaseBillId },
-          data: { isPaid: true },
-        });
+        const bill = await tx.purchaseBill.findUnique({ where: { id: purchaseBillId } });
+        if (bill) {
+          const currentPaid = bill.amountPaid || 0;
+          const due = Math.max(0, bill.grandTotal - currentPaid);
+          const payVal = parseFloat(amountPaid);
+          const actualPay = !isNaN(payVal) && payVal > 0 ? Math.min(due, payVal) : due;
+          const newAmountPaid = Math.min(bill.grandTotal, currentPaid + actualPay);
+          const isPaid = newAmountPaid >= bill.grandTotal - 0.01;
+          await tx.purchaseBill.update({
+            where: { id: purchaseBillId },
+            data: {
+              amountPaid: newAmountPaid,
+              isPaid,
+            },
+          });
+        }
       }
     });
 

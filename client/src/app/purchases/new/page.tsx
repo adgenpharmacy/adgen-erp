@@ -193,8 +193,8 @@ function NewPurchasePageContent() {
       ...updated[index],
       productId: prod.id,
       productName: prod.name,
-      batchNumber: `B-${Math.floor(1000 + Math.random() * 9000)}`,
-      expiryDate: '07/27',
+      batchNumber: latestBatch?.batchNumber || '',
+      expiryDate: latestBatch?.expiryDate ? new Date(latestBatch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '',
       mrp: defaultMrp,
       purchaseRate: defaultRate,
       gstPercent: prod.gstPercent !== undefined && prod.gstPercent !== null ? prod.gstPercent : 12,
@@ -324,6 +324,7 @@ function NewPurchasePageContent() {
         alert('Purchase Entry saved successfully!');
       }
       invalidateCatalogCache();
+      setItems([]);
       router.push('/purchases');
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to save purchase bill');

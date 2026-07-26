@@ -60,59 +60,76 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
       for (const item of items) {
         let { productId, batchId, quantity, unitPrice, taxPercent } = item;
-        const qtyNum = parseFloat(quantity) || 0;
+        let qtyNeeded = parseFloat(quantity) || 0;
 
-        // 1. Fetch & lock batch stock (or find/create fallback batch if missing/empty)
-        let batch: any = null;
+        if (qtyNeeded <= 0) continue;
+
+        // Fetch candidate batches ordered by expiryDate (FEFO)
+        const availableBatches = await tx.inventoryBatch.findMany({
+          where: {
+            productId,
+            quantity: { gt: 0 },
+          },
+          orderBy: { expiryDate: 'asc' },
+        });
+
+        // If explicit batchId provided, put it first in candidate list
         if (batchId) {
-          batch = await tx.inventoryBatch.findUnique({ where: { id: batchId } });
+          const specIdx = availableBatches.findIndex(b => b.id === batchId);
+          if (specIdx > 0) {
+            const [spec] = availableBatches.splice(specIdx, 1);
+            availableBatches.unshift(spec);
+          }
         }
-        
-        if (!batch && productId) {
-          batch = await tx.inventoryBatch.findFirst({
-            where: { productId },
-            orderBy: { expiryDate: 'asc' },
+
+        const totalAvailableStock = availableBatches.reduce((sum, b) => {
+          const used = batchStockTracker[b.id] || 0;
+          return sum + Math.max(0, b.quantity - used);
+        }, 0);
+
+        if (availableBatches.length === 0 || totalAvailableStock < qtyNeeded) {
+          throw new Error(
+            `Insufficient stock for product ID ${productId}. Requested: ${qtyNeeded}, Available: ${totalAvailableStock}`
+          );
+        }
+
+        // Deduct from candidate batches sequentially
+        for (const batch of availableBatches) {
+          if (qtyNeeded <= 0) break;
+
+          const usedAlready = batchStockTracker[batch.id] || 0;
+          const availableInBatch = Math.max(0, batch.quantity - usedAlready);
+
+          if (availableInBatch <= 0) continue;
+
+          const qtyToTake = Math.min(qtyNeeded, availableInBatch);
+          batchStockTracker[batch.id] = usedAlready + qtyToTake;
+          qtyNeeded -= qtyToTake;
+
+          const itemTotal = qtyToTake * parseFloat(unitPrice);
+          const taxRate = (taxPercent || 0) / 100;
+          const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
+          const itemSubtotal = itemTotal - itemTax;
+
+          subtotal += itemSubtotal;
+          taxTotal += itemTax;
+
+          billItemsToCreate.push({
+            productId: batch.productId || productId,
+            batchId: batch.id,
+            quantity: qtyToTake,
+            unitPrice: parseFloat(unitPrice),
+            taxPercent: parseFloat(taxPercent || 0),
+            totalAmount: itemTotal,
+          });
+
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: {
+              quantity: { decrement: qtyToTake },
+            },
           });
         }
-
-        if (!batch) {
-          throw new Error(`No available stock batch found for product ID ${productId}`);
-        }
-
-        batchId = batch.id;
-        const currentUsed = batchStockTracker[batch.id] || 0;
-        if (batch.quantity < currentUsed + qtyNum) {
-          throw new Error(`Insufficient stock for batch ${batch.batchNumber}. Available: ${batch.quantity - currentUsed}, Requested: ${qtyNum}`);
-        }
-        batchStockTracker[batch.id] = currentUsed + qtyNum;
-
-        // 2. Calculate item totals (MRP is tax-inclusive)
-        const itemTotal = qtyNum * parseFloat(unitPrice);
-        const taxRate = (taxPercent || 0) / 100;
-        const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
-        const itemSubtotal = itemTotal - itemTax;
-
-        subtotal += itemSubtotal;
-        taxTotal += itemTax;
-
-        billItemsToCreate.push({
-          productId: batch.productId || productId,
-          batchId: batch.id,
-          quantity: qtyNum,
-          unitPrice: parseFloat(unitPrice),
-          taxPercent: parseFloat(taxPercent || 0),
-          totalAmount: itemTotal,
-        });
-
-        // 3. Deduct stock from batch
-        await tx.inventoryBatch.update({
-          where: { id: batch.id },
-          data: {
-            quantity: {
-              decrement: qtyNum,
-            },
-          },
-        });
       }
 
       const discountAmount = parseFloat(discount || 0);
