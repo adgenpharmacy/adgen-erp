@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Printer, X, Share2, Check, FileText } from 'lucide-react';
-import { formatDate, numberToWords } from '@/lib/utils';
+import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 
 interface PurchasePrintModalProps {
   purchase: any;
@@ -46,9 +46,33 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   };
 
   const items = purchase.items || [];
-  const totalBilledQty = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 1), 0);
+  const totalBilledQty = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 0), 0);
   const totalFreeQty = items.reduce((acc: number, i: any) => acc + (Number(i.freeQuantity) || 0), 0);
-  const subtotal = items.reduce((acc: number, i: any) => acc + ((i.quantity || 1) * (i.purchaseRate || i.unitPrice || 0)), 0);
+
+  // Line item gross pre-discount subtotal & item discounts
+  const grossSubtotal = items.reduce((acc: number, i: any) => {
+    const qty = Number(i.quantity) || 0;
+    const pRate = Number(i.purchaseRate || i.unitPrice || 0);
+    return acc + (qty * pRate);
+  }, 0);
+
+  const itemDiscountsSum = items.reduce((acc: number, i: any) => {
+    const qty = Number(i.quantity) || 0;
+    const pRate = Number(i.purchaseRate || i.unitPrice || 0);
+    const discPercent = Number(i.discountPercent || 0);
+    return acc + ((qty * pRate) * (discPercent / 100));
+  }, 0);
+
+  const billSchemeDiscount = Number(purchase.discount || purchase.schemeDiscountAmount || 0);
+  const totalDiscountVal = itemDiscountsSum + billSchemeDiscount;
+
+  const taxableSubtotalVal = purchase.subtotal !== undefined
+    ? Number(purchase.subtotal)
+    : Math.max(0, grossSubtotal - totalDiscountVal);
+
+  const taxTotal = Number(purchase.taxTotal || 0);
+  const roundOffVal = Number(purchase.roundOffAmount || 0);
+  const totalOutflow = Number(purchase.grandTotal || (taxableSubtotalVal + taxTotal + roundOffVal));
 
   return (
     <div 
@@ -170,24 +194,35 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
               {items.map((item: any, idx: number) => {
-                const pRate = item.purchaseRate || item.unitPrice || 0;
-                const qty = item.quantity || 1;
-                const lineTotal = item.totalAmount || (qty * pRate);
+                const qty = Number(item.quantity) || 0;
+                const freeQty = Number(item.freeQuantity) || 0;
+                const pRate = Number(item.purchaseRate || item.unitPrice || 0);
+                const discPercent = Number(item.discountPercent || 0);
+                
+                // Line total = exact Qty x Rate minus discount
+                const grossLine = qty * pRate;
+                const lineDisc = grossLine * (discPercent / 100);
+                const lineTotal = item.totalAmount !== undefined ? Number(item.totalAmount) : (grossLine - lineDisc);
 
                 return (
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="py-2 px-2 font-mono text-slate-500">{idx + 1}</td>
                     <td className="py-2 px-2 font-bold text-slate-900">
-                      {item.productName || item.product?.name || 'Purchased Medicine'}
+                      <div>{item.productName || item.product?.name || 'Purchased Medicine'}</div>
+                      {discPercent > 0 && (
+                        <div className="text-[9px] text-emerald-700 font-semibold">({discPercent}% Disc Applied)</div>
+                      )}
                     </td>
                     <td className="py-2 px-2 font-mono font-bold text-slate-900">{item.batchNumber || 'DEF'}</td>
                     <td className="py-2 px-2 text-slate-600 font-mono">
                       {item.expiryDate ? formatDate(item.expiryDate) : '-'}
                     </td>
-                    <td className="py-2 px-2 text-center font-extrabold text-slate-900">{qty}</td>
-                    <td className="py-2 px-2 text-center font-bold text-emerald-700">{item.freeQuantity || 0}</td>
+                    <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">{formatQuantity(qty)}</td>
+                    <td className="py-2 px-2 text-center font-bold text-emerald-700 font-mono">
+                      {freeQty > 0 ? `+${formatQuantity(freeQty)}` : '0'}
+                    </td>
                     <td className="py-2 px-2 text-right font-mono">₹{pRate.toFixed(2)}</td>
-                    <td className="py-2 px-2 text-right font-mono text-slate-600">₹{(item.mrp || 0).toFixed(2)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-slate-600">₹{Number(item.mrp || 0).toFixed(2)}</td>
                     <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-900">₹{lineTotal.toFixed(2)}</td>
                   </tr>
                 );
@@ -200,80 +235,94 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                 <td colSpan={4} className="py-2 px-2 text-left uppercase">
                   Total Items: {items.length} Medicines
                 </td>
-                <td className="py-2 px-2 text-center font-mono">{totalBilledQty}</td>
-                <td className="py-2 px-2 text-center font-mono text-emerald-800">+{totalFreeQty} Free</td>
+                <td className="py-2 px-2 text-center font-mono">{formatQuantity(totalBilledQty)}</td>
+                <td className="py-2 px-2 text-center font-mono text-emerald-800">
+                  {totalFreeQty > 0 ? `+${formatQuantity(totalFreeQty)} Free` : '0 Free'}
+                </td>
                 <td colSpan={2} className="py-2 px-2 text-right uppercase text-[11px]">
                   Inward Subtotal:
                 </td>
                 <td className="py-2 px-2 text-right font-mono text-sm text-slate-900">
-                  ₹{subtotal.toFixed(2)}
+                  ₹{grossSubtotal.toFixed(2)}
                 </td>
               </tr>
             </tfoot>
           </table>
 
-          {/* Financial Breakdown & Summary */}
-          {(() => {
-            const taxTotal = purchase.taxTotal || 0;
-            const subtotalVal = purchase.subtotal || (purchase.grandTotal ? purchase.grandTotal - taxTotal : subtotal);
-            const totalOutflow = purchase.grandTotal || (subtotalVal + taxTotal);
-
-            return (
-              <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
-                {/* Left Column: Words & ITC Declaration */}
-                <div className="space-y-3 max-w-md w-full">
-                  {/* Amount in Words Box */}
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">
-                      Amount in Words:
-                    </span>
-                    <span className="font-extrabold text-slate-900 text-xs mt-0.5 block italic">
-                      {numberToWords(totalOutflow)}
-                    </span>
-                  </div>
-
-                  <div className="text-[9px] text-slate-500 space-y-0.5">
-                    <p className="font-bold text-slate-700 uppercase">Input Tax Credit (ITC) Declaration:</p>
-                    <p>1. Input Tax Credit claimed under Section 16 of CGST Act, 2017.</p>
-                    <p>2. Stock received & verified against supplier delivery challan.</p>
-                  </div>
-                </div>
-
-                {/* Right Column: Breakdown Box & Total Outflow Banner */}
-                <div className="w-full sm:w-80 space-y-1.5 text-xs font-medium">
-                  <div className="flex justify-between text-slate-600">
-                    <span>Taxable Inward Subtotal:</span>
-                    <span className="font-mono font-bold text-slate-900">₹{subtotalVal.toFixed(2)}</span>
-                  </div>
-                  {taxTotal > 0 && (
-                    <>
-                      <div className="flex justify-between text-slate-500 text-[11px]">
-                        <span>Input CGST Credit (50%):</span>
-                        <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-500 text-[11px]">
-                        <span>Input SGST Credit (50%):</span>
-                        <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
-                      </div>
-                    </>
-                  )}
-
-                  {/* PROMINENT PROCUREMENT OUTFLOW BANNER */}
-                  <div className="p-3 bg-indigo-900 text-white rounded-2xl flex justify-between items-center shadow-lg print:bg-slate-900 print:text-white mt-2">
-                    <div>
-                      <span className="text-[10px] font-extrabold text-indigo-300 uppercase tracking-widest block print:text-slate-300">
-                        TOTAL PROCUREMENT OUTFLOW
-                      </span>
-                      <span className="text-xs font-bold text-indigo-100 print:text-slate-200">Net Purchase Bill</span>
-                    </div>
-                    <span className="font-mono text-xl font-black text-white">
-                      ₹{totalOutflow.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
+          {/* Financial Breakdown & Summary Flow */}
+          <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
+            {/* Left Column: Words & ITC Declaration */}
+            <div className="space-y-3 max-w-md w-full">
+              {/* Amount in Words Box */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                  Amount in Words:
+                </span>
+                <span className="font-extrabold text-slate-900 text-xs mt-0.5 block italic">
+                  {numberToWords(totalOutflow)}
+                </span>
               </div>
-            );
-          })()}
+
+              <div className="text-[9px] text-slate-500 space-y-0.5">
+                <p className="font-bold text-slate-700 uppercase">Input Tax Credit (ITC) Declaration:</p>
+                <p>1. Input Tax Credit claimed under Section 16 of CGST Act, 2017.</p>
+                <p>2. Stock received & verified against supplier delivery challan.</p>
+              </div>
+            </div>
+
+            {/* Right Column: Arithmetic Flow Summary Box */}
+            <div className="w-full sm:w-80 space-y-1.5 text-xs font-medium">
+              <div className="flex justify-between text-slate-600">
+                <span>Inward Gross Subtotal:</span>
+                <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
+              </div>
+
+              {totalDiscountVal > 0 && (
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>(-) Trade & Scheme Discount:</span>
+                  <span className="font-mono">- ₹{totalDiscountVal.toFixed(2)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-slate-800 font-bold pt-1 border-t border-dashed border-slate-300">
+                <span>(=) Net Taxable Subtotal:</span>
+                <span className="font-mono">₹{taxableSubtotalVal.toFixed(2)}</span>
+              </div>
+
+              {taxTotal > 0 && (
+                <>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>(+) Input CGST Credit (50%):</span>
+                    <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>(+) Input SGST Credit (50%):</span>
+                    <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
+                  </div>
+                </>
+              )}
+
+              {roundOffVal !== 0 && (
+                <div className="flex justify-between text-slate-500 text-[11px]">
+                  <span>Round Off:</span>
+                  <span className="font-mono">{roundOffVal > 0 ? `+₹${roundOffVal.toFixed(2)}` : `-₹${Math.abs(roundOffVal).toFixed(2)}`}</span>
+                </div>
+              )}
+
+              {/* PROMINENT PROCUREMENT OUTFLOW BANNER */}
+              <div className="p-3 bg-indigo-900 text-white rounded-2xl flex justify-between items-center shadow-lg print:bg-slate-900 print:text-white mt-2">
+                <div>
+                  <span className="text-[10px] font-extrabold text-indigo-300 uppercase tracking-widest block print:text-slate-300">
+                    TOTAL PROCUREMENT OUTFLOW
+                  </span>
+                  <span className="text-xs font-bold text-indigo-100 print:text-slate-200">Net Purchase Bill</span>
+                </div>
+                <span className="font-mono text-xl font-black text-white">
+                  ₹{totalOutflow.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
 
           {/* Footer Signature */}
           <div className="mt-8 pt-4 flex justify-between items-end border-t border-slate-200">

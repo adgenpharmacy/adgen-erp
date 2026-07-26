@@ -77,3 +77,11 @@ export function numberToWords(num: number): string {
   }
   return words + ' Only';
 }
+
+export function formatQuantity(quantity: number | null | undefined): string {
+  if (quantity === null || quantity === undefined || isNaN(quantity)) return '0';
+  const num = Number(quantity);
+  if (Number.isInteger(num)) return num.toString();
+  const rounded = Math.round(num * 100) / 100;
+  return rounded.toFixed(2).replace(/\.?0+$/, '');
+}

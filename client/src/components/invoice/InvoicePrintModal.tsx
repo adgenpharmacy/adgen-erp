@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Printer, X, Share2, Check, FileText } from 'lucide-react';
-import { formatDate, numberToWords } from '@/lib/utils';
+import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 
 interface InvoicePrintModalProps {
   invoice?: any;
@@ -49,22 +49,28 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   };
 
   const items = activeInvoice.items || [];
-  const totalQtyCount = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 1), 0);
-  const grossSubtotal = items.reduce((acc: number, i: any) => acc + ((i.quantity || 1) * (i.unitPrice || i.price || i.mrp || 0)), 0);
-  const discountVal = activeInvoice.discount || activeInvoice.discountAmount || 0;
-  const netPayableVal = activeInvoice.grandTotal || Math.max(0, grossSubtotal - discountVal);
-  const roundOffVal = activeInvoice.roundOffAmount || 0;
+  const totalQtyCount = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 0), 0);
+  const grossSubtotal = items.reduce((acc: number, i: any) => {
+    const qty = Number(i.quantity) || 0;
+    const unitPrice = Number(i.unitPrice || i.price || i.mrp || 0);
+    return acc + (qty * unitPrice);
+  }, 0);
+
+  const discountVal = Number(activeInvoice.discount || activeInvoice.discountAmount || 0);
+  const netBilledVal = Math.max(0, grossSubtotal - discountVal);
+  const netPayableVal = Number(activeInvoice.grandTotal || netBilledVal);
+  const roundOffVal = Number(activeInvoice.roundOffAmount || 0);
 
   // Exact per-item GST tax extraction
-  const discountRatio = grossSubtotal > 0 ? (netPayableVal / grossSubtotal) : 1;
+  const discountRatio = grossSubtotal > 0 ? (netBilledVal / grossSubtotal) : 1;
   const totalGstIncluded = items.reduce((acc: number, i: any) => {
-    const itemTotal = (i.quantity || 1) * (i.unitPrice || i.price || i.mrp || 0);
-    const gstRate = i.gstPercent || i.product?.gstPercent || 12;
+    const itemTotal = (Number(i.quantity) || 0) * (Number(i.unitPrice || i.price || i.mrp || 0));
+    const gstRate = Number(i.gstPercent || i.product?.gstPercent || 12);
     const itemTax = itemTotal * (gstRate / (100 + gstRate));
     return acc + itemTax;
   }, 0) * discountRatio;
 
-  const taxableSubtotalVal = Math.max(0, netPayableVal - totalGstIncluded);
+  const taxableSubtotalVal = Math.max(0, netBilledVal - totalGstIncluded);
 
   return (
     <div 
@@ -188,10 +194,12 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
               {items.map((item: any, idx: number) => {
-                const itemGst = item.gstPercent || item.product?.gstPercent || 12;
-                const unitPrice = item.unitPrice || item.price || item.mrp || 0;
-                const qty = item.quantity || 1;
-                const lineTotal = item.totalAmount || (qty * unitPrice);
+                const itemGst = Number(item.gstPercent || item.product?.gstPercent || 12);
+                const unitPrice = Number(item.unitPrice || item.price || item.mrp || 0);
+                const qty = Number(item.quantity) || 0;
+                
+                // Line total = exact Qty x Unit MRP
+                const lineTotal = item.totalAmount !== undefined ? Number(item.totalAmount) : (qty * unitPrice);
 
                 return (
                   <tr key={idx} className="hover:bg-slate-50">
@@ -207,7 +215,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                     <td className="py-2 px-2 text-slate-600 font-mono">
                       {item.expiryDate || item.batch?.expiryDate ? formatDate(item.expiryDate || item.batch?.expiryDate) : '-'}
                     </td>
-                    <td className="py-2 px-2 text-center font-extrabold text-slate-900">{qty}</td>
+                    <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">{formatQuantity(qty)}</td>
                     <td className="py-2 px-2 text-right font-mono">₹{unitPrice.toFixed(2)}</td>
                     <td className="py-2 px-2 text-right font-mono">{itemGst}%</td>
                     <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-900">₹{lineTotal.toFixed(2)}</td>
@@ -222,7 +230,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <td colSpan={5} className="py-2 px-2 text-left uppercase">
                   Total Items: {items.length} Medicines
                 </td>
-                <td className="py-2 px-2 text-center font-mono">{totalQtyCount}</td>
+                <td className="py-2 px-2 text-center font-mono">{formatQuantity(totalQtyCount)}</td>
                 <td colSpan={2} className="py-2 px-2 text-right uppercase text-[11px]">
                   Subtotal MRP:
                 </td>
@@ -233,7 +241,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             </tfoot>
           </table>
 
-          {/* Financial Breakdown & Prominent Bottom Summary */}
+          {/* Financial Breakdown & Summary Flow */}
           <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
             {/* Left Column: Words, Payment Details & Notes */}
             <div className="space-y-3 max-w-md w-full">
@@ -267,30 +275,38 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
               </div>
             </div>
 
-            {/* Right Column: Price Breakdown Box & Net Payable Banner */}
+            {/* Right Column: Arithmetic Flow Summary Box */}
             <div className="w-full sm:w-80 space-y-1.5 text-xs font-medium">
               <div className="flex justify-between text-slate-600">
                 <span>Gross Total (MRP):</span>
                 <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
               </div>
+
               {discountVal > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>(-) Discount Allowed:</span>
+                  <span>(-) Special Discount Allowed:</span>
                   <span className="font-mono">- ₹{discountVal.toFixed(2)}</span>
                 </div>
               )}
+
+              <div className="flex justify-between text-slate-800 font-bold pt-1 border-t border-dashed border-slate-300">
+                <span>(=) Net Billed Amount:</span>
+                <span className="font-mono">₹{netBilledVal.toFixed(2)}</span>
+              </div>
+
               <div className="flex justify-between text-slate-500 text-[11px] pt-1 border-t border-dashed border-slate-200">
                 <span>Taxable Value (Excl. Tax):</span>
                 <span className="font-mono">₹{taxableSubtotalVal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>CGST (Central Tax):</span>
+                <span>(+) CGST (Central Tax Included):</span>
                 <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>SGST (State Tax):</span>
+                <span>(+) SGST (State Tax Included):</span>
                 <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
               </div>
+
               {roundOffVal !== 0 && (
                 <div className="flex justify-between text-slate-500 text-[11px]">
                   <span>Round Off:</span>
