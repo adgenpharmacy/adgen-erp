@@ -211,21 +211,29 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       // 5. Create Ledger Entry if Credit Sale or Split Sale with Credit Portion
       if (isCredit && debtAmount > 0) {
         let targetCustomerId = customerId || null;
-        if (!targetCustomerId && cleanCustName && cleanCustName !== 'Walk-in Retail Customer') {
+        if (!targetCustomerId) {
+          const searchName = (cleanCustName && cleanCustName.length >= 2 && cleanCustName !== 'Walk-in Retail Customer')
+            ? cleanCustName
+            : 'Walk-in Credit Customer';
           const existingCust = await tx.customer.findFirst({
-            where: { name: { equals: cleanCustName, mode: 'insensitive' } },
+            where: { name: { equals: searchName, mode: 'insensitive' } },
           });
           if (existingCust) {
             targetCustomerId = existingCust.id;
           } else {
             const newCust = await tx.customer.create({
               data: {
-                name: cleanCustName,
+                name: searchName,
                 phone: customerPhone || null,
               },
             });
             targetCustomerId = newCust.id;
           }
+
+          await tx.salesBill.update({
+            where: { id: bill.id },
+            data: { customerId: targetCustomerId },
+          });
         }
 
         await tx.ledgerEntry.create({
@@ -453,21 +461,29 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
       if (isCredit && debtAmount > 0) {
         let targetCustomerId = updatedBill.customerId;
-        if (!targetCustomerId && cleanCustName && cleanCustName !== 'Walk-in Retail Customer') {
+        if (!targetCustomerId) {
+          const searchName = (cleanCustName && cleanCustName.length >= 2 && cleanCustName !== 'Walk-in Retail Customer')
+            ? cleanCustName
+            : 'Walk-in Credit Customer';
           const existingCust = await tx.customer.findFirst({
-            where: { name: { equals: cleanCustName, mode: 'insensitive' } },
+            where: { name: { equals: searchName, mode: 'insensitive' } },
           });
           if (existingCust) {
             targetCustomerId = existingCust.id;
           } else {
             const newCust = await tx.customer.create({
               data: {
-                name: cleanCustName,
+                name: searchName,
                 phone: updatedBill.customerPhone || null,
               },
             });
             targetCustomerId = newCust.id;
           }
+
+          await tx.salesBill.update({
+            where: { id },
+            data: { customerId: targetCustomerId },
+          });
         }
 
         await tx.ledgerEntry.create({

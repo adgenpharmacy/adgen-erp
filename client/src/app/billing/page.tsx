@@ -438,13 +438,14 @@ function NewSalePageContent() {
                 <div className="relative">
                   <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
                   <input
-                    type="text"
+                    type="tel"
+                    maxLength={10}
                     ref={(el) => { inputRefs.current['customerPhone'] = el; }}
                     onKeyDown={(e) => handleKeyDown(e, 'customerPhone', 'doctorName')}
                     value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="e.g. 9826012345"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
                   />
                 </div>
               </div>

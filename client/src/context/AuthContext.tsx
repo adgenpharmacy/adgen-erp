@@ -52,8 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.post('/users/login', { email, password });
       const userData = res.data.user;
       setUser(userData);
+      if (!res.data.token) throw new Error('Invalid auth payload received from server');
       localStorage.setItem('adgen_user', JSON.stringify(userData));
-      localStorage.setItem('adgen_token', res.data.token || 'valid_token');
+      localStorage.setItem('adgen_token', res.data.token);
       router.push('/');
     } catch (err: unknown) {
       const errorMsg = (err as { response?: { data?: { error?: string } } }).response?.data?.error;

@@ -153,9 +153,16 @@ export default function PartiesPage() {
                 ].map((field) => (
                   <div key={field.key}>
                     <label className="text-xs text-gray-500 font-medium block mb-1">{field.label}</label>
-                    <input type={field.type || 'text'} required={field.required} placeholder={field.placeholder}
+                    <input 
+                      type={field.key === 'phone' ? 'tel' : field.type || 'text'}
+                      maxLength={field.key === 'phone' ? 10 : undefined}
+                      required={field.required}
+                      placeholder={field.placeholder}
                       value={(formData as any)[field.key]}
-                      onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        [field.key]: field.key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 10) : e.target.value
+                      })}
                       className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-gray-900 focus:outline-none focus:border-emerald-500" />
                   </div>
                 ))}

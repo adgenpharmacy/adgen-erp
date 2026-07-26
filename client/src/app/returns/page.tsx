@@ -33,6 +33,7 @@ export default function ReturnsPage() {
   // Modals state
   const [showSalesReturnModal, setShowSalesReturnModal] = useState(false);
   const [showPurchaseReturnModal, setShowPurchaseReturnModal] = useState(false);
+  const [inspectReturn, setInspectReturn] = useState<any>(null);
 
   // Sales Return Form State
   const [srCustomerName, setSrCustomerName] = useState('');
@@ -242,11 +243,12 @@ export default function ReturnsPage() {
                     <th className="py-3.5 px-4">Refund Mode</th>
                     <th className="py-3.5 px-4">Items Returned</th>
                     <th className="py-3.5 px-4 text-right">Return Total (₹)</th>
+                    <th className="py-3.5 px-4 text-center">Inspect</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-800">
                   {salesReturns.map((sr) => (
-                    <tr key={sr.id} className="hover:bg-emerald-50/40 transition">
+                    <tr key={sr.id} onClick={() => setInspectReturn({ ...sr, returnType: 'SALES' })} className="hover:bg-emerald-50/40 transition cursor-pointer">
                       <td className="py-3.5 px-4 font-mono font-extrabold text-emerald-700">
                         {sr.returnNumber}
                       </td>
@@ -261,6 +263,11 @@ export default function ReturnsPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900 text-sm">
                         ₹{(sr.totalReturnAmount || 0).toFixed(2)}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <button onClick={(e) => { e.stopPropagation(); setInspectReturn({ ...sr, returnType: 'SALES' }); }} className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold rounded-lg text-xs transition">
+                          Inspect
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -283,11 +290,12 @@ export default function ReturnsPage() {
                     <th className="py-3.5 px-4">Refund Mode</th>
                     <th className="py-3.5 px-4">Items Returned</th>
                     <th className="py-3.5 px-4 text-right">Return Total (₹)</th>
+                    <th className="py-3.5 px-4 text-center">Inspect</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-800">
                   {purchaseReturns.map((pr) => (
-                    <tr key={pr.id} className="hover:bg-indigo-50/40 transition">
+                    <tr key={pr.id} onClick={() => setInspectReturn({ ...pr, returnType: 'PURCHASE' })} className="hover:bg-indigo-50/40 transition cursor-pointer">
                       <td className="py-3.5 px-4 font-mono font-extrabold text-indigo-700">
                         {pr.returnNumber}
                       </td>
@@ -302,6 +310,11 @@ export default function ReturnsPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900 text-sm">
                         ₹{(pr.totalReturnAmount || 0).toFixed(2)}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <button onClick={(e) => { e.stopPropagation(); setInspectReturn({ ...pr, returnType: 'PURCHASE' }); }} className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold rounded-lg text-xs transition">
+                          Inspect
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -602,6 +615,95 @@ export default function ReturnsPage() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* INSPECT RETURN DETAILS MODAL */}
+      <AnimatePresence>
+        {inspectReturn && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <RotateCcw className={`w-5 h-5 ${inspectReturn.returnType === 'SALES' ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                  <h3 className="font-extrabold text-slate-900 text-base">
+                    {inspectReturn.returnType === 'SALES' ? 'Sales Credit Note' : 'Purchase Debit Note'} #{inspectReturn.returnNumber}
+                  </h3>
+                </div>
+                <button onClick={() => setInspectReturn(null)} className="p-1 text-slate-400 hover:text-slate-800 rounded-lg">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-semibold">
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Date Issued</div>
+                  <div className="font-mono text-slate-900 mt-1">{formatDate(inspectReturn.createdAt)}</div>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Refund Method</div>
+                  <div className="font-extrabold text-slate-900 mt-1">{inspectReturn.refundMethod || 'STANDARD'}</div>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Total Amount</div>
+                  <div className="font-mono font-extrabold text-slate-900 text-sm mt-1">₹{(inspectReturn.totalReturnAmount || 0).toFixed(2)}</div>
+                </div>
+              </div>
+
+              {inspectReturn.notes && (
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Notes / Remarks:</span>
+                  <span className="font-medium text-slate-800">{inspectReturn.notes}</span>
+                </div>
+              )}
+
+              <div>
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Itemized Returned Items</h4>
+                <div className="border border-slate-200/80 rounded-2xl overflow-hidden text-xs">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-extrabold text-slate-500 uppercase">
+                      <tr>
+                        <th className="p-2.5">Medicine</th>
+                        <th className="p-2.5">Batch</th>
+                        <th className="p-2.5 text-center">Qty</th>
+                        <th className="p-2.5 text-right">Rate</th>
+                        <th className="p-2.5 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {(inspectReturn.items || []).map((item: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="p-2.5 font-bold text-slate-900">
+                            {item.product?.name || item.productName || 'Medicine'}
+                          </td>
+                          <td className="p-2.5 font-mono text-slate-600">{item.batchNumber || '—'}</td>
+                          <td className="p-2.5 text-center font-mono font-bold">{item.quantity}</td>
+                          <td className="p-2.5 text-right font-mono">₹{(item.unitPrice || item.purchaseRate || 0).toFixed(2)}</td>
+                          <td className="p-2.5 text-right font-mono font-bold text-slate-900">
+                            ₹{((item.quantity || 1) * (item.unitPrice || item.purchaseRate || 0)).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setInspectReturn(null)}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition"
+                >
+                  Close
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

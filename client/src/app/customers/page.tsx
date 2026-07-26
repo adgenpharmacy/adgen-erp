@@ -105,6 +105,8 @@ export default function CustomersPage() {
                     <th className="py-3.5 px-4">Phone</th>
                     <th className="py-3.5 px-4">Doctor</th>
                     <th className="py-3.5 px-4">Address</th>
+                    <th className="py-3.5 px-4">GSTIN / Email</th>
+                    <th className="py-3.5 px-4 text-right">Outstanding Credit</th>
                     <th className="py-3.5 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -114,7 +116,13 @@ export default function CustomersPage() {
                       <td className="py-3.5 px-4 font-bold text-slate-900">{c.name}</td>
                       <td className="py-3.5 px-4 font-mono">{c.phone || '—'}</td>
                       <td className="py-3.5 px-4">{c.doctorName || '—'}</td>
-                      <td className="py-3.5 px-4 text-slate-500 truncate max-w-[200px]">{c.address || '—'}</td>
+                      <td className="py-3.5 px-4 text-slate-500 truncate max-w-[180px]">{c.address || '—'}</td>
+                      <td className="py-3.5 px-4 font-mono text-slate-500">
+                        {c.gstNumber || c.email || '—'}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-extrabold text-amber-700">
+                        ₹{(c.creditBalance || c.outstandingBalance || 0).toFixed(2)}
+                      </td>
                       <td className="py-3.5 px-4 text-center">
                         <button
                           onClick={() => openEditModal(c)}
@@ -154,19 +162,64 @@ export default function CustomersPage() {
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    placeholder="9826012345"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="customer@email.com"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Prescribed Doctor</label>
+                  <input
+                    type="text"
+                    value={formData.doctorName}
+                    onChange={(e) => setFormData({ ...formData, doctorName: e.target.value })}
+                    placeholder="Dr. Verma"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">GSTIN Number</label>
+                  <input
+                    type="text"
+                    value={formData.gstNumber}
+                    onChange={(e) => setFormData({ ...formData, gstNumber: e.target.value })}
+                    placeholder="27ABCDE1234F1Z5"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+              </div>
               <div>
-                <label className="block text-slate-600 font-bold mb-1">Phone Number</label>
+                <label className="block text-slate-600 font-bold mb-1">Address</label>
                 <input
                   type="text"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="9826012345"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Street, City, Pincode"
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20">{isSubmitting ? 'Saving...' : 'Save'}</button>
+                <button type="submit" disabled={isSubmitting} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20">{isSubmitting ? 'Saving...' : 'Save Customer'}</button>
               </div>
             </form>
           </div>

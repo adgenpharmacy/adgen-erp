@@ -98,16 +98,16 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
             <div className="flex items-start gap-3">
-              <img src="/logo.png" alt="AdGen Pharmacy" className="h-12 w-auto object-contain shrink-0" />
+              <img src="/logo.png" alt="AdGen Pharma" className="h-12 w-auto object-contain shrink-0" />
               <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">ADGEN PHARMACY</h1>
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">ADGEN PHARMA</h1>
                 <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider mt-1">
                   RETAIL PHARMACY & CLINICAL SUPPLIES
                 </p>
-                <div className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">
-                  Shop No. 12, Main Market Road, Chembur, Mumbai - 400071<br />
-                  <strong>DL No:</strong> 20B/MH-MUM-182736, 21B/MH-MUM-182737 | <strong>GSTIN:</strong> 27AACCA1234F1Z9<br />
-                  <strong>Phone:</strong> +91 98765 43210 | <strong>Email:</strong> billing@adgenpharmacy.com
+                <div className="text-[10px] text-slate-600 font-medium mt-1 leading-tight">
+                  27-A Chandra Nagar, Barfani Dham, MR-9, Indore (M.P) 452001<br />
+                  <strong>DL No:</strong> 20B/5441/12/2024 | <strong>GSTIN:</strong> 27ABCDE1234F1Z5<br />
+                  <strong>Phone:</strong> +91 88396 40968 | <strong>Email:</strong> adgenpharmacy2024@gmail.com
                 </div>
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 Date: {formatDate(activeInvoice.saleDate || activeInvoice.createdAt)}
               </div>
               <div className="text-[11px] font-bold text-slate-800 uppercase mt-1">
-                Mode: {activeInvoice.paymentMethod || 'CASH'}
+                Payment: {activeInvoice.paymentMethod || 'CASH'}
               </div>
             </div>
           </div>
@@ -136,7 +136,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 {activeInvoice.customerName || activeInvoice.customer?.name || 'Walk-in Customer'}
               </span>
               {(activeInvoice.customerPhone || activeInvoice.customer?.phone) && (
-                <span className="text-slate-600 font-medium ml-2">
+                <span className="text-slate-600 font-medium ml-2 font-mono">
                   (📞 {activeInvoice.customerPhone || activeInvoice.customer?.phone})
                 </span>
               )}
@@ -159,10 +159,8 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <th className="py-2 px-2">HSN</th>
                 <th className="py-2 px-2">Batch</th>
                 <th className="py-2 px-2">Exp</th>
-                <th className="py-2 px-2 text-center">Unit</th>
                 <th className="py-2 px-2 text-center">Qty</th>
                 <th className="py-2 px-2 text-right">MRP (₹)</th>
-                <th className="py-2 px-2 text-right">Rate (₹)</th>
                 <th className="py-2 px-2 text-right">GST %</th>
                 <th className="py-2 px-2 text-right">Total (₹)</th>
               </tr>
@@ -170,7 +168,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
               {items.map((item: any, idx: number) => {
                 const itemGst = item.gstPercent || item.product?.gstPercent || 12;
-                const unitPrice = item.unitPrice || item.price || 0;
+                const unitPrice = item.unitPrice || item.price || item.mrp || 0;
                 const qty = item.quantity || 1;
                 const lineTotal = item.totalAmount || (qty * unitPrice);
 
@@ -188,9 +186,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                     <td className="py-2 px-2 text-slate-600 font-mono">
                       {item.expiryDate || item.batch?.expiryDate ? formatDate(item.expiryDate || item.batch?.expiryDate) : '-'}
                     </td>
-                    <td className="py-2 px-2 text-center font-bold">{item.unitType || 'STRIP'}</td>
                     <td className="py-2 px-2 text-center font-extrabold text-slate-900">{qty}</td>
-                    <td className="py-2 px-2 text-right font-mono">₹{(item.mrp || item.batch?.mrp || unitPrice).toFixed(2)}</td>
                     <td className="py-2 px-2 text-right font-mono">₹{unitPrice.toFixed(2)}</td>
                     <td className="py-2 px-2 text-right font-mono">{itemGst}%</td>
                     <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-900">₹{lineTotal.toFixed(2)}</td>
@@ -201,53 +197,76 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
           </table>
 
           {/* Financial Breakdown & Summary */}
-          <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
-            {/* Terms & Conditions */}
-            <div className="text-[9px] text-slate-500 space-y-0.5 max-w-sm">
-              <p className="font-bold text-slate-700 uppercase">Terms & Conditions:</p>
-              <p>1. Goods once sold will not be taken back without original cash memo.</p>
-              <p>2. Schedule H & H1 drugs sold against Doctor's prescription only.</p>
-              <p>3. Check expiry date and seal before leaving the counter.</p>
-            </div>
+          {(() => {
+            const grossSubtotal = items.reduce((acc: number, i: any) => acc + ((i.quantity || 1) * (i.unitPrice || i.price || i.mrp || 0)), 0);
+            const discountVal = activeInvoice.discount || activeInvoice.discountAmount || 0;
+            const netPayableVal = activeInvoice.grandTotal || Math.max(0, grossSubtotal - discountVal);
+            
+            // Exact per-item GST tax extraction
+            const discountRatio = grossSubtotal > 0 ? (netPayableVal / grossSubtotal) : 1;
+            const totalGstIncluded = items.reduce((acc: number, i: any) => {
+              const itemTotal = (i.quantity || 1) * (i.unitPrice || i.price || i.mrp || 0);
+              const gstRate = i.gstPercent || i.product?.gstPercent || 12;
+              const itemTax = itemTotal * (gstRate / (100 + gstRate));
+              return acc + itemTax;
+            }, 0) * discountRatio;
 
-            {/* Price Breakdown Box */}
-            <div className="w-full sm:w-64 space-y-1.5 text-xs font-medium">
-              <div className="flex justify-between text-slate-600">
-                <span>Taxable Subtotal:</span>
-                <span className="font-mono font-bold text-slate-900">₹{(subtotal - taxAmount).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>CGST ({((items[0]?.gstPercent || 12) / 2).toFixed(1)}%):</span>
-                <span className="font-mono text-slate-800">₹{(taxAmount / 2).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>SGST ({((items[0]?.gstPercent || 12) / 2).toFixed(1)}%):</span>
-                <span className="font-mono text-slate-800">₹{(taxAmount / 2).toFixed(2)}</span>
-              </div>
-              {discountAmount > 0 && (
-                <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>Special Discount:</span>
-                  <span className="font-mono">- ₹{discountAmount.toFixed(2)}</span>
+            const taxableSubtotalVal = Math.max(0, netPayableVal - totalGstIncluded);
+
+            return (
+              <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
+                {/* Terms & Conditions */}
+                <div className="text-[9px] text-slate-500 space-y-0.5 max-w-sm">
+                  <p className="font-bold text-slate-700 uppercase">Notes & Statutory Declarations:</p>
+                  <p>1. Rates are GST-Inclusive as per Drugs (Prices Control) Order.</p>
+                  <p>2. Goods once sold cannot be returned without original cash memo.</p>
+                  <p>3. Schedule H & H1 medicines sold against Doctor's prescription only.</p>
                 </div>
-              )}
-              <div className="border-t-2 border-slate-900 pt-1.5 flex justify-between items-center text-sm font-black text-slate-900">
-                <span>NET PAYABLE:</span>
-                <span className="font-mono text-base text-emerald-700 print:text-black">
-                  ₹{grandTotal.toFixed(2)}
-                </span>
+
+                {/* Price Breakdown Box */}
+                <div className="w-full sm:w-72 space-y-1.5 text-xs font-medium">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Gross Total (MRP):</span>
+                    <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
+                  </div>
+                  {discountVal > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-bold">
+                      <span>(-) Discount Allowed:</span>
+                      <span className="font-mono">- ₹{discountVal.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-slate-500 text-[11px] pt-1 border-t border-dashed border-slate-200">
+                    <span>Taxable Value (Excl. Tax):</span>
+                    <span className="font-mono">₹{taxableSubtotalVal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>CGST (Central Tax):</span>
+                    <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>SGST (State Tax):</span>
+                    <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="border-t-2 border-slate-900 pt-1.5 flex justify-between items-center text-sm font-black text-slate-900">
+                    <span>NET AMOUNT PAYABLE:</span>
+                    <span className="font-mono text-base text-emerald-700 print:text-black">
+                      ₹{netPayableVal.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Authorized Signature Line */}
           <div className="mt-8 pt-4 flex justify-between items-end border-t border-slate-200">
             <div className="text-[10px] text-slate-500">
-              Thank you for trusting <strong>ADGEN PHARMACY</strong>! Wish you good health.
+              Thank you for trusting <strong>ADGEN PHARMA</strong>! Wish you good health.
             </div>
             <div className="text-center font-bold text-xs text-slate-800">
-              <div className="h-10"></div>
-              <div className="border-t border-slate-400 px-4 pt-1">
-                For ADGEN PHARMACY (Authorised Signatory)
+              <div className="h-8"></div>
+              <div className="border-t border-slate-400 px-4 pt-1 text-[11px]">
+                For ADGEN PHARMA (Authorised Signatory)
               </div>
             </div>
           </div>

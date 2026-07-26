@@ -362,8 +362,36 @@ export default function SalesPage() {
                 </div>
 
                 <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Prescribed Doctor</div>
+                  <div className="font-bold text-slate-900 mt-1">
+                    {inspectBill.doctorName ? `Dr. ${inspectBill.doctorName}` : '—'}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
                   <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Payment Mode</div>
                   <div className="font-extrabold text-slate-900 mt-1">{inspectBill.paymentMethod}</div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Subtotal (Excl. Tax)</div>
+                  <div className="font-mono font-bold text-slate-900 mt-1">
+                    ₹{(inspectBill.subtotal || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">GST Tax Collected</div>
+                  <div className="font-mono font-bold text-indigo-600 mt-1">
+                    ₹{(inspectBill.taxTotal || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Discount Allowed</div>
+                  <div className="font-mono font-bold text-rose-600 mt-1">
+                    -₹{(inspectBill.discount || 0).toFixed(2)}
+                  </div>
                 </div>
 
                 <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
@@ -374,6 +402,13 @@ export default function SalesPage() {
                 </div>
               </div>
 
+              {inspectBill.notes && (
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Billing Notes / Remarks:</span>
+                  <span className="font-medium text-slate-800">{inspectBill.notes}</span>
+                </div>
+              )}
+
               {/* Items List */}
               <div>
                 <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Itemized Medicines Sold</h4>
@@ -383,6 +418,7 @@ export default function SalesPage() {
                       <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-extrabold text-slate-500 uppercase">
                         <th className="py-2.5 px-3">Medicine Name</th>
                         <th className="py-2.5 px-3">Batch Number</th>
+                        <th className="py-2.5 px-3">Expiry</th>
                         <th className="py-2.5 px-3 text-center">Qty Sold</th>
                         <th className="py-2.5 px-3 text-right">Unit MRP</th>
                         <th className="py-2.5 px-3 text-right">Line Total</th>
@@ -396,6 +432,9 @@ export default function SalesPage() {
                           </td>
                           <td className="py-2.5 px-3 font-mono text-slate-600">
                             {item.batch?.batchNumber || item.batchNumber || '—'}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-500">
+                            {item.batch?.expiryDate || item.expiryDate ? formatDate(item.batch?.expiryDate || item.expiryDate) : '—'}
                           </td>
                           <td className="py-2.5 px-3 text-center font-bold font-mono">
                             {item.quantity} Units
@@ -474,10 +513,11 @@ export default function SalesPage() {
                 <div>
                   <label className="block text-slate-500 mb-1">Customer Phone</label>
                   <input
-                    type="text"
+                    type="tel"
+                    maxLength={10}
                     value={editingSale.customerPhone || ''}
-                    onChange={(e) => setEditingSale({ ...editingSale, customerPhone: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    onChange={(e) => setEditingSale({ ...editingSale, customerPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
                   />
                 </div>
 

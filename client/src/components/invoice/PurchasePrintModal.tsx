@@ -88,21 +88,22 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
             <div className="flex items-start gap-3">
-              <img src="/logo.png" alt="AdGen Pharmacy" className="h-12 w-auto object-contain shrink-0" />
+              <img src="/logo.png" alt="AdGen Pharma" className="h-12 w-auto object-contain shrink-0" />
               <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">ADGEN PHARMACY</h1>
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">ADGEN PHARMA</h1>
                 <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider mt-1">
                   GOODS INWARD RECEIPT & PURCHASE INVOICE
                 </p>
-                <div className="text-[10px] text-slate-500 font-medium mt-1 leading-tight">
-                  Shop No. 12, Main Market Road, Chembur, Mumbai - 400071<br />
-                  <strong>DL No:</strong> 20B/MH-MUM-182736 | <strong>GSTIN:</strong> 27AACCA1234F1Z9
+                <div className="text-[10px] text-slate-600 font-medium mt-1 leading-tight">
+                  27-A Chandra Nagar, Barfani Dham, MR-9, Indore (M.P) 452001<br />
+                  <strong>DL No:</strong> 20B/5441/12/2024 | <strong>GSTIN:</strong> 27ABCDE1234F1Z5<br />
+                  <strong>Phone:</strong> +91 88396 40968 | <strong>Email:</strong> adgenpharmacy2024@gmail.com
                 </div>
               </div>
             </div>
 
             <div className="text-right">
-              <span className="inline-block px-3 py-1 bg-blue-100 text-blue-900 font-extrabold text-[11px] rounded-lg uppercase tracking-wider mb-2 print:bg-slate-200 print:text-black">
+              <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-900 font-extrabold text-[11px] rounded-lg uppercase tracking-wider mb-2 print:bg-slate-200 print:text-black">
                 PURCHASE GRN MEMO
               </span>
               <div className="text-xs font-mono font-extrabold text-slate-900">
@@ -123,16 +124,16 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
               <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Supplier Party / Distributor:</span>
               <span className="font-extrabold text-slate-900 text-sm">{purchase.party?.name || 'Distributor Party'}</span>
               {purchase.party?.phone && (
-                <span className="text-slate-600 font-medium ml-2">(📞 {purchase.party.phone})</span>
+                <span className="text-slate-600 font-medium ml-2 font-mono">(📞 {purchase.party.phone})</span>
               )}
             </div>
 
             <div className="text-right text-[11px]">
               {purchase.party?.gstin && (
-                <div><span className="font-bold text-slate-500">GSTIN:</span> {purchase.party.gstin}</div>
+                <div><span className="font-bold text-slate-500">GSTIN:</span> <span className="font-mono font-bold">{purchase.party.gstin}</span></div>
               )}
               {purchase.party?.dlNumber && (
-                <div><span className="font-bold text-slate-500">DL No:</span> {purchase.party.dlNumber}</div>
+                <div><span className="font-bold text-slate-500">DL No:</span> <span className="font-mono font-bold">{purchase.party.dlNumber}</span></div>
               )}
             </div>
           </div>
@@ -179,13 +180,47 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
             </tbody>
           </table>
 
-          {/* Grand Total Bar */}
-          <div className="border-t-2 border-slate-900 pt-3 flex justify-between items-center text-sm font-black text-slate-900">
-            <span>TOTAL PURCHASE VALUE INWARD</span>
-            <span className="font-mono text-lg text-emerald-800 print:text-black">
-              ₹{(purchase.grandTotal || subtotal).toFixed(2)}
-            </span>
-          </div>
+          {/* Grand Total & Tax Breakdown Bar */}
+          {(() => {
+            const taxTotal = purchase.taxTotal || 0;
+            const subtotalVal = purchase.subtotal || (purchase.grandTotal ? purchase.grandTotal - taxTotal : subtotal);
+            const totalOutflow = purchase.grandTotal || (subtotalVal + taxTotal);
+
+            return (
+              <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
+                <div className="text-[9px] text-slate-500 space-y-0.5 max-w-sm">
+                  <p className="font-bold text-slate-700 uppercase">Input Tax Credit (ITC) Declaration:</p>
+                  <p>1. Input Tax Credit claimed under Section 16 of CGST Act, 2017.</p>
+                  <p>2. Stock received & verified against supplier delivery challan.</p>
+                </div>
+
+                <div className="w-full sm:w-72 space-y-1.5 text-xs font-medium">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Taxable Inward Subtotal:</span>
+                    <span className="font-mono font-bold text-slate-900">₹{subtotalVal.toFixed(2)}</span>
+                  </div>
+                  {taxTotal > 0 && (
+                    <>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Input CGST Credit (50%):</span>
+                        <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Input SGST Credit (50%):</span>
+                        <span className="font-mono">₹{(taxTotal / 2).toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="border-t-2 border-slate-900 pt-1.5 flex justify-between items-center text-sm font-black text-slate-900">
+                    <span>TOTAL PROCUREMENT OUTFLOW:</span>
+                    <span className="font-mono text-base text-indigo-700 print:text-black">
+                      ₹{totalOutflow.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Footer Signature */}
           <div className="mt-8 pt-4 flex justify-between items-end border-t border-slate-200">
@@ -193,8 +228,8 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
               Goods Inward Verification Complete. Stock quantities added to FEFO inventory.
             </div>
             <div className="text-center font-bold text-xs text-slate-800">
-              <div className="h-10"></div>
-              <div className="border-t border-slate-400 px-4 pt-1">
+              <div className="h-8"></div>
+              <div className="border-t border-slate-400 px-4 pt-1 text-[11px]">
                 Verified By (Store In-Charge / Owner)
               </div>
             </div>

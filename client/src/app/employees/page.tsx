@@ -10,7 +10,7 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', role: 'EMPLOYEE', designation: 'Pharmacist' });
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'EMPLOYEE', designation: 'Pharmacist' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchUsers = async () => {
@@ -38,7 +38,7 @@ export default function EmployeesPage() {
       setIsSubmitting(true);
       await api.post('/users/register', formData);
       setShowAddModal(false);
-      setFormData({ name: '', email: '', role: 'EMPLOYEE', designation: 'Pharmacist' });
+      setFormData({ name: '', email: '', password: '', role: 'EMPLOYEE', designation: 'Pharmacist' });
       fetchUsers();
     } catch (err: any) { alert(err.response?.data?.error || 'Failed to add staff'); }
     finally { setIsSubmitting(false); }
@@ -159,6 +159,11 @@ export default function EmployeesPage() {
                 <div>
                   <label className="text-xs text-gray-500 font-medium block mb-1">Email *</label>
                   <input type="email" required value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-gray-900 focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 font-medium block mb-1">Password *</label>
+                  <input type="password" required value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     className="w-full bg-white border border-gray-200 rounded-md px-3 py-2 text-gray-900 focus:outline-none focus:border-emerald-500" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">

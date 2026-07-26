@@ -341,12 +341,15 @@ export default function PurchasesPage() {
                   <div className="font-extrabold text-slate-900 mt-1">
                     {toTitleCase(inspectBill.party?.name || 'Supplier')}
                   </div>
+                  {inspectBill.party?.phone && (
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">📞 {inspectBill.party.phone}</div>
+                  )}
                 </div>
 
                 <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">GSTIN Number</div>
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">GSTIN / DL Number</div>
                   <div className="font-mono font-extrabold text-slate-900 mt-1">
-                    {inspectBill.party?.gstin || '—'}
+                    {inspectBill.party?.gstNumber || inspectBill.party?.gstin || inspectBill.party?.dlNumber || '—'}
                   </div>
                 </div>
 
@@ -356,12 +359,33 @@ export default function PurchasesPage() {
                 </div>
 
                 <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Taxable Subtotal</div>
+                  <div className="font-mono font-bold text-slate-900 mt-1">
+                    ₹{(inspectBill.subtotal || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Input GST Tax</div>
+                  <div className="font-mono font-bold text-indigo-600 mt-1">
+                    ₹{(inspectBill.taxTotal || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
                   <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Grand Total</div>
                   <div className="font-mono font-extrabold text-indigo-700 text-sm mt-1">
                     ₹{(inspectBill.grandTotal || 0).toFixed(2)}
                   </div>
                 </div>
               </div>
+
+              {inspectBill.notes && (
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Purchase Entry Notes / Remarks:</span>
+                  <span className="font-medium text-slate-800">{inspectBill.notes}</span>
+                </div>
+              )}
 
               {/* Items List */}
               <div>
@@ -373,9 +397,10 @@ export default function PurchasesPage() {
                         <th className="py-2.5 px-3">Medicine Item</th>
                         <th className="py-2.5 px-3">Batch #</th>
                         <th className="py-2.5 px-3">Expiry</th>
-                        <th className="py-2.5 px-3 text-center">Qty Received</th>
+                        <th className="py-2.5 px-3 text-center">Qty Rec. (Free)</th>
                         <th className="py-2.5 px-3 text-right">P. Rate</th>
                         <th className="py-2.5 px-3 text-right">MRP</th>
+                        <th className="py-2.5 px-3 text-right">Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -391,13 +416,16 @@ export default function PurchasesPage() {
                             {formatDate(item.expiryDate || item.batch?.expiryDate)}
                           </td>
                           <td className="py-2.5 px-3 text-center font-bold font-mono text-indigo-700">
-                            {item.quantity} Strips
+                            {item.quantity} {item.freeQuantity ? `(+${item.freeQuantity} free)` : ''}
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono">
                             ₹{(item.purchaseRate || 0).toFixed(2)}
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
                             ₹{(item.mrp || 0).toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-extrabold text-indigo-800">
+                            ₹{(item.totalAmount || (item.quantity * item.purchaseRate) || 0).toFixed(2)}
                           </td>
                         </tr>
                       ))}

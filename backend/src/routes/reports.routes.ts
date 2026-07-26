@@ -44,7 +44,7 @@ router.get('/dashboard', authenticate, async (req: AuthenticatedRequest, res: Re
     for (const p of products) {
       const totalStock = p.batches.reduce((sum, b) => sum + b.quantity, 0);
       if (totalStock > 0) skusWithStock++;
-      const effectiveThreshold = p.lowStockThreshold > 1 ? p.lowStockThreshold : 10;
+      const effectiveThreshold = p.lowStockThreshold || 5;
       if (totalStock <= 0) outOfStockCount++;
       else if (totalStock <= effectiveThreshold) lowStockCount++;
 

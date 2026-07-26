@@ -46,6 +46,7 @@ export default function ProductsPage() {
     contentUnit: 'Tablet',
     requiresColdStorage: false,
     division: 'GENERAL',
+    lowStockThreshold: 5,
   });
 
   useEffect(() => {
@@ -154,6 +155,7 @@ export default function ProductsPage() {
                   contentUnit: 'Tablet',
                   requiresColdStorage: false,
                   division: 'GENERAL',
+                  lowStockThreshold: 5,
                 });
                 setShowAddModal(true);
               }}
@@ -294,6 +296,7 @@ export default function ProductsPage() {
                                 contentUnit: p.contentUnit || 'Tablet',
                                 requiresColdStorage: Boolean(p.requiresColdStorage),
                                 division: p.division || 'GENERAL',
+                                lowStockThreshold: p.lowStockThreshold || 5,
                               });
                               setShowAddModal(true);
                             }}
@@ -402,7 +405,7 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+            <form onSubmit={handleSubmit} className="space-y-3 text-xs max-h-[75vh] overflow-y-auto pr-1">
               <div>
                 <label className="block text-slate-600 font-bold mb-1">Brand Name *</label>
                 <input
@@ -438,17 +441,153 @@ export default function ProductsPage() {
                 </div>
               </div>
 
+              {/* Default MRP & Purchase Rate */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Default MRP/Pack (₹)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={formData.mrp || ''}
+                    onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Default Purchase Rate/Pack (₹)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={formData.purchaseRate || ''}
+                    onChange={(e) => setFormData({ ...formData, purchaseRate: parseFloat(e.target.value) || 0 })}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Dosage Form & HSN Code */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Dosage Form</label>
+                  <select
+                    value={formData.productType}
+                    onChange={(e) => setFormData({ ...formData, productType: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value="TABLET">TABLET</option>
+                    <option value="CAPSULE">CAPSULE</option>
+                    <option value="SYRUP">SYRUP</option>
+                    <option value="INJECTION">INJECTION</option>
+                    <option value="CREAM">CREAM</option>
+                    <option value="DROPS">DROPS</option>
+                    <option value="OINTMENT">OINTMENT</option>
+                    <option value="POWDER">POWDER</option>
+                    <option value="OTHERS">OTHERS</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">HSN Code</label>
+                  <input
+                    type="text"
+                    value={formData.hsnCode}
+                    onChange={(e) => setFormData({ ...formData, hsnCode: e.target.value })}
+                    placeholder="3004"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+
+              {/* Pack Size & Units */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Pack Size *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formData.packSize}
+                    onChange={(e) => setFormData({ ...formData, packSize: parseInt(e.target.value, 10) || 1 })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Pack Unit</label>
+                  <input
+                    type="text"
+                    value={formData.packUnit}
+                    onChange={(e) => setFormData({ ...formData, packUnit: e.target.value })}
+                    placeholder="Strip"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Content Unit</label>
+                  <input
+                    type="text"
+                    value={formData.contentUnit}
+                    onChange={(e) => setFormData({ ...formData, contentUnit: e.target.value })}
+                    placeholder="Tablet"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+
+              {/* GST % & Low Stock Threshold */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">GST Tax Rate</label>
+                  <select
+                    value={formData.gstPercent}
+                    onChange={(e) => setFormData({ ...formData, gstPercent: parseFloat(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value={0}>0% GST</option>
+                    <option value={5}>5% GST</option>
+                    <option value={12}>12% GST</option>
+                    <option value={18}>18% GST</option>
+                    <option value={28}>28% GST</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">Low Stock Alert Threshold</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formData.lowStockThreshold}
+                    onChange={(e) => setFormData({ ...formData, lowStockThreshold: parseFloat(e.target.value) || 5 })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Cold Storage Toggle */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="requiresColdStorage"
+                  checked={formData.requiresColdStorage}
+                  onChange={(e) => setFormData({ ...formData, requiresColdStorage: e.target.checked })}
+                  className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                />
+                <label htmlFor="requiresColdStorage" className="text-xs font-bold text-slate-700 cursor-pointer">
+                  Requires Cold Storage Refrigeration (2-8°C)
+                </label>
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs"
+                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs hover:bg-slate-200 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20"
+                  className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 hover:bg-emerald-700 transition"
                 >
                   Save Product
                 </button>

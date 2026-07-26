@@ -271,10 +271,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
           const matchBatch = existingBatches.find(b => b.productId === productId && b.batchNumber === batchNumber);
           if (matchBatch) {
+            const oldItem = existingBill.items.find(i => i.productId === productId && i.batchNumber === batchNumber);
+            const oldPacks = oldItem ? (oldItem.quantity + (oldItem.freeQuantity || 0)) : 0;
+            const oldContentUnits = oldPacks * packSize;
+            const deltaQty = newQty - oldContentUnits;
+            const updatedBatchQty = Math.max(0, matchBatch.quantity + deltaQty);
+
             await tx.inventoryBatch.update({
               where: { id: matchBatch.id },
               data: {
-                quantity: newQty,
+                quantity: updatedBatchQty,
                 mrp: parseFloat(mrp) || matchBatch.mrp,
                 purchaseRate: parseFloat(purchaseRate) || matchBatch.purchaseRate,
                 expiryDate: expiryDate ? new Date(expiryDate) : matchBatch.expiryDate,

@@ -25,8 +25,31 @@ import {
   Package,
   Receipt,
   Building2,
-  Percent
+  Percent,
+  Info
 } from 'lucide-react';
+
+function FormulaTooltip({ title, formula, note }: { title: string; formula: string; note?: string }) {
+  const [show, setShow] = useState(false);
+
+  return (
+    <div className="relative inline-block ml-1.5 align-middle" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      <button type="button" className="p-0.5 text-slate-400 hover:text-emerald-600 transition rounded-full focus:outline-none">
+        <Info className="w-3.5 h-3.5" />
+      </button>
+      {show && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-slate-900 text-white text-[11px] p-3 rounded-2xl shadow-xl z-50 pointer-events-none leading-normal">
+          <div className="font-extrabold text-emerald-400 mb-1">{title}</div>
+          <div className="font-mono text-[10px] text-slate-200 bg-slate-800 p-2 rounded-xl border border-slate-700/80 mb-1 font-semibold">
+            {formula}
+          </div>
+          {note && <div className="text-[10px] text-slate-400 italic mt-1">{note}</div>}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type TimeRangePreset = 'ALL_TIME' | 'TODAY' | 'YESTERDAY' | 'LAST_3_DAYS' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_MONTH' | 'LAST_QUARTER' | 'LAST_YEAR' | 'CUSTOM';
 
@@ -155,6 +178,19 @@ export default function ReportsPage() {
     const netGrossProfit = netSalesExclGst - totalCogs;
     const profitMarginPercent = totalSalesRevenue > 0 ? (netGrossProfit / totalSalesRevenue) * 100 : 0;
 
+    // Inventory Valuation
+    let inventoryMrpValue = 0;
+    let inventoryCostValue = 0;
+    inventory.forEach((inv) => {
+      (inv.batches || []).forEach((b: any) => {
+        if (b.quantity > 0) {
+          const packSize = inv.packSize || 1;
+          inventoryMrpValue += b.quantity * ((b.mrp || inv.mrp || 0) / packSize);
+          inventoryCostValue += b.quantity * ((b.purchaseRate || inv.purchaseRate || 0) / packSize);
+        }
+      });
+    });
+
     return {
       totalDiscounts,
       totalSalesRevenue,
@@ -170,8 +206,11 @@ export default function ReportsPage() {
       upiSales,
       cardSales,
       creditSales,
+      inventoryMrpValue,
+      inventoryCostValue,
+      potentialInventoryProfit: Math.max(0, inventoryMrpValue - inventoryCostValue),
     };
-  }, [filteredSales, filteredPurchases]);
+  }, [filteredSales, filteredPurchases, inventory]);
 
   const tabs = [
     { id: 'OVERVIEW', label: 'Overview' },
@@ -257,6 +296,37 @@ export default function ReportsPage() {
             ))}
           </div>
 
+          {timePreset === 'CUSTOM' && (
+            <div className="flex items-center gap-3 pt-2 pb-1 border-t border-slate-100 text-xs font-bold text-slate-700">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500">From Date:</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600 shadow-2xs"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500">To Date:</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600 shadow-2xs"
+                />
+              </div>
+              {(customStartDate || customEndDate) && (
+                <button
+                  onClick={() => { setCustomStartDate(''); setCustomEndDate(''); }}
+                  className="text-xs text-rose-600 hover:underline font-extrabold ml-auto"
+                >
+                  Clear Custom Range
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 overflow-x-auto border-t border-slate-100 pt-2">
             {tabs.map((tab) => (
               <button
@@ -281,27 +351,90 @@ export default function ReportsPage() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Sales Revenue</div>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Total Sales Revenue</span>
+                      <FormulaTooltip
+                        title="Total Sales Revenue"
+                        formula="∑ (SalesBill.grandTotal)"
+                        note="Sum of net total invoice amounts issued to customers within selected date range (including GST & after discounts)."
+                      />
+                    </div>
                     <div className="text-2xl font-black font-mono text-slate-900 mt-1">{formatCurrency(metrics.totalSalesRevenue)}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-1">{filteredSales.length} total bills</div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Purchases Cost</div>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Total Purchases Cost</span>
+                      <FormulaTooltip
+                        title="Total Procurement Cost"
+                        formula="∑ (PurchaseBill.grandTotal)"
+                        note="Sum of all supplier invoice bill amounts received within selected date range."
+                      />
+                    </div>
                     <div className="text-2xl font-black font-mono text-slate-900 mt-1">{formatCurrency(metrics.totalPurchasesCost)}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-1">{filteredPurchases.length} purchase invoices</div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Estimated Net Profit</div>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Estimated Net Profit</span>
+                      <FormulaTooltip
+                        title="Estimated Net Profit (Gross Profit)"
+                        formula="(Total Sales - Output GST) - COGS"
+                        note="Net revenue (excluding Output GST collected) minus exact Cost of Goods Sold (COGS) for medicines sold."
+                      />
+                    </div>
                     <div className="text-2xl font-black font-mono text-emerald-600 mt-1">{formatCurrency(metrics.netGrossProfit)}</div>
-                    <div className="text-xs text-emerald-700 font-extrabold mt-1">+{metrics.profitMarginPercent.toFixed(1)}% margin</div>
+                    <div className="text-xs text-emerald-700 font-extrabold mt-1 flex items-center justify-between">
+                      <span>+{metrics.profitMarginPercent.toFixed(1)}% margin</span>
+                      <FormulaTooltip
+                        title="Profit Margin Percentage"
+                        formula="(Net Profit ÷ Total Sales Revenue) × 100"
+                      />
+                    </div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Net GST Payable</div>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Net GST Payable</span>
+                      <FormulaTooltip
+                        title="Net GST Tax Liability (GSTR-3B)"
+                        formula="Math.max(0, Output GST - Input ITC)"
+                        note="Net cash GST liability payable to government after deducting Input Tax Credit (ITC) from Output GST collected."
+                      />
+                    </div>
                     <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
+                  </div>
+                </div>
+
+                {/* Inventory Stock Valuation Card */}
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-5 h-5 text-emerald-600" />
+                      <h3 className="font-extrabold text-slate-900 text-sm">Store Inventory Capital Valuation</h3>
+                    </div>
+                    <FormulaTooltip
+                      title="Store Inventory Valuation"
+                      formula="Valuation at MRP: ∑(Qty × MRP) | Valuation at Cost: ∑(Qty × Purchase Rate)"
+                      note="Total capital tied up in active pharmacy medicine batches sitting in stock."
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl">
+                      <span className="text-slate-400 font-extrabold uppercase text-[10px]">Total MRP Stock Value</span>
+                      <div className="text-lg font-black font-mono text-slate-900 mt-1">{formatCurrency(metrics.inventoryMrpValue)}</div>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl">
+                      <span className="text-slate-400 font-extrabold uppercase text-[10px]">Total Purchase Cost Value</span>
+                      <div className="text-lg font-black font-mono text-indigo-700 mt-1">{formatCurrency(metrics.inventoryCostValue)}</div>
+                    </div>
+                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl">
+                      <span className="text-emerald-800 font-extrabold uppercase text-[10px]">Potential Profit in Stock</span>
+                      <div className="text-lg font-black font-mono text-emerald-800 mt-1">{formatCurrency(metrics.potentialInventoryProfit)}</div>
+                    </div>
                   </div>
                 </div>
 
@@ -500,37 +633,62 @@ export default function ReportsPage() {
             {activeTab === 'PL' && (
               <div className="space-y-6">
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-6">
-                  <div className="border-b border-slate-200 pb-4">
-                    <h2 className="text-lg font-black text-slate-900">Statement of Profit & Loss (P&L)</h2>
-                    <p className="text-xs text-slate-500 font-medium mt-1">Financial performance statement for period {rangeLabel}</p>
+                  <div className="border-b border-slate-200 pb-4 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900">Statement of Profit & Loss (P&L)</h2>
+                      <p className="text-xs text-slate-500 font-medium mt-1">Financial performance statement for period {rangeLabel}</p>
+                    </div>
+                    <FormulaTooltip
+                      title="Net Profit & Loss Formula"
+                      formula="Net Profit = (Gross Sales - Output GST) - COGS"
+                      note="COGS is computed strictly from actual batch purchase rates assigned during inward entry."
+                    />
                   </div>
 
                   <table className="w-full text-left border-collapse text-sm">
                     <tbody className="divide-y divide-slate-200 font-medium">
                       <tr>
-                        <td className="py-3 text-slate-700 font-bold">Gross Sales Revenue</td>
+                        <td className="py-3 text-slate-700 font-bold flex items-center">
+                          <span>Gross Sales Revenue</span>
+                          <FormulaTooltip title="Gross Revenue" formula="∑ (SalesBill.grandTotal)" note="All customer sales bills within range." />
+                        </td>
                         <td className="py-3 text-right font-mono font-extrabold text-slate-900">{formatCurrency(metrics.totalSalesRevenue)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-slate-600">(-) Output GST Tax Collected</td>
+                        <td className="py-3 text-slate-600 flex items-center">
+                          <span>(-) Output GST Tax Collected</span>
+                          <FormulaTooltip title="Output GST Liability" formula="∑ (SalesBill.taxTotal)" note="Output tax collected on behalf of govt." />
+                        </td>
                         <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalOutputGst)}</td>
                       </tr>
                       <tr className="bg-slate-50 font-bold">
-                        <td className="py-3 px-3 text-slate-900">Net Sales Revenue (excl. GST)</td>
+                        <td className="py-3 px-3 text-slate-900 flex items-center">
+                          <span>Net Sales Revenue (excl. GST)</span>
+                          <FormulaTooltip title="Net Revenue" formula="Gross Sales Revenue - Output GST" note="Real top-line sales income retained by store." />
+                        </td>
                         <td className="py-3 px-3 text-right font-mono text-emerald-800">{formatCurrency(metrics.netSalesExclGst)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-slate-600">(-) Real Cost of Goods Sold (COGS)</td>
+                        <td className="py-3 text-slate-600 flex items-center">
+                          <span>(-) Real Cost of Goods Sold (COGS)</span>
+                          <FormulaTooltip title="Cost of Goods Sold" formula="∑ (Quantity Sold × Batch Purchase Rate)" note="Exact procurement cost of sold medicine units." />
+                        </td>
                         <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalCogs)}</td>
                       </tr>
                       <tr className="border-t-2 border-slate-900 font-black text-base">
-                        <td className="py-4 text-slate-900">ESTIMATED NET GROSS PROFIT</td>
+                        <td className="py-4 text-slate-900 flex items-center">
+                          <span>ESTIMATED NET GROSS PROFIT</span>
+                          <FormulaTooltip title="Net Gross Profit" formula="Net Sales Revenue (excl. GST) - COGS" />
+                        </td>
                         <td className={`py-4 text-right font-mono ${metrics.netGrossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
                           {formatCurrency(metrics.netGrossProfit)}
                         </td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-slate-600 font-bold">Net Gross Margin Percentage</td>
+                        <td className="py-3 text-slate-600 font-bold flex items-center">
+                          <span>Net Gross Margin Percentage</span>
+                          <FormulaTooltip title="Margin %" formula="(Gross Profit ÷ Gross Sales) × 100" />
+                        </td>
                         <td className="py-3 text-right font-mono font-black text-emerald-700">+{metrics.profitMarginPercent.toFixed(1)}%</td>
                       </tr>
                     </tbody>
@@ -544,35 +702,59 @@ export default function ReportsPage() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Output GST Liability</span>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Output GST Liability</span>
+                      <FormulaTooltip title="GSTR-1 Tax" formula="∑ (SalesBill.taxTotal)" note="Output tax collected from retail sales." />
+                    </div>
                     <div className="text-2xl font-black font-mono text-rose-600 mt-1">{formatCurrency(metrics.totalOutputGst)}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-1 Tax Collected</div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Input Tax Credit (ITC)</span>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Input Tax Credit (ITC)</span>
+                      <FormulaTooltip title="GSTR-2B ITC" formula="∑ (PurchaseBill.taxTotal)" note="Input GST paid to suppliers." />
+                    </div>
                     <div className="text-2xl font-black font-mono text-emerald-600 mt-1">{formatCurrency(metrics.totalInputGst)}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-2B Claimed</div>
                   </div>
 
                   <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
-                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Net Cash GST Payable</span>
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Net Cash GST Payable</span>
+                      <FormulaTooltip title="GSTR-3B Liability" formula="Math.max(0, Output GST - Input ITC)" note="Net tax payable to government cash ledger." />
+                    </div>
                     <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
-                    <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-3B Tax Liability</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
                   </div>
                 </div>
 
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-4">
-                  <h3 className="font-extrabold text-slate-900 text-sm">GSTR-1 & GSTR-3B Tax Liability Summary</h3>
-                  <p className="text-xs text-slate-500">Official GST Filing calculations for pharmacy retail sales and supplier procurement.</p>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="font-extrabold text-slate-900 text-sm">GSTR-1 & GSTR-3B Tax Liability Summary</h3>
+                      <p className="text-xs text-slate-500">Official GST Filing calculations for pharmacy retail sales and supplier procurement.</p>
+                    </div>
+                    <FormulaTooltip
+                      title="CGST / SGST Tax Split"
+                      formula="CGST = Output GST ÷ 2 | SGST = Output GST ÷ 2"
+                      note="Intra-state sales split tax 50-50 between Central and State governments."
+                    />
+                  </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                      <div className="text-xs font-bold text-slate-700">CGST (Central GST) - 50%</div>
+                      <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <span>CGST (Central GST) - 50%</span>
+                        <FormulaTooltip title="CGST" formula="Output GST × 50%" />
+                      </div>
                       <div className="text-lg font-black font-mono text-slate-900">{formatCurrency(metrics.totalOutputGst / 2)}</div>
                     </div>
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                      <div className="text-xs font-bold text-slate-700">SGST (State GST) - 50%</div>
+                      <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <span>SGST (State GST) - 50%</span>
+                        <FormulaTooltip title="SGST" formula="Output GST × 50%" />
+                      </div>
                       <div className="text-lg font-black font-mono text-slate-900">{formatCurrency(metrics.totalOutputGst / 2)}</div>
                     </div>
                   </div>
