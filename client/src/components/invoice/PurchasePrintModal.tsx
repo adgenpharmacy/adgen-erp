@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Printer, X, Share2, Check, FileText } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
+import { formatDate, numberToWords } from '@/lib/utils';
 
 interface PurchasePrintModalProps {
   purchase: any;
@@ -39,6 +39,8 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   };
 
   const items = purchase.items || [];
+  const totalBilledQty = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 1), 0);
+  const totalFreeQty = items.reduce((acc: number, i: any) => acc + (Number(i.freeQuantity) || 0), 0);
   const subtotal = items.reduce((acc: number, i: any) => acc + ((i.quantity || 1) * (i.purchaseRate || i.unitPrice || 0)), 0);
 
   return (
@@ -50,6 +52,12 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
         onClick={(e) => e.stopPropagation()}
         className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col transition-all"
       >
+        <style>{`
+          @media print {
+            @page { margin: 0; size: auto; }
+            body { margin: 0; }
+          }
+        `}</style>
         {/* Top Control Bar (Hidden on print) */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0 print:hidden">
           <div className="flex items-center gap-2 font-extrabold text-slate-900 text-sm">
@@ -178,9 +186,26 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                 );
               })}
             </tbody>
+
+            {/* TABLE FOOTER WITH TOTALS */}
+            <tfoot className="bg-slate-100 border-t-2 border-b border-slate-900 font-extrabold text-slate-900 text-xs">
+              <tr>
+                <td colSpan={4} className="py-2 px-2 text-left uppercase">
+                  Total Items: {items.length} Medicines
+                </td>
+                <td className="py-2 px-2 text-center font-mono">{totalBilledQty}</td>
+                <td className="py-2 px-2 text-center font-mono text-emerald-800">+{totalFreeQty} Free</td>
+                <td colSpan={2} className="py-2 px-2 text-right uppercase text-[11px]">
+                  Inward Subtotal:
+                </td>
+                <td className="py-2 px-2 text-right font-mono text-sm text-slate-900">
+                  ₹{subtotal.toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
 
-          {/* Grand Total & Tax Breakdown Bar */}
+          {/* Financial Breakdown & Summary */}
           {(() => {
             const taxTotal = purchase.taxTotal || 0;
             const subtotalVal = purchase.subtotal || (purchase.grandTotal ? purchase.grandTotal - taxTotal : subtotal);
@@ -188,13 +213,27 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
 
             return (
               <div className="border-t-2 border-slate-900 pt-3 flex flex-col sm:flex-row justify-between items-start gap-4">
-                <div className="text-[9px] text-slate-500 space-y-0.5 max-w-sm">
-                  <p className="font-bold text-slate-700 uppercase">Input Tax Credit (ITC) Declaration:</p>
-                  <p>1. Input Tax Credit claimed under Section 16 of CGST Act, 2017.</p>
-                  <p>2. Stock received & verified against supplier delivery challan.</p>
+                {/* Left Column: Words & ITC Declaration */}
+                <div className="space-y-3 max-w-md w-full">
+                  {/* Amount in Words Box */}
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                      Amount in Words:
+                    </span>
+                    <span className="font-extrabold text-slate-900 text-xs mt-0.5 block italic">
+                      {numberToWords(totalOutflow)}
+                    </span>
+                  </div>
+
+                  <div className="text-[9px] text-slate-500 space-y-0.5">
+                    <p className="font-bold text-slate-700 uppercase">Input Tax Credit (ITC) Declaration:</p>
+                    <p>1. Input Tax Credit claimed under Section 16 of CGST Act, 2017.</p>
+                    <p>2. Stock received & verified against supplier delivery challan.</p>
+                  </div>
                 </div>
 
-                <div className="w-full sm:w-72 space-y-1.5 text-xs font-medium">
+                {/* Right Column: Breakdown Box & Total Outflow Banner */}
+                <div className="w-full sm:w-80 space-y-1.5 text-xs font-medium">
                   <div className="flex justify-between text-slate-600">
                     <span>Taxable Inward Subtotal:</span>
                     <span className="font-mono font-bold text-slate-900">₹{subtotalVal.toFixed(2)}</span>
@@ -211,9 +250,16 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                       </div>
                     </>
                   )}
-                  <div className="border-t-2 border-slate-900 pt-1.5 flex justify-between items-center text-sm font-black text-slate-900">
-                    <span>TOTAL PROCUREMENT OUTFLOW:</span>
-                    <span className="font-mono text-base text-indigo-700 print:text-black">
+
+                  {/* PROMINENT PROCUREMENT OUTFLOW BANNER */}
+                  <div className="p-3 bg-indigo-900 text-white rounded-2xl flex justify-between items-center shadow-lg print:bg-slate-900 print:text-white mt-2">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-indigo-300 uppercase tracking-widest block print:text-slate-300">
+                        TOTAL PROCUREMENT OUTFLOW
+                      </span>
+                      <span className="text-xs font-bold text-indigo-100 print:text-slate-200">Net Purchase Bill</span>
+                    </div>
+                    <span className="font-mono text-xl font-black text-white">
                       ₹{totalOutflow.toFixed(2)}
                     </span>
                   </div>
