@@ -80,6 +80,11 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         return sum + (perUnitMrp * b.quantity);
       }, 0);
 
+      const totalCostValue = prod.batches.reduce((sum, b) => {
+        const perUnitCost = b.purchaseRate / packSize;
+        return sum + (perUnitCost * b.quantity);
+      }, 0);
+
       const latestBatch = prod.batches[0];
       const mrp = prod.mrp || latestBatch?.mrp || 0;
       const purchaseRate = prod.purchaseRate || latestBatch?.purchaseRate || 0;
@@ -100,6 +105,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         lowStockThreshold: prod.lowStockThreshold,
         systemStock: totalStock,
         totalMrpValue: Math.round(totalMrpValue * 100) / 100,
+        totalCostValue: Math.round(totalCostValue * 100) / 100,
         batches: prod.batches,
       };
     });

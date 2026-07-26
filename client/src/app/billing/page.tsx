@@ -288,13 +288,15 @@ function NewSalePageContent() {
     ? (grossSubtotal * (schemeDiscountValue / 100))
     : schemeDiscountValue;
 
-  const netTaxable = Math.max(0, grossSubtotal - schemeDiscountAmount);
-  const gstTotal = items.reduce((sum, item) => {
-    const lineTotal = getItemLineTotal(item);
-    return sum + (lineTotal * 0.12);
-  }, 0);
+  // MRP is tax-inclusive by Indian GST law for Retail Pharmacy POS:
+  // Grand Total = Total MRP - Discounts
+  // Taxable Subtotal = Grand Total / (1 + TaxRate)
+  // GST Tax Amount = Grand Total - Taxable Subtotal
+  const rawGrandTotal = Math.max(0, grossSubtotal - schemeDiscountAmount);
+  const gstRate = 0.12; // 12% default average GST
+  const netTaxable = rawGrandTotal / (1 + gstRate);
+  const gstTotal = rawGrandTotal - netTaxable;
 
-  const rawGrandTotal = netTaxable + gstTotal;
   const grandTotal = isRoundOff ? Math.round(rawGrandTotal) : rawGrandTotal;
 
   const totalContentUnits = items.reduce((sum, item) => {

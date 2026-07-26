@@ -28,11 +28,11 @@ import {
   XAxis, YAxis, Tooltip, Legend, CartesianGrid
 } from 'recharts';
 
-export type TimeRangePreset = 'TODAY' | 'YESTERDAY' | 'LAST_3_DAYS' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_MONTH' | 'LAST_QUARTER' | 'LAST_YEAR' | 'CUSTOM';
+export type TimeRangePreset = 'ALL_TIME' | 'TODAY' | 'YESTERDAY' | 'LAST_3_DAYS' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_MONTH' | 'LAST_QUARTER' | 'LAST_YEAR' | 'CUSTOM';
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST' | 'EXPIRY_RISK'>('OVERVIEW');
-  const [timePreset, setTimePreset] = useState<TimeRangePreset>('LAST_30_DAYS');
+  const [timePreset, setTimePreset] = useState<TimeRangePreset>('ALL_TIME');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   
@@ -54,20 +54,25 @@ export default function ReportsPage() {
 
   const { startDateObj, endDateObj, rangeLabel } = useMemo(() => {
     const now = new Date();
-    let start = new Date();
-    let end = new Date();
-    let label = 'Last 30 Days';
+    let start = new Date(0); // 1970 for ALL_TIME
+    let end = new Date(now.getFullYear() + 10, 11, 31); // Future for ALL_TIME
+    let label = 'All Historical Data';
     switch (timePreset) {
-      case 'TODAY': start.setHours(0, 0, 0, 0); end.setHours(23, 59, 59, 999); label = 'Today'; break;
-      case 'YESTERDAY': start.setDate(now.getDate() - 1); start.setHours(0, 0, 0, 0); end.setDate(now.getDate() - 1); end.setHours(23, 59, 59, 999); label = 'Yesterday'; break;
-      case 'LAST_3_DAYS': start.setDate(now.getDate() - 3); start.setHours(0, 0, 0, 0); label = 'Last 3 Days'; break;
-      case 'LAST_7_DAYS': start.setDate(now.getDate() - 7); start.setHours(0, 0, 0, 0); label = 'Last 7 Days'; break;
-      case 'LAST_30_DAYS': start.setDate(now.getDate() - 30); start.setHours(0, 0, 0, 0); label = 'Last 30 Days'; break;
+      case 'ALL_TIME':
+        start = new Date(2000, 0, 1);
+        end = new Date(2099, 11, 31);
+        label = 'All Time';
+        break;
+      case 'TODAY': start = new Date(); start.setHours(0, 0, 0, 0); end = new Date(); end.setHours(23, 59, 59, 999); label = 'Today'; break;
+      case 'YESTERDAY': start = new Date(); start.setDate(now.getDate() - 1); start.setHours(0, 0, 0, 0); end = new Date(); end.setDate(now.getDate() - 1); end.setHours(23, 59, 59, 999); label = 'Yesterday'; break;
+      case 'LAST_3_DAYS': start = new Date(); start.setDate(now.getDate() - 3); start.setHours(0, 0, 0, 0); label = 'Last 3 Days'; break;
+      case 'LAST_7_DAYS': start = new Date(); start.setDate(now.getDate() - 7); start.setHours(0, 0, 0, 0); label = 'Last 7 Days'; break;
+      case 'LAST_30_DAYS': start = new Date(); start.setDate(now.getDate() - 30); start.setHours(0, 0, 0, 0); label = 'Last 30 Days'; break;
       case 'LAST_MONTH': start = new Date(now.getFullYear(), now.getMonth() - 1, 1); end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59); label = 'Last Month'; break;
-      case 'LAST_QUARTER': start.setMonth(now.getMonth() - 3); start.setHours(0, 0, 0, 0); label = 'Last Quarter'; break;
-      case 'LAST_YEAR': start.setFullYear(now.getFullYear() - 1); start.setHours(0, 0, 0, 0); label = 'Last Year'; break;
+      case 'LAST_QUARTER': start = new Date(); start.setMonth(now.getMonth() - 3); start.setHours(0, 0, 0, 0); label = 'Last Quarter'; break;
+      case 'LAST_YEAR': start = new Date(); start.setFullYear(now.getFullYear() - 1); start.setHours(0, 0, 0, 0); label = 'Last Year'; break;
       case 'CUSTOM':
-        if (customStartDate) start = new Date(customStartDate); else start.setDate(now.getDate() - 30);
+        if (customStartDate) start = new Date(customStartDate); else start = new Date(2000, 0, 1);
         if (customEndDate) { end = new Date(customEndDate); end.setHours(23, 59, 59, 999); }
         label = 'Custom Range'; break;
     }
@@ -160,6 +165,7 @@ export default function ReportsPage() {
   ];
 
   const presets = [
+    { id: 'ALL_TIME', label: 'All Time' },
     { id: 'TODAY', label: 'Today' },
     { id: 'LAST_7_DAYS', label: '7 Days' },
     { id: 'LAST_30_DAYS', label: '30 Days' },

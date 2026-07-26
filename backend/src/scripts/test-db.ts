@@ -2,35 +2,45 @@ import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
 
-// Load .env manually (same as fresh-import.ts)
 const envPath = path.join(__dirname, '../../.env');
 if (fs.existsSync(envPath)) {
-  const envContents = fs.readFileSync(envPath, 'utf-8');
-  for (const line of envContents.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim().replace(/^"(.*)"$/, '$1');
-    if (!process.env[key]) process.env[key] = val;
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq === -1) continue;
+    const k = t.slice(0, eq).trim();
+    const v = t.slice(eq + 1).trim().replace(/^"(.*)"$/, '$1');
+    if (!process.env[k]) process.env[k] = v;
   }
 }
 
-const dbUrl = process.env.DATABASE_URL;
+const dbUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
 const prisma = new PrismaClient({ datasources: { db: { url: dbUrl } } });
 
-async function count() {
-  console.log('📊 DB Record Counts:');
-  console.log('---');
-  console.log('Party:         ', await prisma.party.count());
-  console.log('Product:       ', await prisma.product.count());
-  console.log('InventoryBatch:', await prisma.inventoryBatch.count());
-  console.log('PurchaseBill:  ', await prisma.purchaseBill.count());
-  console.log('SalesBill:     ', await prisma.salesBill.count());
-  console.log('Customer:      ', await prisma.customer.count());
-  console.log('---');
+async function verifyAllTables() {
+  const [parties, products, purchaseBills, purchaseItems, inventoryBatches, salesBills, salesItems, ledgerEntries] = await Promise.all([
+    prisma.party.count(),
+    prisma.product.count(),
+    prisma.purchaseBill.count(),
+    prisma.purchaseBillItem.count(),
+    prisma.inventoryBatch.count(),
+    prisma.salesBill.count(),
+    prisma.salesBillItem.count(),
+    prisma.ledgerEntry.count(),
+  ]);
+
+  console.log('\n📊 FINAL SUPABASE DATABASE ROW COUNTS:');
+  console.log(`  🏢 Parties:          ${parties}`);
+  console.log(`  💊 Products:         ${products}`);
+  console.log(`  🧾 Purchase Bills:   ${purchaseBills}`);
+  console.log(`  📦 Purchase Items:   ${purchaseItems}`);
+  console.log(`  🏷️  InventoryBatches: ${inventoryBatches}`);
+  console.log(`  🛒 Sales Bills:      ${salesBills}`);
+  console.log(`  🛍️  Sales Items:      ${salesItems}`);
+  console.log(`  📒 Ledger Entries:   ${ledgerEntries}`);
+
   await prisma.$disconnect();
 }
 
-count();
+verifyAllTables();

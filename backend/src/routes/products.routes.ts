@@ -118,15 +118,36 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
-// PUT /api/products/:id — Update a product
+// PUT /api/products/:id — Update a product with clean field casting
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const data = req.body;
+    const {
+      name, genericName, companyName, hsnCode, gstPercent, productType,
+      division, packSize, packUnit, contentUnit, requiresColdStorage,
+      lowStockThreshold, mrp, purchaseRate, isActive
+    } = req.body;
+
+    const dataToUpdate: any = {};
+    if (name !== undefined) dataToUpdate.name = name;
+    if (genericName !== undefined) dataToUpdate.genericName = genericName;
+    if (companyName !== undefined) dataToUpdate.companyName = companyName;
+    if (hsnCode !== undefined) dataToUpdate.hsnCode = hsnCode;
+    if (gstPercent !== undefined) dataToUpdate.gstPercent = parseFloat(gstPercent);
+    if (productType !== undefined) dataToUpdate.productType = productType;
+    if (division !== undefined) dataToUpdate.division = division;
+    if (packSize !== undefined) dataToUpdate.packSize = parseInt(packSize, 10);
+    if (packUnit !== undefined) dataToUpdate.packUnit = packUnit;
+    if (contentUnit !== undefined) dataToUpdate.contentUnit = contentUnit;
+    if (requiresColdStorage !== undefined) dataToUpdate.requiresColdStorage = Boolean(requiresColdStorage);
+    if (lowStockThreshold !== undefined) dataToUpdate.lowStockThreshold = parseFloat(lowStockThreshold);
+    if (mrp !== undefined) dataToUpdate.mrp = parseFloat(mrp);
+    if (purchaseRate !== undefined) dataToUpdate.purchaseRate = parseFloat(purchaseRate);
+    if (isActive !== undefined) dataToUpdate.isActive = Boolean(isActive);
 
     const updated = await prisma.product.update({
       where: { id },
-      data,
+      data: dataToUpdate,
     });
 
     res.json(updated);

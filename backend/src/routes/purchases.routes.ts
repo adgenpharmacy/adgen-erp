@@ -28,24 +28,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 // GET /api/purchases/next-number — Get next DB sequential purchase invoice number
 router.get('/next-number', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const latestBill = await prisma.purchaseBill.findFirst({
-      orderBy: { createdAt: 'desc' },
-      select: { invoiceNumber: true },
-    });
-    
-    let nextSeq = 1001;
-    if (latestBill && latestBill.invoiceNumber) {
-      const match = latestBill.invoiceNumber.match(/PUR-(\d+)/);
-      if (match) {
-        nextSeq = parseInt(match[1], 10) + 1;
-      } else {
-        const count = await prisma.purchaseBill.count();
-        nextSeq = count + 1001;
-      }
-    }
-    
-    const nextNum = `PUR-${String(nextSeq).padStart(6, '0')}`;
-    res.json({ nextInvoiceNumber: nextNum });
+    const count = await prisma.purchaseBill.count();
+    const nextInvoiceNumber = `PUR-${String(count + 1).padStart(6, '0')}`;
+    res.json({ nextInvoiceNumber });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -100,10 +85,16 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
 
       const grandTotal = subtotal + taxTotal;
 
+      let finalInvoiceNum = (invoiceNumber || '').trim();
+      if (!finalInvoiceNum) {
+        const count = await tx.purchaseBill.count();
+        finalInvoiceNum = `PUR-${String(count + 1).padStart(6, '0')}`;
+      }
+
       // 1. Create PurchaseBill
       const bill = await tx.purchaseBill.create({
         data: {
-          invoiceNumber,
+          invoiceNumber: finalInvoiceNum,
           partyId,
           purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
           subtotal,

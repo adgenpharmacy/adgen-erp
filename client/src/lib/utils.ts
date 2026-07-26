@@ -41,11 +41,12 @@ export function formatPackQuantity(
     return `${qty} ${qty === 1 ? 'Unit' : 'Units'}`;
   }
 
+  const decimalStrips = Math.round((qty / pack) * 100) / 100;
   const strips = Math.floor(qty / pack);
   const loose = Math.round(qty % pack);
 
   if (strips > 0 && loose > 0) {
-    return `${strips} ${strips === 1 ? pUnit : pUnit + 's'} + ${loose} Loose`;
+    return `${decimalStrips} ${pUnit}s (${strips} ${pUnit} + ${loose} Loose)`;
   }
   if (strips > 0) {
     return `${strips} ${strips === 1 ? pUnit : pUnit + 's'} (${qty} ${cUnit}s)`;

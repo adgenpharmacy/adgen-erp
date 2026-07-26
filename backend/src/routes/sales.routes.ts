@@ -27,6 +27,17 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
+// GET /api/sales/next-number — Get next DB sequential sales invoice number
+router.get('/next-number', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const count = await prisma.salesBill.count();
+    const nextInvoiceNumber = `INV-${String(count + 1).padStart(6, '0')}`;
+    res.json({ nextInvoiceNumber });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/sales — Create sale with atomic stock deduction & ledger entry
 router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -116,12 +127,16 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         cleanCustName = 'Walk-in Retail Customer';
       }
 
-      const generatedInvoiceNum = `INV-${Date.now().toString().slice(-6)}`;
+      let finalInvoiceNum = (req.body.invoiceNumber || '').trim();
+      if (!finalInvoiceNum) {
+        const count = await tx.salesBill.count();
+        finalInvoiceNum = `INV-${String(count + 1).padStart(6, '0')}`;
+      }
 
       // 4. Create SalesBill with customer metadata & FEFO line items
       const bill = await tx.salesBill.create({
         data: {
-          invoiceNumber: generatedInvoiceNum,
+          invoiceNumber: finalInvoiceNum,
           customerId: customerId || null,
           customerName: cleanCustName,
           customerPhone: customerPhone || null,

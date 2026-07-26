@@ -46,7 +46,8 @@ export default function InventoryPage() {
 
   // Header Summary Stats Calculation
   const stats = useMemo(() => {
-    let totalStockValue = 0;
+    let totalMrpValue = 0;
+    let totalCostValue = 0;
     let expiringCount = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
@@ -55,7 +56,10 @@ export default function InventoryPage() {
       const stock = inv.systemStock || 0;
       const lowThreshold = inv.lowStockThreshold || 5;
       const mrp = inv.mrp || 0;
-      totalStockValue += (inv.totalMrpValue || (stock * mrp));
+      const prate = inv.purchaseRate || 0;
+
+      totalMrpValue += (inv.totalMrpValue || (stock * mrp));
+      totalCostValue += (inv.totalCostValue || (stock * prate));
 
       if (stock === 0) outOfStockCount++;
       else if (stock <= lowThreshold) lowStockCount++;
@@ -70,7 +74,8 @@ export default function InventoryPage() {
 
     return {
       totalProducts: inventory.length,
-      totalStockValue,
+      totalMrpValue,
+      totalCostValue,
       expiringCount,
       lowStockCount,
       outOfStockCount,
@@ -130,9 +135,14 @@ export default function InventoryPage() {
             
             {/* Inline 1-Line KPI Metrics */}
             <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-600 mt-1.5">
-              <span className="flex items-center gap-1 text-slate-900 font-extrabold">
-                <span className="text-slate-400 font-normal">Stock Value:</span>
-                <span className="font-mono text-emerald-700">₹{(stats.totalStockValue / 100000).toFixed(2)}L</span>
+              <span className="flex items-center gap-1 text-slate-900 font-extrabold" title="Gross Stock Value if sold at MRP">
+                <span className="text-slate-400 font-normal">MRP Value:</span>
+                <span className="font-mono text-emerald-700">₹{(stats.totalMrpValue / 100000).toFixed(2)}L</span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="flex items-center gap-1 text-slate-900 font-extrabold" title="Capital Invested based on Purchase Rate">
+                <span className="text-slate-400 font-normal">Cost Value:</span>
+                <span className="font-mono text-blue-700">₹{(stats.totalCostValue / 100000).toFixed(2)}L</span>
               </span>
               <span className="text-slate-300">•</span>
               <span className="flex items-center gap-1 text-rose-700 font-extrabold">
@@ -302,9 +312,14 @@ export default function InventoryPage() {
                           {toTitleCase(inv.companyName || 'Generic')}
                         </td>
 
-                        {/* Stock Valuation */}
-                        <td className="py-2 px-3 text-right font-mono font-extrabold text-slate-900 text-sm">
-                          ₹{(inv.totalMrpValue || (stock * (inv.mrp || 0))).toFixed(2)}
+                        {/* Stock Valuation (MRP & Cost) */}
+                        <td className="py-2 px-3 text-right font-mono text-sm">
+                          <div className="font-extrabold text-slate-900" title="MRP Valuation">
+                            ₹{(inv.totalMrpValue || (stock * (inv.mrp || 0))).toFixed(2)}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-semibold" title="Purchase Cost Valuation">
+                            Cost: ₹{(inv.totalCostValue || (stock * (inv.purchaseRate || 0))).toFixed(2)}
+                          </div>
                         </td>
 
                         {/* Hover Action Buttons */}
