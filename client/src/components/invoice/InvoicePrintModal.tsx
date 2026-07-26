@@ -17,7 +17,14 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   if (!activeInvoice) return null;
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+    const invNum = activeInvoice.invoiceNumber || activeInvoice.id || 'Draft';
+    const custName = (activeInvoice.customerName || activeInvoice.customer?.name || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+    document.title = `Tax_Invoice_${invNum}_${custName}_AdGen_Pharma`;
     window.print();
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 1000);
   };
 
   const handleShare = async () => {
@@ -70,8 +77,8 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
       >
         <style>{`
           @media print {
-            @page { margin: 0; size: auto; }
-            body { margin: 0; }
+            @page { margin: 0.8cm; size: auto; }
+            html, body { margin: 0; padding: 0; background: #ffffff; }
           }
         `}</style>
         {/* Top Control Bar (Hidden on print) */}

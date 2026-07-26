@@ -15,7 +15,14 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   if (!purchase) return null;
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+    const invNum = purchase.invoiceNumber || purchase.id || 'Draft';
+    const partyName = (purchase.party?.name || 'Supplier').replace(/[^a-zA-Z0-9_-]/g, '_');
+    document.title = `Purchase_Invoice_${invNum}_${partyName}_AdGen_Pharma`;
     window.print();
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 1000);
   };
 
   const handleShare = async () => {
@@ -54,8 +61,8 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
       >
         <style>{`
           @media print {
-            @page { margin: 0; size: auto; }
-            body { margin: 0; }
+            @page { margin: 0.8cm; size: auto; }
+            html, body { margin: 0; padding: 0; background: #ffffff; }
           }
         `}</style>
         {/* Top Control Bar (Hidden on print) */}
