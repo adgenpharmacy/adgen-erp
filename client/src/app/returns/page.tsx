@@ -116,22 +116,31 @@ export default function ReturnsPage() {
   const handleCreatePurchaseReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     const validItems = prItems.filter(i => i.productName && i.quantity > 0);
-    if (validItems.length === 0) {
-      alert('Please fill at least 1 supplier return item!');
-      return;
+    const itemsToSubmit = [];
+    for (const item of validItems) {
+      let matchedId = item.productId;
+      if (!matchedId && item.productName) {
+        const found = productsList.find(p => p.name.toLowerCase().trim() === item.productName.toLowerCase().trim());
+        if (found) matchedId = found.id;
+      }
+      if (!matchedId) {
+        alert(`Medicine "${item.productName}" not found in catalog. Please select a valid medicine.`);
+        return;
+      }
+      itemsToSubmit.push({
+        productId: matchedId,
+        batchNumber: item.batchNumber || 'DEFAULT',
+        quantity: parseFloat(item.quantity),
+        purchaseRate: parseFloat(item.purchaseRate),
+        reason: item.reason,
+      });
     }
 
     try {
       await api.post('/returns/purchases', {
         refundMethod: prRefundMethod,
         notes: `${prPartyName ? 'Supplier: ' + prPartyName + ' • ' : ''}${prNotes}`,
-        items: validItems.map(i => ({
-          productId: i.productId || productsList[0]?.id || 'def-prod',
-          batchNumber: i.batchNumber || 'DEFAULT',
-          quantity: parseFloat(i.quantity),
-          purchaseRate: parseFloat(i.purchaseRate),
-          reason: i.reason,
-        })),
+        items: itemsToSubmit,
       });
 
       alert('Purchase Return Debit Note created & inventory stock deducted!');

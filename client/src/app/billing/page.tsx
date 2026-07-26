@@ -352,7 +352,7 @@ function NewSalePageContent() {
           batchId: i.batchId,
           quantity: ((parseFloat(i.quantityStrips) || 0) * (i.packSize || 1)) + (parseFloat(i.quantityLoose) || 0),
           unitPrice: (parseFloat(i.mrp) || 0) / (i.packSize || 1),
-          taxPercent: 12,
+          taxPercent: i.taxPercent !== undefined ? parseFloat(i.taxPercent) : (i.gstPercent !== undefined ? parseFloat(i.gstPercent) : 12),
           discountPercent: i.discountPercent || 0,
         })),
       };

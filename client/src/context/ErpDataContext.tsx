@@ -29,7 +29,7 @@ const ErpDataContext = createContext<ErpDataContextType>({
 });
 
 const GLOBAL_CACHE_KEY = 'adgen_global_erp_cache_v1';
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 mins cache TTL
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 mins cache TTL
 
 export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();

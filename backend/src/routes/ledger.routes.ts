@@ -64,7 +64,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         customerId: null,
         partyId: b.partyId,
         transactionType: 'DEBIT',
-        amount: b.grandTotal,
+        amount: b.grandTotal - (b.amountPaid || 0),
         description: `Unpaid Supplier Purchase Bill #${b.invoiceNumber} (${b.party?.name || 'Supplier'})`,
         isSettled: false,
         salesBillId: null,

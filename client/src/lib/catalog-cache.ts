@@ -2,7 +2,7 @@ import { api } from './api-client';
 
 const PRODUCTS_CACHE_KEY = 'adgen_products_cache_v2';
 const INVENTORY_CACHE_KEY = 'adgen_inventory_cache_v2';
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes TTL for responsive stock sync
 
 let memoryProducts: { data: any[]; timestamp: number } | null = null;
 let memoryInventory: { data: any[]; timestamp: number } | null = null;

@@ -75,22 +75,8 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           });
         }
 
-        if (!batch && productId) {
-          // Auto-create fallback initial batch for zero-stock catalog medicines
-          batch = await tx.inventoryBatch.create({
-            data: {
-              productId,
-              batchNumber: 'INITIAL-STOCK',
-              expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-              quantity: 100,
-              purchaseRate: parseFloat(unitPrice) * 0.7,
-              mrp: parseFloat(unitPrice),
-            },
-          });
-        }
-
         if (!batch) {
-          throw new Error(`No available batch found for product ${productId}`);
+          throw new Error(`No available stock batch found for product ID ${productId}`);
         }
 
         batchId = batch.id;
@@ -274,10 +260,13 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
         }
       }
 
-      // 2. Delete linked customer ledger entries if any
+      // 2. Delete linked SalesReturn records to prevent FK constraint failure
+      await tx.salesReturn.deleteMany({ where: { salesBillId: id } });
+
+      // 3. Delete linked customer ledger entries if any
       await tx.ledgerEntry.deleteMany({ where: { salesBillId: id } });
 
-      // 3. Delete bill (Cascades to items)
+      // 4. Delete bill (Cascades to items)
       await tx.salesBill.delete({ where: { id } });
     });
 
@@ -487,45 +476,6 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
   }
 });
 
-// DELETE /api/sales/:id - Void / Delete Sales Bill with stock restoration & ledger cleanup
-router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    await prisma.$transaction(async (tx) => {
-      const existingBill = await tx.salesBill.findUnique({
-        where: { id },
-        include: { items: true },
-      });
 
-      if (!existingBill) {
-        throw new Error('Sales bill not found');
-      }
-
-      // 1. Restore inventory batch quantities
-      for (const item of existingBill.items) {
-        if (item.batchId) {
-          await tx.inventoryBatch.update({
-            where: { id: item.batchId },
-            data: { quantity: { increment: item.quantity } },
-          }).catch(() => null);
-        }
-      }
-
-      // 2. Delete linked SalesReturn records to prevent FK constraint failure
-      await tx.salesReturn.deleteMany({ where: { salesBillId: id } });
-
-      // 3. Delete linked LedgerEntry records
-      await tx.ledgerEntry.deleteMany({ where: { salesBillId: id } });
-
-      // 4. Delete SalesBillItems and SalesBill
-      await tx.salesBillItem.deleteMany({ where: { salesBillId: id } });
-      await tx.salesBill.delete({ where: { id } });
-    });
-
-    res.json({ message: 'Sales bill deleted successfully and stock restored' });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || 'Failed to delete sales bill' });
-  }
-});
 
 export default router;

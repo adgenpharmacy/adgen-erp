@@ -91,11 +91,27 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
             customerId,
             transactionType: 'DEBIT',
             amount: totalReturnAmount,
+            salesBillId: salesBillId || null,
             paymentMethod: refundMethod || 'CREDIT_NOTE',
             description: `Sales Return Credit Note ${returnNumber}`,
             isSettled: true,
           },
         });
+
+        // Apply credit note to linked sales bill if present
+        if (salesBillId) {
+          const bill = await tx.salesBill.findUnique({ where: { id: salesBillId } });
+          if (bill) {
+            const newAmountPaid = Math.min(bill.grandTotal, bill.amountPaid + totalReturnAmount);
+            await tx.salesBill.update({
+              where: { id: salesBillId },
+              data: {
+                amountPaid: newAmountPaid,
+                isSettled: newAmountPaid >= bill.grandTotal - 0.01,
+              },
+            });
+          }
+        }
       }
 
       return record;
@@ -187,19 +203,36 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
         }
       }
 
-      // Create Ledger entry for Supplier Debit Note
+      // Create Ledger entry for Supplier Debit Note (Reduces Supplier Debt)
       if (partyId) {
         await tx.ledgerEntry.create({
           data: {
             partyType: 'SUPPLIER',
             partyId,
-            transactionType: 'DEBIT',
+            transactionType: 'CREDIT',
             amount: totalReturnAmount,
+            purchaseBillId: purchaseBillId || null,
             paymentMethod: refundMethod || 'DEBIT_NOTE',
             description: `Purchase Return Debit Note ${returnNumber}`,
             isSettled: true,
           },
         });
+
+        // Apply debit note to linked purchase bill if present
+        if (purchaseBillId) {
+          const bill = await tx.purchaseBill.findUnique({ where: { id: purchaseBillId } });
+          if (bill) {
+            const currentPaid = bill.amountPaid || 0;
+            const newAmountPaid = Math.min(bill.grandTotal, currentPaid + totalReturnAmount);
+            await tx.purchaseBill.update({
+              where: { id: purchaseBillId },
+              data: {
+                amountPaid: newAmountPaid,
+                isPaid: newAmountPaid >= bill.grandTotal - 0.01,
+              },
+            });
+          }
+        }
       }
 
       return record;
