@@ -52,7 +52,6 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       take,
       include: {
         batches: {
-          where: { quantity: { gt: 0 } },
           orderBy: { expiryDate: 'asc' },
         },
       },

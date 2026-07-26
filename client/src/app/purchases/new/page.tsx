@@ -37,7 +37,7 @@ function NewPurchasePageContent() {
   // Bill Header State
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [partyId, setPartyId] = useState('');
-  const [paymentType, setPaymentType] = useState<'CASH' | 'CREDIT' | 'BANK'>('CREDIT');
+  const [paymentType, setPaymentType] = useState<'CASH' | 'CREDIT' | 'BANK'>('CASH');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Discount & Roundoff State
@@ -300,12 +300,20 @@ function NewPurchasePageContent() {
         partyId,
         isPaid: paymentType === 'CASH',
         purchaseDate,
-        items: validItems.map((i) => ({
-          ...i,
-          expiryDate: i.expiryDate.includes('/') 
-            ? `20${i.expiryDate.split('/')[1]}-${i.expiryDate.split('/')[0]}-01`
-            : i.expiryDate,
-        })),
+        items: validItems.map((i) => {
+          let formattedExpiry = i.expiryDate;
+          if (i.expiryDate && i.expiryDate.includes('/')) {
+            const parts = i.expiryDate.split('/');
+            const month = parts[0].padStart(2, '0');
+            let year = parts[1] || '';
+            if (year.length === 2) year = `20${year}`;
+            formattedExpiry = `${year}-${month}-01`;
+          }
+          return {
+            ...i,
+            expiryDate: formattedExpiry,
+          };
+        }),
       };
 
       if (editId) {
@@ -339,7 +347,9 @@ function NewPurchasePageContent() {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-bold text-slate-900">New Purchase Entry</h1>
+            <h1 className="text-xl font-bold text-slate-900">
+              {editId ? 'Edit Purchase Entry' : 'New Purchase Entry'}
+            </h1>
           </div>
 
           <button
@@ -348,7 +358,7 @@ function NewPurchasePageContent() {
             className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-sm transition shadow-md shadow-emerald-600/20 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            <span>{isSubmitting ? 'Saving...' : 'Save Purchase'}</span>
+            <span>{isSubmitting ? (editId ? 'Updating...' : 'Saving...') : (editId ? 'Update Purchase' : 'Save Purchase')}</span>
           </button>
         </div>
 

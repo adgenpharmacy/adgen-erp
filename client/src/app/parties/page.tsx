@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
+import { useErpData } from '@/context/ErpDataContext';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import { Search, Plus, Edit2 } from 'lucide-react';
 
 export default function PartiesPage() {
+  const { parties: cachedParties, refreshData } = useErpData();
   const [parties, setParties] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -14,12 +16,25 @@ export default function PartiesPage() {
   const [formData, setFormData] = useState({ name: '', phone: '', email: '', address: '', gstNumber: '', dlNumber: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (cachedParties && cachedParties.length > 0) {
+      setParties(cachedParties);
+    }
+  }, [cachedParties]);
+
   const fetchParties = async () => {
-    try { const res = await api.get('/parties'); setParties(res.data); }
-    catch (e) { console.error('Failed to fetch suppliers:', e); }
+    try { 
+      const res = await api.get('/parties'); 
+      setParties(res.data);
+      refreshData();
+    } catch (e) { 
+      console.error('Failed to fetch suppliers:', e); 
+    }
   };
 
-  useEffect(() => { fetchParties(); }, []);
+  useEffect(() => { 
+    fetchParties(); 
+  }, []);
 
   const openAddModal = () => {
     setEditingParty(null);

@@ -4,7 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middlewa
 
 const router = Router();
 
-// GET /api/parties — Fetch all suppliers with query search (q) & computed outstanding balance
+// GET /api/parties — Fetch all suppliers with query search (q) & computed outstanding balance (amountPaid synced)
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { q } = req.query;
@@ -24,7 +24,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       include: {
         purchaseBills: {
           where: { isPaid: false },
-          select: { grandTotal: true },
+          select: { grandTotal: true, amountPaid: true },
         },
       },
     });
@@ -50,7 +50,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 
     const result = parties.map((p) => {
       const outstandingBalance = p.purchaseBills.reduce(
-        (sum, bill) => sum + bill.grandTotal,
+        (sum, bill) => sum + (bill.grandTotal - (bill.amountPaid || 0)),
         0
       );
       const { purchaseBills, ...partyData } = p;

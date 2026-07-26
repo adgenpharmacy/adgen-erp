@@ -83,13 +83,13 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
         }
       }
 
-      // Create Ledger entry for Credit Note
+      // Create Ledger entry for Credit Note (Reduces Customer Debt)
       if (customerId) {
         await tx.ledgerEntry.create({
           data: {
             partyType: 'CUSTOMER',
             customerId,
-            transactionType: 'CREDIT',
+            transactionType: 'DEBIT',
             amount: totalReturnAmount,
             paymentMethod: refundMethod || 'CREDIT_NOTE',
             description: `Sales Return Credit Note ${returnNumber}`,

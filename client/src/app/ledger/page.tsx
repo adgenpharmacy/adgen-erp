@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
+import { useErpData } from '@/context/ErpDataContext';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import { formatDate } from '@/lib/utils';
 import { Search, Plus } from 'lucide-react';
 
 export default function LedgerPage() {
+  const { ledgers: cachedLedgers, customers: cachedCustomers, parties: cachedParties, refreshData } = useErpData();
   const [ledgers, setLedgers] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [parties, setParties] = useState<any[]>([]);
@@ -18,15 +20,23 @@ export default function LedgerPage() {
   const [amount, setAmount] = useState<number>(0);
   const [notes, setNotes] = useState('');
 
+  useEffect(() => {
+    if (cachedLedgers?.length > 0) setLedgers(cachedLedgers);
+    if (cachedCustomers?.length > 0) setCustomers(cachedCustomers);
+    if (cachedParties?.length > 0) setParties(cachedParties);
+  }, [cachedLedgers, cachedCustomers, cachedParties]);
+
   const fetchLedgers = async () => {
-    try { const res = await api.get('/ledger'); setLedgers(res.data); }
+    try { 
+      const res = await api.get('/ledger'); 
+      setLedgers(res.data); 
+      refreshData();
+    }
     catch (e) { console.error('Failed to fetch ledgers:', e); }
   };
 
   useEffect(() => {
     fetchLedgers();
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(console.error);
-    api.get('/parties').then((r) => setParties(r.data)).catch(console.error);
   }, []);
 
   const handleSettlePayment = async (e: React.FormEvent) => {

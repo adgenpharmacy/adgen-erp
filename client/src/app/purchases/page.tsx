@@ -261,8 +261,8 @@ export default function PurchasesPage() {
                         <td className="py-2 px-4 text-right">
                           <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                             <button
-                              onClick={() => setEditingPurchase({ ...p })}
-                              className="p-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                              onClick={() => router.push(`/purchases/new?id=${p.id}`)}
+                              className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
                               title="Edit Purchase Bill"
                             >
                               <Edit3 className="w-4 h-4" />
@@ -410,12 +410,12 @@ export default function PurchasesPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
-                      setEditingPurchase({ ...inspectBill });
+                      router.push(`/purchases/new?id=${inspectBill.id}`);
                       setInspectBill(null);
                     }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
                   >
-                    <Edit3 className="w-4 h-4" /> Edit Purchase
+                    <Edit3 className="w-4 h-4" /> Edit Purchase Entry
                   </button>
                   <button
                     onClick={() => setSelectedPurchaseForPrint(inspectBill)}

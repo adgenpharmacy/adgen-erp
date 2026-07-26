@@ -4,7 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middlewa
 
 const router = Router();
 
-// GET /api/ledger — Fetch all ledger entries
+// GET /api/ledger — Fetch all ledger entries (amountPaid synced)
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const entries = await prisma.ledgerEntry.findMany({
@@ -89,21 +89,82 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 router.post('/payment', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { type, customerId, partyId, amount, notes } = req.body;
+    const paymentAmount = parseFloat(amount);
 
-    if (!amount || parseFloat(amount) <= 0) {
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
       return res.status(400).json({ error: 'Valid payment amount is required' });
     }
 
-    const entry = await prisma.ledgerEntry.create({
-      data: {
-        partyType: type === 'CUSTOMER' ? 'CUSTOMER' : 'SUPPLIER',
-        customerId: type === 'CUSTOMER' ? customerId : null,
-        partyId: type === 'PARTY' ? partyId : null,
-        transactionType: type === 'CUSTOMER' ? 'DEBIT' : 'CREDIT',
-        amount: parseFloat(amount),
-        description: notes || `Debt Repayment Settlement (${type})`,
-        isSettled: true,
-      },
+    const entry = await prisma.$transaction(async (tx) => {
+      // 1. Create Ledger entry for payment
+      const ledgerRecord = await tx.ledgerEntry.create({
+        data: {
+          partyType: type === 'CUSTOMER' ? 'CUSTOMER' : 'SUPPLIER',
+          customerId: type === 'CUSTOMER' ? customerId : null,
+          partyId: type === 'PARTY' || type === 'SUPPLIER' ? partyId : null,
+          transactionType: type === 'CUSTOMER' ? 'DEBIT' : 'CREDIT',
+          amount: paymentAmount,
+          description: notes || `Debt Repayment Settlement (${type})`,
+          isSettled: true,
+        },
+      });
+
+      // 2. If Customer payment, apply funds to open sales bills sequentially
+      if (type === 'CUSTOMER' && customerId) {
+        let remainingFunds = paymentAmount;
+        const openBills = await tx.salesBill.findMany({
+          where: { customerId, isSettled: false },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        for (const bill of openBills) {
+          if (remainingFunds <= 0) break;
+          const due = bill.grandTotal - bill.amountPaid;
+          const payForBill = Math.min(due, remainingFunds);
+          const newAmountPaid = bill.amountPaid + payForBill;
+          const isSettled = newAmountPaid >= bill.grandTotal;
+
+          await tx.salesBill.update({
+            where: { id: bill.id },
+            data: {
+              amountPaid: newAmountPaid,
+              isSettled,
+            },
+          });
+
+          remainingFunds -= payForBill;
+        }
+      }
+
+      // 3. If Supplier payment, mark open purchase bills as paid sequentially with partial payment support
+      if ((type === 'PARTY' || type === 'SUPPLIER') && partyId) {
+        let remainingFunds = paymentAmount;
+        const openBills = await tx.purchaseBill.findMany({
+          where: { partyId, isPaid: false },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        for (const bill of openBills) {
+          if (remainingFunds <= 0) break;
+          const currentPaid = bill.amountPaid || 0;
+          const remainingBillDebt = bill.grandTotal - currentPaid;
+          const payForBill = Math.min(remainingFunds, remainingBillDebt);
+          const newAmountPaid = currentPaid + payForBill;
+          const isPaid = newAmountPaid >= bill.grandTotal - 0.01;
+
+          await tx.purchaseBill.update({
+            where: { id: bill.id },
+            data: {
+              amountPaid: newAmountPaid,
+              isPaid,
+            },
+          });
+
+          remainingFunds -= payForBill;
+        }
+      }
+
+      return ledgerRecord;
     });
 
     res.status(201).json(entry);

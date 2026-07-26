@@ -87,8 +87,16 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
 
       let finalInvoiceNum = (invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
-        const count = await tx.purchaseBill.count();
-        finalInvoiceNum = `PUR-${String(count + 1).padStart(6, '0')}`;
+        const lastBill = await tx.purchaseBill.findFirst({
+          orderBy: { createdAt: 'desc' },
+          select: { invoiceNumber: true },
+        });
+        let nextNum = 1;
+        if (lastBill?.invoiceNumber) {
+          const match = lastBill.invoiceNumber.match(/\d+/);
+          if (match) nextNum = parseInt(match[0], 10) + 1;
+        }
+        finalInvoiceNum = `PUR-${String(nextNum).padStart(6, '0')}`;
       }
 
       // 1. Create PurchaseBill
@@ -111,7 +119,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         },
       });
 
-      // 2. Auto-create/Ingest into InventoryBatch linked with purchaseBillId
+      // 2. Auto-create/Ingest into InventoryBatch linked with purchaseBillId (Deduplicate matching batchNumber)
       for (const item of items) {
         const { productId, batchNumber, expiryDate, quantity, freeQuantity, mrp, purchaseRate } = item;
         const prod = await tx.product.findUnique({ where: { id: productId } });
@@ -119,18 +127,37 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         const totalPacks = parseFloat(quantity) + parseFloat(freeQuantity || 0);
         const totalContentUnits = totalPacks * packSize;
 
-        await tx.inventoryBatch.create({
-          data: {
+        const existingBatch = await tx.inventoryBatch.findFirst({
+          where: {
             productId,
             batchNumber,
-            expiryDate: new Date(expiryDate),
-            quantity: totalContentUnits,
-            mrp: parseFloat(mrp),
-            purchaseRate: parseFloat(purchaseRate),
-            purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-            purchaseBillId: bill.id,
           },
         });
+
+        if (existingBatch) {
+          await tx.inventoryBatch.update({
+            where: { id: existingBatch.id },
+            data: {
+              quantity: { increment: totalContentUnits },
+              mrp: parseFloat(mrp),
+              purchaseRate: parseFloat(purchaseRate),
+              expiryDate: new Date(expiryDate),
+            },
+          });
+        } else {
+          await tx.inventoryBatch.create({
+            data: {
+              productId,
+              batchNumber,
+              expiryDate: new Date(expiryDate),
+              quantity: totalContentUnits,
+              mrp: parseFloat(mrp),
+              purchaseRate: parseFloat(purchaseRate),
+              purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+              purchaseBillId: bill.id,
+            },
+          });
+        }
       }
 
       // 3. Create Ledger Entry if Unpaid Credit Purchase
@@ -183,30 +210,30 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { invoiceNumber, partyId, purchaseDate, isPaid, grandTotal, notes, items } = req.body;
+    const { invoiceNumber, partyId, purchaseDate, isPaid, notes, items } = req.body;
 
     const updated = await prisma.$transaction(async (tx) => {
-      // 1. Update purchase bill header
-      const bill = await tx.purchaseBill.update({
+      const existingBill = await tx.purchaseBill.findUnique({
         where: { id },
-        data: {
-          invoiceNumber: invoiceNumber !== undefined ? invoiceNumber : undefined,
-          partyId: partyId !== undefined ? partyId : undefined,
-          isPaid: isPaid !== undefined ? Boolean(isPaid) : undefined,
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : undefined,
-          grandTotal: grandTotal !== undefined ? parseFloat(grandTotal) : undefined,
-          notes: notes !== undefined ? notes : undefined,
-        },
+        include: { items: true, batches: true },
       });
 
-      // 2. If new items provided, update bill items and sync inventory batches
+      if (!existingBill) throw new Error('Purchase bill not found');
+
+      let subtotal = existingBill.subtotal;
+      let taxTotal = existingBill.taxTotal;
+
+      // Update bill items and inventory batches if items provided
       if (items && Array.isArray(items) && items.length > 0) {
         await tx.purchaseBillItem.deleteMany({ where: { purchaseBillId: id } });
-        await tx.inventoryBatch.deleteMany({ where: { purchaseBillId: id } });
 
-        let subtotal = 0;
-        let taxTotal = 0;
+        subtotal = 0;
+        taxTotal = 0;
         const billItemsToCreate = [];
+
+        const existingBatches = await tx.inventoryBatch.findMany({
+          where: { purchaseBillId: id },
+        });
 
         for (const item of items) {
           const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
@@ -214,8 +241,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             ? parseFloat(taxPercent) 
             : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : 12);
             
-          const lineGross = (quantity || 1) * (purchaseRate || 0);
-          const lineDisc = lineGross * ((discountPercent || 0) / 100);
+          const lineGross = (parseFloat(quantity) || 1) * (parseFloat(purchaseRate) || 0);
+          const lineDisc = lineGross * ((parseFloat(discountPercent) || 0) / 100);
           const lineNet = Math.max(0, lineGross - lineDisc);
           const lineTax = lineNet * (parsedTax / 100);
 
@@ -240,28 +267,71 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           const prod = await tx.product.findUnique({ where: { id: productId } });
           const packSize = prod?.packSize || 1;
           const totalPacks = (parseFloat(quantity) || 1) + (parseFloat(freeQuantity) || 0);
+          const newQty = totalPacks * packSize;
 
-          await tx.inventoryBatch.create({
-            data: {
-              productId,
-              batchNumber: batchNumber || 'DEF-001',
-              expiryDate: expiryDate ? new Date(expiryDate) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-              quantity: totalPacks * packSize,
-              mrp: parseFloat(mrp) || 0,
-              purchaseRate: parseFloat(purchaseRate) || 0,
-              purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-              purchaseBillId: id,
-            },
-          });
+          const matchBatch = existingBatches.find(b => b.productId === productId && b.batchNumber === batchNumber);
+          if (matchBatch) {
+            await tx.inventoryBatch.update({
+              where: { id: matchBatch.id },
+              data: {
+                quantity: newQty,
+                mrp: parseFloat(mrp) || matchBatch.mrp,
+                purchaseRate: parseFloat(purchaseRate) || matchBatch.purchaseRate,
+                expiryDate: expiryDate ? new Date(expiryDate) : matchBatch.expiryDate,
+              },
+            });
+          } else {
+            await tx.inventoryBatch.create({
+              data: {
+                productId,
+                batchNumber: batchNumber || 'DEF-001',
+                expiryDate: expiryDate ? new Date(expiryDate) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                quantity: newQty,
+                mrp: parseFloat(mrp) || 0,
+                purchaseRate: parseFloat(purchaseRate) || 0,
+                purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+                purchaseBillId: id,
+              },
+            });
+          }
         }
 
         await tx.purchaseBillItem.createMany({ data: billItemsToCreate });
-        await tx.purchaseBill.update({
-          where: { id },
+      }
+
+      const grandTotal = subtotal + taxTotal;
+      const finalPartyId = partyId || existingBill.partyId;
+      const finalInvoiceNumber = invoiceNumber || existingBill.invoiceNumber;
+      const finalIsPaid = isPaid !== undefined ? Boolean(isPaid) : existingBill.isPaid;
+
+      // Update purchase bill header
+      const bill = await tx.purchaseBill.update({
+        where: { id },
+        data: {
+          invoiceNumber: finalInvoiceNumber,
+          partyId: finalPartyId,
+          isPaid: finalIsPaid,
+          purchaseDate: purchaseDate ? new Date(purchaseDate) : existingBill.purchaseDate,
+          subtotal,
+          taxTotal,
+          grandTotal,
+          notes: notes !== undefined ? notes : existingBill.notes,
+        },
+      });
+
+      // Synchronize Supplier Ledger Entries
+      await tx.ledgerEntry.deleteMany({ where: { purchaseBillId: id } });
+
+      if (!finalIsPaid) {
+        await tx.ledgerEntry.create({
           data: {
-            subtotal,
-            taxTotal,
-            grandTotal: subtotal + taxTotal,
+            partyType: 'SUPPLIER',
+            partyId: finalPartyId,
+            transactionType: 'DEBIT',
+            amount: grandTotal,
+            purchaseBillId: id,
+            description: `Purchase Bill #${finalInvoiceNumber}`,
+            isSettled: false,
           },
         });
       }

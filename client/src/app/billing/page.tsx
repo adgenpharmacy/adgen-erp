@@ -132,6 +132,17 @@ function NewSalePageContent() {
         setAddress(bill.notes || bill.customer?.address || '');
         setPaymentMethod(bill.paymentMethod || 'CASH');
 
+        setCashAmount(bill.cashAmount || 0);
+        setUpiAmount(bill.upiAmount || 0);
+        setCardAmount(bill.cardAmount || 0);
+        setCreditAmount(bill.creditAmount || 0);
+
+        if (bill.discount) {
+          setSchemeDiscountType('amount');
+          setSchemeDiscountValue(bill.discount);
+        }
+        setIsRoundOff(bill.isRoundOff ?? true);
+
         if (bill.items && bill.items.length > 0) {
           setItems(
             bill.items.map((i: any) => {
@@ -313,6 +324,14 @@ function NewSalePageContent() {
       return;
     }
 
+    if (paymentMethod === 'SPLIT') {
+      const splitSum = (parseFloat(cashAmount as any) || 0) + (parseFloat(upiAmount as any) || 0) + (parseFloat(cardAmount as any) || 0) + (parseFloat(creditAmount as any) || 0);
+      if (Math.abs(splitSum - grandTotal) > 0.5) {
+        alert(`Split payment sum (₹${splitSum.toFixed(2)}) must equal Bill Grand Total (₹${grandTotal.toFixed(2)})!`);
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       const payload = {
@@ -369,7 +388,9 @@ function NewSalePageContent() {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-bold text-slate-900">New Sale</h1>
+            <h1 className="text-xl font-bold text-slate-900">
+              {editId ? 'Edit Sales Invoice' : 'New Sale (POS)'}
+            </h1>
           </div>
 
           <button
@@ -378,7 +399,7 @@ function NewSalePageContent() {
             className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-sm transition shadow-md shadow-emerald-600/20 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            <span>{isSubmitting ? 'Saving...' : 'Save Sale'}</span>
+            <span>{isSubmitting ? (editId ? 'Updating...' : 'Saving...') : (editId ? 'Update Sale' : 'Save Sale')}</span>
           </button>
         </div>
 

@@ -11,6 +11,7 @@ interface ErpDataContextType {
   purchases: any[];
   customers: any[];
   parties: any[];
+  ledgers: any[];
   loading: boolean;
   refreshData: () => Promise<void>;
 }
@@ -22,6 +23,7 @@ const ErpDataContext = createContext<ErpDataContextType>({
   purchases: [],
   customers: [],
   parties: [],
+  ledgers: [],
   loading: true,
   refreshData: async () => {},
 });
@@ -47,14 +49,13 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
     return null;
   };
 
-  const initialCache = getInitialCache();
-
-  const [products, setProducts] = useState<any[]>(initialCache?.products || []);
-  const [inventory, setInventory] = useState<any[]>(initialCache?.inventory || []);
-  const [sales, setSales] = useState<any[]>(initialCache?.sales || []);
-  const [purchases, setPurchases] = useState<any[]>(initialCache?.purchases || []);
-  const [customers, setCustomers] = useState<any[]>(initialCache?.customers || []);
-  const [parties, setParties] = useState<any[]>(initialCache?.parties || []);
+  const [products, setProducts] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
+  const [purchases, setPurchases] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [parties, setParties] = useState<any[]>([]);
+  const [ledgers, setLedgers] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -64,6 +65,18 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         'color: #059669; font-weight: bold; font-size: 16px; padding: 4px 0;',
         'color: #2563eb; font-weight: bold; font-size: 13px; background: #eff6ff; padding: 4px 8px; border-radius: 6px;'
       );
+
+      const cache = getInitialCache();
+      if (cache) {
+        if (cache.products) setProducts(cache.products);
+        if (cache.inventory) setInventory(cache.inventory);
+        if (cache.sales) setSales(cache.sales);
+        if (cache.purchases) setPurchases(cache.purchases);
+        if (cache.customers) setCustomers(cache.customers);
+        if (cache.parties) setParties(cache.parties);
+        if (cache.ledgers) setLedgers(cache.ledgers);
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -73,15 +86,18 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       return;
     }
     try {
-      setLoading(true);
+      if (products.length === 0) {
+        setLoading(true);
+      }
       console.log('⚡ [Anshu Sync Engine] Synchronizing Live Pharmacy Data...');
-      const [prodRes, invRes, salesRes, purRes, custRes, partyRes] = await Promise.all([
+      const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes] = await Promise.all([
         api.get('/products').catch(() => ({ data: [] })),
         api.get('/inventory').catch(() => ({ data: [] })),
         api.get('/sales').catch(() => ({ data: [] })),
         api.get('/purchases').catch(() => ({ data: [] })),
         api.get('/customers').catch(() => ({ data: [] })),
         api.get('/parties').catch(() => ({ data: [] })),
+        api.get('/ledger').catch(() => ({ data: [] })),
       ]);
 
       const prods = prodRes.data || [];
@@ -90,6 +106,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       const pur = purRes.data || [];
       const cust = custRes.data || [];
       const part = partyRes.data || [];
+      const ledg = ledgerRes.data || [];
 
       console.log(`✅ [Anshu Engine] Data Sync Complete! 📦 ${prods.length} Medicines | 💊 ${inv.length} Batches | 🧾 ${sal.length} Invoices | 👥 ${cust.length} Customers`);
 
@@ -99,6 +116,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       setPurchases(pur);
       setCustomers(cust);
       setParties(part);
+      setLedgers(ledg);
       setLoading(false);
 
       if (typeof window !== 'undefined') {
@@ -112,6 +130,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
               purchases: pur,
               customers: cust,
               parties: part,
+              ledgers: ledg,
               timestamp: Date.now(),
             })
           );
@@ -133,6 +152,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       setPurchases([]);
       setCustomers([]);
       setParties([]);
+      setLedgers([]);
       setLoading(false);
     }
   }, [user, fetchAllData]);
@@ -146,6 +166,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         purchases,
         customers,
         parties,
+        ledgers,
         loading,
         refreshData: fetchAllData,
       }}

@@ -134,7 +134,7 @@ router.put('/:id/approve', authenticate, requireOwner, async (req: Authenticated
     const { id } = req.params;
     const updated = await prisma.user.update({
       where: { id },
-      data: { isApproved: true },
+      data: { isApproved: true, isActive: true },
       select: {
         id: true,
         name: true,
@@ -144,6 +144,19 @@ router.put('/:id/approve', authenticate, requireOwner, async (req: Authenticated
       },
     });
     res.json(updated);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/users/:id — Owner rejects/deletes pending staff registration
+router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await prisma.user.delete({
+      where: { id },
+    });
+    res.json({ message: 'User registration deleted successfully' });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api-client';
+import { useErpData } from '@/context/ErpDataContext';
 import Sidebar from '@/components/layout/Sidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import ReportPrintModal from '@/components/reports/ReportPrintModal';
@@ -21,16 +22,17 @@ import {
   FileText,
   AlertTriangle,
   Clock,
-  Package
+  Package,
+  Receipt,
+  Building2,
+  Percent
 } from 'lucide-react';
-import {
-  ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, Legend, CartesianGrid
-} from 'recharts';
 
 export type TimeRangePreset = 'ALL_TIME' | 'TODAY' | 'YESTERDAY' | 'LAST_3_DAYS' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_MONTH' | 'LAST_QUARTER' | 'LAST_YEAR' | 'CUSTOM';
 
 export default function ReportsPage() {
+  const { sales: cachedSales, purchases: cachedPurchases, inventory: cachedInventory, refreshData } = useErpData();
+
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST' | 'EXPIRY_RISK'>('OVERVIEW');
   const [timePreset, setTimePreset] = useState<TimeRangePreset>('ALL_TIME');
   const [customStartDate, setCustomStartDate] = useState<string>('');
@@ -39,23 +41,30 @@ export default function ReportsPage() {
   const [sales, setSales] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
-  const [dashboardMetrics, setDashboardMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   useEffect(() => {
+    if (cachedSales?.length > 0) setSales(cachedSales);
+    if (cachedPurchases?.length > 0) setPurchases(cachedPurchases);
+    if (cachedInventory?.length > 0) setInventory(cachedInventory);
+  }, [cachedSales, cachedPurchases, cachedInventory]);
+
+  useEffect(() => {
     Promise.all([
-      api.get('/reports/dashboard').then((r) => setDashboardMetrics(r.data)).catch(() => null),
       api.get('/sales').then((r) => setSales(r.data)).catch(() => null),
       api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => null),
       api.get('/inventory').then((r) => setInventory(r.data)).catch(() => null),
-    ]).finally(() => setLoading(false));
+    ]).finally(() => {
+      setLoading(false);
+      refreshData();
+    });
   }, []);
 
   const { startDateObj, endDateObj, rangeLabel } = useMemo(() => {
     const now = new Date();
-    let start = new Date(0); // 1970 for ALL_TIME
-    let end = new Date(now.getFullYear() + 10, 11, 31); // Future for ALL_TIME
+    let start = new Date(2000, 0, 1);
+    let end = new Date(2099, 11, 31);
     let label = 'All Historical Data';
     switch (timePreset) {
       case 'ALL_TIME':
@@ -127,12 +136,21 @@ export default function ReportsPage() {
     const netGstPayable = Math.max(0, totalOutputGst - totalInputGst);
 
     const totalDiscounts = filteredSales.reduce((sum, s) => sum + (s.discount || 0), 0);
-    const cashSales = filteredSales.filter((s) => s.paymentMethod === 'CASH').reduce((sum, s) => sum + s.grandTotal, 0);
-    const upiSales = filteredSales.filter((s) => s.paymentMethod === 'UPI').reduce((sum, s) => sum + s.grandTotal, 0);
-    const cardSales = filteredSales.filter((s) => s.paymentMethod === 'CARD').reduce((sum, s) => sum + s.grandTotal, 0);
-    const creditSales = filteredSales.filter((s) => s.paymentMethod === 'CREDIT').reduce((sum, s) => sum + s.grandTotal, 0);
+    const cashSales = filteredSales.filter((s) => s.paymentMethod === 'CASH').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
+    const upiSales = filteredSales.filter((s) => s.paymentMethod === 'UPI').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
+    const cardSales = filteredSales.filter((s) => s.paymentMethod === 'CARD').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
+    const creditSales = filteredSales.filter((s) => s.paymentMethod === 'CREDIT' || s.paymentMethod === 'SPLIT').reduce((sum, s) => sum + (s.creditAmount || s.grandTotal || 0), 0);
 
-    const totalCogs = filteredSales.reduce((sum, s) => sum + (s.grandTotal * 0.72), 0);
+    const totalCogs = filteredSales.reduce((sum, s) => {
+      if (s.items && s.items.length > 0) {
+        const billCogs = s.items.reduce((itemSum: number, item: any) => {
+          const pRate = item.batch?.purchaseRate || item.product?.purchaseRate || item.purchaseRate || (item.unitPrice ? item.unitPrice * 0.75 : 0);
+          return itemSum + ((item.quantity || 0) * pRate);
+        }, 0);
+        return sum + billCogs;
+      }
+      return sum + ((s.grandTotal || 0) * 0.75);
+    }, 0);
     const netSalesExclGst = Math.max(0, totalSalesRevenue - totalOutputGst);
     const netGrossProfit = netSalesExclGst - totalCogs;
     const profitMarginPercent = totalSalesRevenue > 0 ? (netGrossProfit / totalSalesRevenue) * 100 : 0;
@@ -157,9 +175,9 @@ export default function ReportsPage() {
 
   const tabs = [
     { id: 'OVERVIEW', label: 'Overview' },
-    { id: 'SALES', label: 'Sales' },
-    { id: 'PURCHASES', label: 'Purchases' },
-    { id: 'EXPIRY_RISK', label: 'FEFO Expiry Risk & Dead Stock' },
+    { id: 'SALES', label: 'Sales Reports' },
+    { id: 'PURCHASES', label: 'Purchase Invoices' },
+    { id: 'EXPIRY_RISK', label: 'FEFO Expiry Risk' },
     { id: 'PL', label: 'P&L Statement' },
     { id: 'GST', label: 'GST Tax Filings' },
   ];
@@ -181,7 +199,7 @@ export default function ReportsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Reports & Analytical Intelligence</h1>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Reports & Financial Analytics</h1>
             <p className="text-xs text-slate-500 font-semibold mt-1">
               {rangeLabel} · {filteredSales.length} sales invoices · {filteredPurchases.length} purchase bills
             </p>
@@ -286,6 +304,134 @@ export default function ReportsPage() {
                     <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
                   </div>
                 </div>
+
+                {/* Collection Method Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-emerald-50/60 border border-emerald-200/80 p-4 rounded-2xl">
+                    <span className="text-[11px] font-extrabold text-emerald-800 uppercase block">Cash Collections</span>
+                    <span className="text-xl font-mono font-black text-emerald-900 mt-1 block">{formatCurrency(metrics.cashSales)}</span>
+                  </div>
+                  <div className="bg-sky-50/60 border border-sky-200/80 p-4 rounded-2xl">
+                    <span className="text-[11px] font-extrabold text-sky-800 uppercase block">UPI / Online</span>
+                    <span className="text-xl font-mono font-black text-sky-900 mt-1 block">{formatCurrency(metrics.upiSales)}</span>
+                  </div>
+                  <div className="bg-indigo-50/60 border border-indigo-200/80 p-4 rounded-2xl">
+                    <span className="text-[11px] font-extrabold text-indigo-800 uppercase block">Card Payments</span>
+                    <span className="text-xl font-mono font-black text-indigo-900 mt-1 block">{formatCurrency(metrics.cardSales)}</span>
+                  </div>
+                  <div className="bg-amber-50/60 border border-amber-200/80 p-4 rounded-2xl">
+                    <span className="text-[11px] font-extrabold text-amber-800 uppercase block">Customer Credit</span>
+                    <span className="text-xl font-mono font-black text-amber-900 mt-1 block">{formatCurrency(metrics.creditSales)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SALES TAB */}
+            {activeTab === 'SALES' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Sales Invoices</span>
+                    <div className="text-2xl font-black font-mono text-slate-900 mt-1">{filteredSales.length} Invoices</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Gross Sales Revenue</span>
+                    <div className="text-2xl font-black font-mono text-emerald-600 mt-1">{formatCurrency(metrics.totalSalesRevenue)}</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Discounts Given</span>
+                    <div className="text-2xl font-black font-mono text-rose-600 mt-1">{formatCurrency(metrics.totalDiscounts)}</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-emerald-600" />
+                    <span>Sales Invoices ({filteredSales.length})</span>
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500 uppercase">
+                        <th className="py-3 px-4">Invoice #</th>
+                        <th className="py-3 px-4">Date</th>
+                        <th className="py-3 px-4">Customer Name</th>
+                        <th className="py-3 px-4">Prescribed Doctor</th>
+                        <th className="py-3 px-4 text-center">Payment Mode</th>
+                        <th className="py-3 px-4 text-right">Items</th>
+                        <th className="py-3 px-4 text-right">Grand Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {filteredSales.map((s, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{s.invoiceNumber}</td>
+                          <td className="py-3 px-4 font-mono text-slate-600">{formatDate(s.saleDate || s.createdAt)}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900">{s.customerName || 'Walk-in Retail'}</td>
+                          <td className="py-3 px-4 text-slate-500">{s.doctorName || 'N/A'}</td>
+                          <td className="py-3 px-4 text-center font-bold">
+                            <span className="px-2.5 py-1 rounded-md text-[10px] bg-slate-100 text-slate-800 uppercase font-mono">
+                              {s.paymentMethod || 'CASH'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">{s.items?.length || 1}</td>
+                          <td className="py-3 px-4 text-right font-mono font-extrabold text-emerald-700">₹{(s.grandTotal || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* PURCHASES TAB */}
+            {activeTab === 'PURCHASES' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Purchase Bills</span>
+                    <div className="text-2xl font-black font-mono text-slate-900 mt-1">{filteredPurchases.length} Invoices</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Total Procurement Outflow</span>
+                    <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.totalPurchasesCost)}</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-indigo-600" />
+                    <span>Purchase Goods Receipt Bills ({filteredPurchases.length})</span>
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500 uppercase">
+                        <th className="py-3 px-4">Invoice #</th>
+                        <th className="py-3 px-4">Purchase Date</th>
+                        <th className="py-3 px-4">Supplier Party</th>
+                        <th className="py-3 px-4 text-center">Status</th>
+                        <th className="py-3 px-4 text-right">Items Count</th>
+                        <th className="py-3 px-4 text-right">Bill Total (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {filteredPurchases.map((p, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{p.invoiceNumber}</td>
+                          <td className="py-3 px-4 font-mono text-slate-600">{formatDate(p.purchaseDate || p.createdAt)}</td>
+                          <td className="py-3 px-4 font-extrabold text-slate-900">{p.party?.name || 'Supplier Distributor'}</td>
+                          <td className="py-3 px-4 text-center font-bold">
+                            <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase font-mono ${p.isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {p.isPaid ? 'PAID CASH' : 'CREDIT DUE'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">{p.items?.length || 1}</td>
+                          <td className="py-3 px-4 text-right font-mono font-extrabold text-indigo-700">₹{(p.grandTotal || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -349,10 +495,110 @@ export default function ReportsPage() {
                 </div>
               </div>
             )}
+
+            {/* P&L STATEMENT TAB */}
+            {activeTab === 'PL' && (
+              <div className="space-y-6">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-6">
+                  <div className="border-b border-slate-200 pb-4">
+                    <h2 className="text-lg font-black text-slate-900">Statement of Profit & Loss (P&L)</h2>
+                    <p className="text-xs text-slate-500 font-medium mt-1">Financial performance statement for period {rangeLabel}</p>
+                  </div>
+
+                  <table className="w-full text-left border-collapse text-sm">
+                    <tbody className="divide-y divide-slate-200 font-medium">
+                      <tr>
+                        <td className="py-3 text-slate-700 font-bold">Gross Sales Revenue</td>
+                        <td className="py-3 text-right font-mono font-extrabold text-slate-900">{formatCurrency(metrics.totalSalesRevenue)}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-3 text-slate-600">(-) Output GST Tax Collected</td>
+                        <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalOutputGst)}</td>
+                      </tr>
+                      <tr className="bg-slate-50 font-bold">
+                        <td className="py-3 px-3 text-slate-900">Net Sales Revenue (excl. GST)</td>
+                        <td className="py-3 px-3 text-right font-mono text-emerald-800">{formatCurrency(metrics.netSalesExclGst)}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-3 text-slate-600">(-) Real Cost of Goods Sold (COGS)</td>
+                        <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalCogs)}</td>
+                      </tr>
+                      <tr className="border-t-2 border-slate-900 font-black text-base">
+                        <td className="py-4 text-slate-900">ESTIMATED NET GROSS PROFIT</td>
+                        <td className={`py-4 text-right font-mono ${metrics.netGrossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {formatCurrency(metrics.netGrossProfit)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-3 text-slate-600 font-bold">Net Gross Margin Percentage</td>
+                        <td className="py-3 text-right font-mono font-black text-emerald-700">+{metrics.profitMarginPercent.toFixed(1)}%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* GST TAX FILINGS TAB */}
+            {activeTab === 'GST' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Output GST Liability</span>
+                    <div className="text-2xl font-black font-mono text-rose-600 mt-1">{formatCurrency(metrics.totalOutputGst)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-1 Tax Collected</div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Input Tax Credit (ITC)</span>
+                    <div className="text-2xl font-black font-mono text-emerald-600 mt-1">{formatCurrency(metrics.totalInputGst)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-2B Claimed</div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Net Cash GST Payable</span>
+                    <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">GSTR-3B Tax Liability</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-4">
+                  <h3 className="font-extrabold text-slate-900 text-sm">GSTR-1 & GSTR-3B Tax Liability Summary</h3>
+                  <p className="text-xs text-slate-500">Official GST Filing calculations for pharmacy retail sales and supplier procurement.</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="text-xs font-bold text-slate-700">CGST (Central GST) - 50%</div>
+                      <div className="text-lg font-black font-mono text-slate-900">{formatCurrency(metrics.totalOutputGst / 2)}</div>
+                    </div>
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="text-xs font-bold text-slate-700">SGST (State GST) - 50%</div>
+                      <div className="text-lg font-black font-mono text-slate-900">{formatCurrency(metrics.totalOutputGst / 2)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
       <BottomNav />
+
+      {isPrintModalOpen && (
+        <ReportPrintModal
+          dateRangeLabel={rangeLabel}
+          startDate={startDateObj.toLocaleDateString('en-IN')}
+          endDate={endDateObj.toLocaleDateString('en-IN')}
+          sales={filteredSales}
+          purchases={filteredPurchases}
+          metrics={{
+            ...metrics,
+            inventoryMrpValue: 0,
+            inventoryCostValue: 0,
+          }}
+          onClose={() => setIsPrintModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

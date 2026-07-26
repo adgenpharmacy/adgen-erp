@@ -56,25 +56,52 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       let subtotal = 0;
       let taxTotal = 0;
       const billItemsToCreate = [];
+      const batchStockTracker: Record<string, number> = {};
 
       for (const item of items) {
-        const { productId, batchId, quantity, unitPrice, taxPercent } = item;
+        let { productId, batchId, quantity, unitPrice, taxPercent } = item;
+        const qtyNum = parseFloat(quantity) || 0;
 
-        // 1. Fetch & lock batch stock
-        const batch = await tx.inventoryBatch.findUnique({
-          where: { id: batchId },
-        });
+        // 1. Fetch & lock batch stock (or find/create fallback batch if missing/empty)
+        let batch: any = null;
+        if (batchId) {
+          batch = await tx.inventoryBatch.findUnique({ where: { id: batchId } });
+        }
+        
+        if (!batch && productId) {
+          batch = await tx.inventoryBatch.findFirst({
+            where: { productId },
+            orderBy: { expiryDate: 'asc' },
+          });
+        }
+
+        if (!batch && productId) {
+          // Auto-create fallback initial batch for zero-stock catalog medicines
+          batch = await tx.inventoryBatch.create({
+            data: {
+              productId,
+              batchNumber: 'INITIAL-STOCK',
+              expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              quantity: 100,
+              purchaseRate: parseFloat(unitPrice) * 0.7,
+              mrp: parseFloat(unitPrice),
+            },
+          });
+        }
 
         if (!batch) {
-          throw new Error(`Batch ${batchId} not found`);
+          throw new Error(`No available batch found for product ${productId}`);
         }
 
-        if (batch.quantity < quantity) {
-          throw new Error(`Insufficient stock for batch ${batch.batchNumber}. Available: ${batch.quantity}, Requested: ${quantity}`);
+        batchId = batch.id;
+        const currentUsed = batchStockTracker[batch.id] || 0;
+        if (batch.quantity < currentUsed + qtyNum) {
+          throw new Error(`Insufficient stock for batch ${batch.batchNumber}. Available: ${batch.quantity - currentUsed}, Requested: ${qtyNum}`);
         }
+        batchStockTracker[batch.id] = currentUsed + qtyNum;
 
         // 2. Calculate item totals (MRP is tax-inclusive)
-        const itemTotal = quantity * unitPrice;
+        const itemTotal = qtyNum * parseFloat(unitPrice);
         const taxRate = (taxPercent || 0) / 100;
         const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
         const itemSubtotal = itemTotal - itemTax;
@@ -83,9 +110,9 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         taxTotal += itemTax;
 
         billItemsToCreate.push({
-          productId,
-          batchId,
-          quantity: parseFloat(quantity),
+          productId: batch.productId || productId,
+          batchId: batch.id,
+          quantity: qtyNum,
           unitPrice: parseFloat(unitPrice),
           taxPercent: parseFloat(taxPercent || 0),
           totalAmount: itemTotal,
@@ -93,25 +120,28 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
         // 3. Deduct stock from batch
         await tx.inventoryBatch.update({
-          where: { id: batchId },
-          data: { quantity: { decrement: parseFloat(quantity) } },
+          where: { id: batch.id },
+          data: {
+            quantity: {
+              decrement: qtyNum,
+            },
+          },
         });
       }
 
       const discountAmount = parseFloat(discount || 0);
-      let grandTotal = (subtotal + taxTotal) - discountAmount;
+      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
       
       const applyRoundOff = isRoundOff ?? true;
-      const rOffAmt = applyRoundOff && roundOffAmount !== undefined ? parseFloat(roundOffAmount) : 0;
+      let grandTotal = rawGrandTotal;
+      let computedRoundOff = 0;
       
       if (applyRoundOff) {
-         // Apply user provided roundoff or calculate it
-         if (roundOffAmount !== undefined) {
-             grandTotal += rOffAmt;
-         } else {
-             const rounded = Math.round(grandTotal);
-             grandTotal = rounded;
-         }
+        grandTotal = Math.round(rawGrandTotal);
+        computedRoundOff = Math.round((grandTotal - rawGrandTotal) * 100) / 100;
+      } else if (roundOffAmount !== undefined) {
+        computedRoundOff = parseFloat(roundOffAmount) || 0;
+        grandTotal = rawGrandTotal + computedRoundOff;
       }
 
       const cAmt = parseFloat(req.body.cashAmount || (paymentMethod === 'CASH' ? grandTotal : 0));
@@ -120,6 +150,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const credAmt = parseFloat(req.body.creditAmount || (paymentMethod === 'CREDIT' ? grandTotal : 0));
 
       const isCredit = paymentMethod === 'CREDIT' || (paymentMethod === 'SPLIT' && credAmt > 0);
+      const debtAmount = paymentMethod === 'SPLIT' ? credAmt : (isCredit ? grandTotal : 0);
       const amountPaid = paymentMethod === 'SPLIT' ? (cAmt + uAmt + cardAmt) : (isCredit ? 0 : grandTotal);
 
       let cleanCustName = (customerName || '').trim();
@@ -129,8 +160,16 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
       let finalInvoiceNum = (req.body.invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
-        const count = await tx.salesBill.count();
-        finalInvoiceNum = `INV-${String(count + 1).padStart(6, '0')}`;
+        const lastBill = await tx.salesBill.findFirst({
+          orderBy: { createdAt: 'desc' },
+          select: { invoiceNumber: true },
+        });
+        let nextNum = 1;
+        if (lastBill?.invoiceNumber) {
+          const match = lastBill.invoiceNumber.match(/\d+/);
+          if (match) nextNum = parseInt(match[0], 10) + 1;
+        }
+        finalInvoiceNum = `INV-${String(nextNum).padStart(6, '0')}`;
       }
 
       // 4. Create SalesBill with customer metadata & FEFO line items
@@ -143,7 +182,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           doctorName: doctorName || null,
           notes: notes || null,
           isRoundOff: applyRoundOff,
-          roundOffAmount: rOffAmt,
+          roundOffAmount: computedRoundOff,
           userId,
           paymentMethod,
           cashAmount: cAmt,
@@ -155,7 +194,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           discount: discountAmount,
           grandTotal,
           amountPaid,
-          isSettled: !isCredit,
+          isSettled: !isCredit || (debtAmount <= 0),
           items: {
             create: billItemsToCreate,
           },
@@ -166,8 +205,8 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         },
       });
 
-      // 5. Create Ledger Entry if Credit Sale
-      if (isCredit) {
+      // 5. Create Ledger Entry if Credit Sale or Split Sale with Credit Portion
+      if (isCredit && debtAmount > 0) {
         let targetCustomerId = customerId || null;
         if (!targetCustomerId && cleanCustName && cleanCustName !== 'Walk-in Retail Customer') {
           const existingCust = await tx.customer.findFirst({
@@ -191,9 +230,9 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
             partyType: 'CUSTOMER',
             customerId: targetCustomerId,
             transactionType: 'CREDIT',
-            amount: grandTotal,
+            amount: debtAmount,
             salesBillId: bill.id,
-            paymentMethod: 'CREDIT',
+            paymentMethod: paymentMethod === 'SPLIT' ? 'SPLIT_CREDIT' : 'CREDIT',
             description: `Credit Sale Invoice #${bill.invoiceNumber} (${cleanCustName})`,
             isSettled: false,
           },
@@ -276,7 +315,10 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { customerId, customerName, customerPhone, doctorName, notes, paymentMethod, isRoundOff, roundOffAmount, items } = req.body;
+    const { 
+      customerId, customerName, customerPhone, doctorName, notes, 
+      paymentMethod, discount, isRoundOff, roundOffAmount, items 
+    } = req.body;
 
     const saleResult = await prisma.$transaction(async (tx) => {
       // 1. Fetch current sales bill
@@ -287,19 +329,25 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
       if (!existingBill) throw new Error('Sales bill not found');
 
-      // 2. If new items provided, restore stock for old items first
+      let subtotal = existingBill.subtotal;
+      let taxTotal = existingBill.taxTotal;
+      let discountAmount = discount !== undefined ? parseFloat(discount) : existingBill.discount;
+
+      // 2. If items provided, restore stock for old items first & recreate line items
       if (items && Array.isArray(items) && items.length > 0) {
         for (const item of existingBill.items) {
-          await tx.inventoryBatch.update({
-            where: { id: item.batchId },
-            data: { quantity: { increment: item.quantity } },
-          });
+          if (item.batchId) {
+            await tx.inventoryBatch.update({
+              where: { id: item.batchId },
+              data: { quantity: { increment: item.quantity } },
+            });
+          }
         }
 
         await tx.salesBillItem.deleteMany({ where: { salesBillId: id } });
 
-        let subtotal = 0;
-        let taxTotal = 0;
+        subtotal = 0;
+        taxTotal = 0;
         const billItemsToCreate = [];
 
         for (const item of items) {
@@ -314,16 +362,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           // Deduct stock
           await tx.inventoryBatch.update({
             where: { id: batchId },
-            data: { quantity: { decrement: quantity } },
+            data: { quantity: { decrement: parseFloat(quantity) } },
           });
 
-          const gross = (quantity || 1) * (unitPrice || 0);
-          const disc = gross * ((discountPercent || 0) / 100);
-          const lineNet = Math.max(0, gross - disc);
-          const lineTax = lineNet * ((taxPercent || 12) / 100);
+          const itemTotal = quantity * unitPrice;
+          const taxRate = (taxPercent || 0) / 100;
+          const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
+          const itemSubtotal = itemTotal - itemTax;
 
-          subtotal += lineNet;
-          taxTotal += lineTax;
+          subtotal += itemSubtotal;
+          taxTotal += itemTax;
 
           billItemsToCreate.push({
             salesBillId: id,
@@ -332,48 +380,151 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             quantity: parseFloat(quantity) || 1,
             unitPrice: parseFloat(unitPrice) || 0,
             discountPercent: parseFloat(discountPercent) || 0,
-            taxPercent: parseFloat(taxPercent) || 12,
-            totalAmount: lineNet + lineTax,
+            taxPercent: parseFloat(taxPercent) || 0,
+            totalAmount: itemTotal,
           });
         }
 
         await tx.salesBillItem.createMany({ data: billItemsToCreate });
+      }
 
-        const rawGrandTotal = subtotal + taxTotal;
-        const parsedRoundOff = parseFloat(roundOffAmount) || 0;
-        const finalGrandTotal = isRoundOff ? Math.round(rawGrandTotal) : (rawGrandTotal + parsedRoundOff);
+      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
+      const applyRoundOff = isRoundOff !== undefined ? Boolean(isRoundOff) : existingBill.isRoundOff;
+      let grandTotal = rawGrandTotal;
+      let computedRoundOff = 0;
 
-        await tx.salesBill.update({
-          where: { id },
+      if (applyRoundOff) {
+        grandTotal = Math.round(rawGrandTotal);
+        computedRoundOff = Math.round((grandTotal - rawGrandTotal) * 100) / 100;
+      } else if (roundOffAmount !== undefined) {
+        computedRoundOff = parseFloat(roundOffAmount) || 0;
+        grandTotal = rawGrandTotal + computedRoundOff;
+      }
+
+      const finalMethod = paymentMethod || existingBill.paymentMethod || 'CASH';
+      const cAmt = req.body.cashAmount !== undefined ? parseFloat(req.body.cashAmount) : (finalMethod === 'CASH' ? grandTotal : 0);
+      const uAmt = req.body.upiAmount !== undefined ? parseFloat(req.body.upiAmount) : (finalMethod === 'UPI' ? grandTotal : 0);
+      const cardAmt = req.body.cardAmount !== undefined ? parseFloat(req.body.cardAmount) : (finalMethod === 'CARD' ? grandTotal : 0);
+      const credAmt = req.body.creditAmount !== undefined ? parseFloat(req.body.creditAmount) : (finalMethod === 'CREDIT' ? grandTotal : 0);
+
+      const isCredit = finalMethod === 'CREDIT' || (finalMethod === 'SPLIT' && credAmt > 0);
+      const debtAmount = finalMethod === 'SPLIT' ? credAmt : (isCredit ? grandTotal : 0);
+      const amountPaid = finalMethod === 'SPLIT' ? (cAmt + uAmt + cardAmt) : (isCredit ? 0 : grandTotal);
+
+      let cleanCustName = customerName !== undefined ? (customerName || '').trim() : existingBill.customerName;
+      if (!cleanCustName || cleanCustName === '?' || cleanCustName.length < 2) {
+        cleanCustName = 'Walk-in Retail Customer';
+      }
+
+      // Update SalesBill header
+      const updatedBill = await tx.salesBill.update({
+        where: { id },
+        data: {
+          customerId: customerId !== undefined ? (customerId || null) : existingBill.customerId,
+          customerName: cleanCustName,
+          customerPhone: customerPhone !== undefined ? (customerPhone || null) : existingBill.customerPhone,
+          doctorName: doctorName !== undefined ? (doctorName || null) : existingBill.doctorName,
+          notes: notes !== undefined ? (notes || null) : existingBill.notes,
+          paymentMethod: finalMethod,
+          cashAmount: cAmt,
+          upiAmount: uAmt,
+          cardAmount: cardAmt,
+          creditAmount: credAmt,
+          subtotal,
+          taxTotal,
+          discount: discountAmount,
+          isRoundOff: applyRoundOff,
+          roundOffAmount: computedRoundOff,
+          grandTotal,
+          amountPaid,
+          isSettled: !isCredit || (debtAmount <= 0),
+        },
+        include: { customer: true, items: true },
+      });
+
+      // Synchronize Ledger Entries: Delete old sales bill ledger entries & recreate if credit remains
+      await tx.ledgerEntry.deleteMany({ where: { salesBillId: id } });
+
+      if (isCredit && debtAmount > 0) {
+        let targetCustomerId = updatedBill.customerId;
+        if (!targetCustomerId && cleanCustName && cleanCustName !== 'Walk-in Retail Customer') {
+          const existingCust = await tx.customer.findFirst({
+            where: { name: { equals: cleanCustName, mode: 'insensitive' } },
+          });
+          if (existingCust) {
+            targetCustomerId = existingCust.id;
+          } else {
+            const newCust = await tx.customer.create({
+              data: {
+                name: cleanCustName,
+                phone: updatedBill.customerPhone || null,
+              },
+            });
+            targetCustomerId = newCust.id;
+          }
+        }
+
+        await tx.ledgerEntry.create({
           data: {
-            subtotal,
-            taxTotal,
-            roundOffAmount: parsedRoundOff,
-            grandTotal: finalGrandTotal,
+            partyType: 'CUSTOMER',
+            customerId: targetCustomerId,
+            transactionType: 'CREDIT',
+            amount: debtAmount,
+            salesBillId: id,
+            paymentMethod: finalMethod === 'SPLIT' ? 'SPLIT_CREDIT' : 'CREDIT',
+            description: `Credit Sale Invoice #${updatedBill.invoiceNumber} (${cleanCustName})`,
+            isSettled: false,
           },
         });
       }
 
-      // Update header details
-      return tx.salesBill.update({
-        where: { id },
-        data: {
-          customerId: customerId || null,
-          customerName: customerName !== undefined ? customerName : undefined,
-          customerPhone: customerPhone !== undefined ? customerPhone : undefined,
-          doctorName: doctorName !== undefined ? doctorName : undefined,
-          notes: notes !== undefined ? notes : undefined,
-          paymentMethod: paymentMethod !== undefined ? paymentMethod : undefined,
-          grandTotal: req.body.grandTotal !== undefined ? parseFloat(req.body.grandTotal) : undefined,
-          isRoundOff: isRoundOff !== undefined ? Boolean(isRoundOff) : undefined,
-        },
-        include: { customer: true, items: true },
-      });
+      return updatedBill;
     });
 
     res.json(saleResult);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// DELETE /api/sales/:id - Void / Delete Sales Bill with stock restoration & ledger cleanup
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existingBill = await tx.salesBill.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+
+      if (!existingBill) {
+        throw new Error('Sales bill not found');
+      }
+
+      // 1. Restore inventory batch quantities
+      for (const item of existingBill.items) {
+        if (item.batchId) {
+          await tx.inventoryBatch.update({
+            where: { id: item.batchId },
+            data: { quantity: { increment: item.quantity } },
+          }).catch(() => null);
+        }
+      }
+
+      // 2. Delete linked SalesReturn records to prevent FK constraint failure
+      await tx.salesReturn.deleteMany({ where: { salesBillId: id } });
+
+      // 3. Delete linked LedgerEntry records
+      await tx.ledgerEntry.deleteMany({ where: { salesBillId: id } });
+
+      // 4. Delete SalesBillItems and SalesBill
+      await tx.salesBillItem.deleteMany({ where: { salesBillId: id } });
+      await tx.salesBill.delete({ where: { id } });
+    });
+
+    res.json({ message: 'Sales bill deleted successfully and stock restored' });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || 'Failed to delete sales bill' });
   }
 });
 

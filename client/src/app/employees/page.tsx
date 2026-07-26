@@ -26,6 +26,12 @@ export default function EmployeesPage() {
     catch (err: any) { alert(err.response?.data?.error || 'Failed to approve'); }
   };
 
+  const handleReject = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to reject and delete the access request for ${name}?`)) return;
+    try { await api.delete(`/users/${id}`); alert(`Registration request for ${name} rejected.`); fetchUsers(); }
+    catch (err: any) { alert(err.response?.data?.error || 'Failed to reject'); }
+  };
+
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -85,7 +91,7 @@ export default function EmployeesPage() {
                               className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-md text-[11px] transition">
                               <CheckCircle className="w-3 h-3" /> Approve
                             </button>
-                            <button onClick={() => alert(`Rejected ${emp.name}`)}
+                            <button onClick={() => handleReject(emp.id, emp.name)}
                               className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-red-50 text-red-600 font-medium rounded-md text-[11px] border border-gray-200 transition">
                               <XCircle className="w-3 h-3" /> Reject
                             </button>

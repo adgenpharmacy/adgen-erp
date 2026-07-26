@@ -4,7 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middlewa
 
 const router = Router();
 
-// GET /api/customers — Fetch all customers with query search (q) & computed credit balance
+// GET /api/customers — Fetch all customers with query search (q) & computed credit balance (amountPaid synced)
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { q } = req.query;
@@ -25,6 +25,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         salesBills: {
           where: { isSettled: false },
           select: { grandTotal: true, amountPaid: true },
+        },
+        salesReturns: {
+          select: { totalReturnAmount: true, refundMethod: true },
         },
       },
     });
@@ -48,15 +51,19 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       customers = customers.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
-    const result = customers.map((c) => {
-      const creditBalance = c.salesBills.reduce(
-        (sum, bill) => sum + (bill.grandTotal - bill.amountPaid),
+    const result = customers.map((c: any) => {
+      const grossDebt = (c.salesBills || []).reduce(
+        (sum: number, bill: any) => sum + ((bill.grandTotal || 0) - (bill.amountPaid || 0)),
         0
       );
-      const { salesBills, ...custData } = c;
+      const creditNotes = (c.salesReturns || [])
+        .filter((sr: any) => sr.refundMethod === 'CREDIT_NOTE')
+        .reduce((sum: number, sr: any) => sum + (sr.totalReturnAmount || 0), 0);
+
+      const { salesBills, salesReturns, ...custData } = c;
       return {
         ...custData,
-        creditBalance,
+        creditBalance: Math.max(0, grossDebt - creditNotes),
       };
     });
 

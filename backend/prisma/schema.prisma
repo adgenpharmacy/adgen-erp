@@ -108,6 +108,7 @@ model Customer {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   salesBills    SalesBill[]
+  salesReturns  SalesReturn[]
   ledgerEntries LedgerEntry[]
 
   @@map("customers")
@@ -142,6 +143,7 @@ model PurchaseBill {
   subtotal        Float
   taxTotal        Float
   grandTotal      Float
+  amountPaid      Float              @default(0)
   isPaid          Boolean            @default(false)
   notes           String?
   createdAt       DateTime           @default(now())
@@ -265,7 +267,8 @@ model SalesReturn {
   notes             String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
-  salesBill         SalesBill?        @relation(fields: [salesBillId], references: [id])
+  salesBill         SalesBill?        @relation(fields: [salesBillId], references: [id], onDelete: Cascade)
+  customer          Customer?         @relation(fields: [customerId], references: [id])
   items             SalesReturnItem[]
 
   @@map("sales_returns")
