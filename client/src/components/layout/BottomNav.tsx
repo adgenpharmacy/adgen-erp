@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Receipt, Package, ShoppingBag, BookOpen, LogOut } from 'lucide-react';
+import { LayoutDashboard, ScanLine, Package, ShoppingBag, LogOut } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-const mobileNav = [
+const MOBILE_NAV = [
   { name: 'Home', href: '/', icon: LayoutDashboard },
-  { name: 'Billing', href: '/billing', icon: Receipt },
+  { name: 'Billing', href: '/billing', icon: ScanLine },
   { name: 'Stock', href: '/inventory', icon: Package },
   { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
-  { name: 'Ledger', href: '/ledger', icon: BookOpen },
 ];
 
 export default function BottomNav() {
@@ -18,31 +18,38 @@ export default function BottomNav() {
   const { logout } = useAuth();
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-1.5 flex justify-around items-center z-40">
-      {mobileNav.map((item) => {
-        const isActive = pathname === item.href;
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.name}
-            href={item.href}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-md text-[10px] font-medium transition ${
-              isActive ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-700'
-            }`}
-          >
-            <Icon className={`w-5 h-5 ${isActive ? 'text-emerald-600' : 'text-gray-400'}`} />
-            <span>{item.name}</span>
-          </Link>
-        );
-      })}
-      <button
-        onClick={logout}
-        className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-md text-[10px] font-medium text-gray-400 hover:text-red-500 transition"
-        title="Log Out"
-      >
-        <LogOut className="w-5 h-5" />
-        <span>Logout</span>
-      </button>
-    </div>
+    <nav
+      className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line no-print"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <div className="flex items-stretch justify-around px-1 py-1">
+        {MOBILE_NAV.map((item) => {
+          const isActive = pathname === item.href;
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              aria-current={isActive ? 'page' : undefined}
+              className={cn(
+                'flex flex-1 flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-semibold transition-colors',
+                isActive ? 'text-brand bg-brand-subtle' : 'text-fg-subtle hover:text-fg'
+              )}
+            >
+              <Icon className="h-5 w-5" aria-hidden />
+              <span>{item.name}</span>
+            </Link>
+          );
+        })}
+        <button
+          onClick={logout}
+          aria-label="Sign out"
+          className="flex flex-1 flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-semibold text-fg-subtle hover:text-danger transition-colors"
+        >
+          <LogOut className="h-5 w-5" aria-hidden />
+          <span>Logout</span>
+        </button>
+      </div>
+    </nav>
   );
 }

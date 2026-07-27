@@ -44,7 +44,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         user: { select: { id: true, name: true } },
         items: {
           include: {
-            product: { select: { name: true, packSize: true, contentUnit: true } },
+            product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
             batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true } },
           },
         },
@@ -87,8 +87,9 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const batchStockTracker: Record<string, number> = {};
 
       for (const item of items) {
-        let { productId, batchId, quantity, unitPrice, taxPercent } = item;
+        let { productId, batchId, quantity, unitPrice, taxPercent, discountPercent } = item;
         let qtyNeeded = parseFloat(quantity) || 0;
+        const lineDiscountPercent = parseFloat(discountPercent) || 0;
 
         if (qtyNeeded <= 0) continue;
 
@@ -134,7 +135,15 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           batchStockTracker[batch.id] = usedAlready + qtyToTake;
           qtyNeeded -= qtyToTake;
 
-          const itemTotal = qtyToTake * parseFloat(unitPrice);
+          // Apply the per-item discount BEFORE extracting tax. This was previously ignored
+          // entirely: the counter showed a discounted line total while the bill was saved at
+          // full price, so revenue and GST were overstated on every discounted sale.
+          const lineGross = qtyToTake * parseFloat(unitPrice);
+          const lineDiscount = lineGross * (lineDiscountPercent / 100);
+          const itemTotal = Math.max(0, lineGross - lineDiscount);
+
+          // MRP is tax-inclusive under Indian retail GST, so tax is extracted from the
+          // discounted amount actually charged.
           const taxRate = (taxPercent || 0) / 100;
           const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
           const itemSubtotal = itemTotal - itemTax;
@@ -147,6 +156,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
             batchId: batch.id,
             quantity: qtyToTake,
             unitPrice: parseFloat(unitPrice),
+            discountPercent: lineDiscountPercent,
             taxPercent: parseFloat(taxPercent || 0),
             totalAmount: itemTotal,
           });
@@ -427,7 +437,14 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             data: { quantity: { decrement: parseFloat(quantity) } },
           });
 
-          const itemTotal = quantity * unitPrice;
+          // Mirror POST: the per-item discount reduces the line before tax is extracted.
+          // It was stored on the row but never applied, so editing a bill restored the
+          // undiscounted total.
+          const lineDiscountPercent = parseFloat(discountPercent) || 0;
+          const lineGross = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0);
+          const lineDiscount = lineGross * (lineDiscountPercent / 100);
+          const itemTotal = Math.max(0, lineGross - lineDiscount);
+
           const taxRate = (taxPercent || 0) / 100;
           const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
           const itemSubtotal = itemTotal - itemTax;
@@ -441,7 +458,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             batchId,
             quantity: parseFloat(quantity) || 1,
             unitPrice: parseFloat(unitPrice) || 0,
-            discountPercent: parseFloat(discountPercent) || 0,
+            discountPercent: lineDiscountPercent,
             taxPercent: parseFloat(taxPercent) || 0,
             totalAmount: itemTotal,
           });

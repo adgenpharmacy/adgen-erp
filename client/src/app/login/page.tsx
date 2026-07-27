@@ -1,25 +1,35 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
-import { TextRepel } from '@/components/ui/text-repel';
-import { KineticTextReveal } from '@/components/ui/kinetic-text-reveal';
-import { ScrollBasedVelocity } from '@/components/ui/scroll-based-velocity';
-import { 
-  ShieldCheck, 
-  Lock, 
-  Mail, 
-  ArrowRight, 
-  CheckCircle2, 
-  User, 
-  KeyRound, 
+import { getApiErrorMessage } from '@/types';
+import {
+  Lock,
+  Mail,
+  ArrowRight,
+  CheckCircle2,
   AlertCircle,
   Eye,
   EyeOff,
   UserPlus,
-  X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Button, Card, Field, Input, Select, Modal } from '@/components/ui';
+
+const FEATURES = [
+  {
+    title: 'Strip & loose tablet billing',
+    body: 'Per-tablet unit prices calculated automatically from strip pack size.',
+  },
+  {
+    title: 'FEFO batch & expiry management',
+    body: 'First-Expiry-First-Out stock deduction with full batch traceability.',
+  },
+  {
+    title: 'Staff approval security',
+    body: 'Role-based access with explicit owner approval for new pharmacy staff.',
+  },
+];
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -52,8 +62,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Login failed. Please check your credentials.');
+    } catch (err) {
+      setErrorMsg(getApiErrorMessage(err, 'Login failed. Please check your credentials.') ?? 'Login failed.');
     } finally {
       setLoading(false);
     }
@@ -71,8 +81,8 @@ export default function LoginPage() {
       setReqName('');
       setReqEmail('');
       setReqPassword('');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to submit access request.');
+    } catch (err) {
+      setErrorMsg(getApiErrorMessage(err, 'Failed to submit access request.') ?? 'Request failed.');
     } finally {
       setReqSubmitting(false);
     }
@@ -93,340 +103,232 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F4F8F6] text-slate-900 flex flex-col justify-between selection:bg-emerald-500 selection:text-white font-sans relative overflow-x-hidden">
-      {/* Background Ambient Glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[400px] bg-gradient-to-b from-emerald-200/30 via-teal-100/10 to-transparent rounded-full blur-3xl pointer-events-none" />
-
-      {/* Header Bar */}
-      <header className="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between relative z-20">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-white rounded-2xl border border-slate-200 shadow-sm">
-            <img src="/logo.png" alt="AdGen Pharmacy" className="w-8 h-8 object-contain" />
-          </div>
-          <div>
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 font-sans block leading-none">
-              AdGen ERP
+    <div className="min-h-screen bg-canvas text-fg flex flex-col">
+      <header className="w-full border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-4">
+          <Image src="/logo.png" alt="" width={36} height={36} className="h-9 w-9 object-contain" />
+          <span>
+            <span className="block text-base font-extrabold leading-none tracking-tight text-fg">AdGen ERP</span>
+            <span className="mt-1 block text-[11px] font-bold uppercase tracking-wider leading-none text-brand">
+              Pharmacy Management
             </span>
-            <span className="text-[11px] text-emerald-700 font-bold tracking-wider uppercase">Pharmacy Management</span>
-          </div>
+          </span>
         </div>
       </header>
 
-      {/* Main Content Hero & Login Card */}
-      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-8 flex flex-col lg:flex-row items-center justify-between gap-12 relative z-20 flex-1">
-        {/* Left Column: Hero Intro */}
-        <div className="flex-1 space-y-6 text-center lg:text-left max-w-2xl">
-          <div className="py-2">
-            <TextRepel
-              text="ADGEN PHARMACY"
-              radius={120}
-              strength={45}
-              className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-900 drop-shadow-sm"
-              letterClassName="text-slate-900 hover:text-emerald-600 transition-colors"
-            />
-          </div>
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center gap-10 px-6 py-10 lg:flex-row lg:items-start lg:justify-between lg:gap-14 lg:py-16">
+        {/* Product intro */}
+        <section className="w-full max-w-xl">
+          <h1 className="text-3xl font-extrabold tracking-tight text-fg sm:text-4xl">
+            Clinical management for modern Indian pharmacies
+          </h1>
+          <p className="mt-3 text-base text-fg-muted">
+            Handle strip &amp; loose tablet billing, FEFO inventory, supplier payables, and GST filings
+            from one counter-ready system.
+          </p>
 
-          <div className="text-base sm:text-lg text-slate-600 font-semibold leading-relaxed">
-            <KineticTextReveal
-              text="The complete clinical management system for modern Indian pharmacies. Handle strip & loose tablet billing, FEFO inventory, supplier payables, and GST filings seamlessly."
-              splitBy="words"
-              stagger={0.025}
-              className="text-slate-600 font-semibold"
-            />
-          </div>
+          <ul className="mt-7 space-y-3">
+            {FEATURES.map((f) => (
+              <li key={f.title} className="flex items-start gap-3 rounded-lg border border-line bg-surface p-3.5 shadow-card">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-brand" aria-hidden />
+                <span>
+                  <span className="block text-sm font-bold text-fg">{f.title}</span>
+                  <span className="mt-0.5 block text-sm text-fg-muted">{f.body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-          <div className="space-y-3 pt-2 text-left max-w-xl mx-auto lg:mx-0 text-sm font-medium">
-            <div className="flex items-start gap-3 p-3 bg-white border border-slate-200/80 rounded-xl shadow-xs">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-slate-900 font-bold">Strip & Loose Tablet Billing:</strong> Automatically calculates per-tablet unit prices based on strip pack size.
-              </div>
-            </div>
+        {/* Sign-in card */}
+        <Card className="w-full max-w-md shrink-0 p-7">
+          <h2 className="text-xl font-bold tracking-tight text-fg">Sign in to the pharmacy portal</h2>
+          <p className="mt-1 text-sm text-fg-muted">
+            Enter your credentials to access the POS &amp; management suite
+          </p>
 
-            <div className="flex items-start gap-3 p-3 bg-white border border-slate-200/80 rounded-xl shadow-xs">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-slate-900 font-bold">FEFO Batch & Expiry Management:</strong> Automatic First-Expiry-First-Out stock deduction and batch tracking.
-              </div>
-            </div>
+          {errorMsg ? (
+            <p
+              role="alert"
+              className="mt-5 flex items-start gap-2 rounded-md border border-danger-line bg-danger-subtle px-3 py-2.5 text-sm font-semibold text-danger"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              {errorMsg}
+            </p>
+          ) : null}
 
-            <div className="flex items-start gap-3 p-3 bg-white border border-slate-200/80 rounded-xl shadow-xs">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-slate-900 font-bold">Staff Approval Security:</strong> Role-based access control with explicit owner approval for new pharmacy staff.
-              </div>
-            </div>
-          </div>
-        </div>
+          {successMsg ? (
+            <p
+              role="status"
+              className="mt-5 flex items-start gap-2 rounded-md border border-brand-line bg-brand-subtle px-3 py-2.5 text-sm font-semibold text-brand-hover"
+            >
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              {successMsg}
+            </p>
+          ) : null}
 
-        {/* Right Column: Clean Ideal Login Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-          className="w-full max-w-md bg-white border border-slate-200/90 p-8 rounded-3xl shadow-xl relative space-y-6 card-glow"
-        >
-          <div className="space-y-1 text-center sm:text-left">
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Sign In to Pharmacy Portal</h2>
-            <p className="text-xs text-slate-500 font-medium">Enter your credentials to access the POS & management suite</p>
-          </div>
+          <form onSubmit={handleSignIn} className="mt-6 space-y-4">
+            <Field label="Work Email Address" required>
+              <Input
+                icon={Mail}
+                type="email"
+                required
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="e.g. owner@adgenpharmacy.com"
+              />
+            </Field>
 
-          {/* Feedback Banners */}
-          {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {successMsg && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {/* Primary Login Form */}
-          <form onSubmit={handleSignIn} className="space-y-4 text-xs font-medium">
-            <div>
-              <label className="text-slate-500 font-bold block mb-1.5">Work Email Address</label>
-              <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. owner@adgenpharmacy.com"
-                  className="w-full bg-slate-50 border border-slate-300/80 rounded-xl pl-10 pr-4 py-2.5 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-500/10 transition"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-slate-500 font-bold block">Password</label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-fg-muted">
+                  Password<span className="ml-0.5 text-danger">*</span>
+                </span>
                 <button
                   type="button"
                   onClick={() => setShowForgot(true)}
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 hover:underline transition"
+                  className="text-xs font-bold text-brand transition-colors hover:text-brand-hover hover:underline"
                 >
                   Forgot password?
                 </button>
               </div>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                <input
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" aria-hidden />
+                <Input
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="current-password"
+                  aria-label="Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300/80 rounded-xl pl-10 pr-10 py-2.5 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-500/10 transition"
+                  className="pl-9 pr-10"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-2.5 p-1 text-slate-400 hover:text-slate-700 transition"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2 text-sm mt-2 disabled:opacity-50"
-            >
-              <span>{loading ? 'Verifying Credentials...' : 'Sign In'}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <Button type="submit" size="lg" loading={loading} className="w-full">
+              Sign In
+              <ArrowRight className="h-4 w-4" aria-hidden />
+            </Button>
           </form>
 
-          {/* Request Staff Access Secondary Link */}
-          <div className="pt-4 border-t border-slate-100 text-center">
+          <div className="mt-6 border-t border-line pt-5 text-center">
+            <p className="text-sm text-fg-muted">New staff member?</p>
             <button
               onClick={() => setShowRequestAccess(true)}
-              className="text-xs font-bold text-slate-600 hover:text-emerald-700 transition flex items-center justify-center gap-1.5 mx-auto"
+              className="mt-1 inline-flex items-center gap-1.5 text-sm font-bold text-brand transition-colors hover:text-brand-hover hover:underline"
             >
-              <UserPlus className="w-4 h-4 text-emerald-600" />
-              <span>New staff employee? <strong>Request Access</strong></span>
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Request portal access
             </button>
           </div>
-        </motion.div>
+        </Card>
       </main>
 
+      <footer className="border-t border-line bg-surface">
+        <p className="mx-auto max-w-6xl px-6 py-4 text-center text-xs text-fg-subtle">
+          AdGen Pharmacy ERP · Billing, FEFO batch inventory &amp; GST compliance
+        </p>
+      </footer>
+
       {/* REQUEST ACCESS MODAL */}
-      <AnimatePresence>
-        {showRequestAccess && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-200 p-6 rounded-3xl max-w-md w-full shadow-2xl relative space-y-4"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-emerald-600" />
-                  <h3 className="text-lg font-bold text-slate-900">Request Employee Access</h3>
-                </div>
-                <button
-                  onClick={() => setShowRequestAccess(false)}
-                  className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                Fill in your staff details below. Your access request will be routed to the Pharmacy Owner for account approval.
-              </p>
-
-              <form onSubmit={handleRequestAccess} className="space-y-3.5 text-xs font-medium">
-                <div>
-                  <label className="text-slate-500 font-bold block mb-1">Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Ramesh Kumar"
-                    value={reqName}
-                    onChange={(e) => setReqName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-slate-500 font-bold block mb-1">Work Email Address *</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. staff@adgenpharmacy.com"
-                    value={reqEmail}
-                    onChange={(e) => setReqEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-slate-500 font-bold block mb-1">Designation</label>
-                  <select
-                    value={reqDesignation}
-                    onChange={(e) => setReqDesignation(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-bold"
-                  >
-                    <option value="Pharmacist">Pharmacist</option>
-                    <option value="Billing Executive">Billing Executive</option>
-                    <option value="Inventory Assistant">Inventory Assistant</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-slate-500 font-bold block mb-1">Desired Password *</label>
-                  <input
-                    type="password"
-                    required
-                    value={reqPassword}
-                    onChange={(e) => setReqPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-bold"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowRequestAccess(false)}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={reqSubmitting}
-                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20"
-                  >
-                    {reqSubmitting ? 'Submitting...' : 'Submit Request'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+      <Modal
+        open={showRequestAccess}
+        onClose={() => setShowRequestAccess(false)}
+        title="Request Portal Access"
+        subtitle="The pharmacy owner must approve your account before you can sign in"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setShowRequestAccess(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="request-access-form" loading={reqSubmitting}>
+              Submit Request
+            </Button>
           </div>
-        )}
-      </AnimatePresence>
+        }
+      >
+        <form id="request-access-form" onSubmit={handleRequestAccess} className="space-y-4 p-5">
+          <Field label="Full Name" required>
+            <Input
+              type="text"
+              required
+              value={reqName}
+              onChange={(e) => setReqName(e.target.value)}
+              placeholder="e.g. Priya Nair"
+            />
+          </Field>
+          <Field label="Work Email" required>
+            <Input
+              type="email"
+              required
+              value={reqEmail}
+              onChange={(e) => setReqEmail(e.target.value)}
+              placeholder="staff@adgenpharmacy.com"
+            />
+          </Field>
+          <Field label="Choose a Password" required>
+            <Input
+              type="password"
+              required
+              autoComplete="new-password"
+              value={reqPassword}
+              onChange={(e) => setReqPassword(e.target.value)}
+              placeholder="Minimum 8 characters"
+            />
+          </Field>
+          <Field label="Designation">
+            <Select value={reqDesignation} onChange={(e) => setReqDesignation(e.target.value)}>
+              <option value="Pharmacist">Pharmacist</option>
+              <option value="Assistant Pharmacist">Assistant Pharmacist</option>
+              <option value="Counter Staff">Counter Staff</option>
+              <option value="Accountant">Accountant</option>
+            </Select>
+          </Field>
+        </form>
+      </Modal>
 
       {/* FORGOT PASSWORD MODAL */}
-      <AnimatePresence>
-        {showForgot && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-200 p-6 rounded-3xl max-w-md w-full shadow-2xl relative space-y-4"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="w-5 h-5 text-emerald-600" />
-                  <h3 className="text-lg font-bold text-slate-900">Reset Password</h3>
-                </div>
-                <button
-                  onClick={() => setShowForgot(false)}
-                  className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                Enter your work email address below. We will send a secure password reset link to your email.
-              </p>
-
-              <form onSubmit={handleForgotPassword} className="space-y-4 text-xs font-medium">
-                <div>
-                  <label className="text-slate-500 font-bold block mb-1">Email Address *</label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="e.g. owner@adgenpharmacy.com"
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-slate-900 font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgot(false)}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={forgotSubmitting}
-                    className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-md"
-                  >
-                    {forgotSubmitting ? 'Sending...' : 'Send Reset Link'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+      <Modal
+        open={showForgot}
+        onClose={() => setShowForgot(false)}
+        title="Reset Password"
+        subtitle="We'll notify the pharmacy administrator to reset it for you"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setShowForgot(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="forgot-form" loading={forgotSubmitting}>
+              Send Request
+            </Button>
           </div>
-        )}
-      </AnimatePresence>
-
-      {/* Ticker */}
-      <footer className="w-full py-3 bg-emerald-50 border-t border-emerald-200/80 relative z-20 overflow-hidden">
-        <ScrollBasedVelocity
-          text="✦ LOOSE TABLET & STRIP BILLING ✦ FEFO BATCH INVENTORY ✦ AUTOMATED GST TAX FILINGS ✦ CUSTOMER CREDIT LEDGER ✦ PRINT CASH MEMO & INVOICE ✦"
-          default_velocity={0.4}
-          className="text-xs font-mono font-extrabold text-emerald-800 tracking-widest uppercase"
-        />
-      </footer>
+        }
+      >
+        <form id="forgot-form" onSubmit={handleForgotPassword} className="space-y-4 p-5">
+          <Field label="Work Email Address" required>
+            <Input
+              icon={Mail}
+              type="email"
+              required
+              value={forgotEmail}
+              onChange={(e) => setForgotEmail(e.target.value)}
+              placeholder="you@adgenpharmacy.com"
+            />
+          </Field>
+        </form>
+      </Modal>
     </div>
   );
 }

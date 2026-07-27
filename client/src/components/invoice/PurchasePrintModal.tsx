@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Printer, X, Share2, Check, FileText } from 'lucide-react';
+import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
+import type { Purchase, PurchaseDetail } from '@/types';
+import Portal from '@/components/ui/Portal';
 
 interface PurchasePrintModalProps {
-  purchase: any;
+  purchase: PurchaseDetail | Purchase;
   onClose: () => void;
 }
 
@@ -26,7 +28,7 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   };
 
   const handleShare = async () => {
-    const text = `*ADGEN PHARMACY - PURCHASE INVOICE MEMO*\n----------------------------\nInvoice #: ${purchase.invoiceNumber}\nDate: ${formatDate(purchase.purchaseDate || purchase.createdAt)}\nSupplier: ${purchase.party?.name || 'Distributor'}\nPhone: ${purchase.party?.phone || 'N/A'}\n----------------------------\n*Grand Total: ₹${purchase.grandTotal?.toFixed(2)}*\nPayment: ${purchase.paymentMethod || (purchase.isPaid ? 'CASH' : 'CREDIT')}\n----------------------------`;
+    const text = `*ADGEN PHARMACY - PURCHASE INVOICE MEMO*\n----------------------------\nInvoice #: ${purchase.invoiceNumber}\nDate: ${formatDate(purchase.purchaseDate || purchase.createdAt)}\nSupplier: ${purchase.party?.name || 'Distributor'}\nPhone: ${purchase.party?.phone || 'N/A'}\n----------------------------\n*Grand Total: ₹${purchase.grandTotal?.toFixed(2)}*\nPayment: ${purchase.isPaid ? 'PAID' : 'CREDIT'}\n----------------------------`;
     
     if (navigator.share) {
       try {
@@ -46,24 +48,24 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   };
 
   const items = purchase.items || [];
-  const totalBilledQty = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 0), 0);
-  const totalFreeQty = items.reduce((acc: number, i: any) => acc + (Number(i.freeQuantity) || 0), 0);
+  const totalBilledQty = items.reduce((acc: number, i) => acc + (Number(i.quantity) || 0), 0);
+  const totalFreeQty = items.reduce((acc: number, i) => acc + (Number(i.freeQuantity) || 0), 0);
 
   // Line item gross pre-discount subtotal & item discounts
-  const grossSubtotal = items.reduce((acc: number, i: any) => {
+  const grossSubtotal = items.reduce((acc: number, i) => {
     const qty = Number(i.quantity) || 0;
-    const pRate = Number(i.purchaseRate || i.unitPrice || 0);
+    const pRate = Number(i.purchaseRate || 0);
     return acc + (qty * pRate);
   }, 0);
 
-  const itemDiscountsSum = items.reduce((acc: number, i: any) => {
+  const itemDiscountsSum = items.reduce((acc: number, i) => {
     const qty = Number(i.quantity) || 0;
-    const pRate = Number(i.purchaseRate || i.unitPrice || 0);
+    const pRate = Number(i.purchaseRate || 0);
     const discPercent = Number(i.discountPercent || 0);
     return acc + ((qty * pRate) * (discPercent / 100));
   }, 0);
 
-  const billSchemeDiscount = Number(purchase.discount || purchase.schemeDiscountAmount || 0);
+  const billSchemeDiscount = Number(purchase.discount || 0);
   const totalDiscountVal = itemDiscountsSum + billSchemeDiscount;
 
   const taxableSubtotalVal = purchase.subtotal !== undefined
@@ -75,6 +77,7 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
   const totalOutflow = Number(purchase.grandTotal || (taxableSubtotalVal + taxTotal + roundOffVal));
 
   return (
+    <Portal>
     <div 
       onClick={onClose}
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto"
@@ -152,7 +155,7 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                 Date: {formatDate(purchase.purchaseDate || purchase.createdAt)}
               </div>
               <div className="text-[11px] font-bold text-slate-800 uppercase mt-1">
-                Payment: {purchase.paymentMethod || (purchase.isPaid ? 'CASH' : 'CREDIT')}
+                Payment: {purchase.isPaid ? 'PAID' : 'CREDIT'}
               </div>
             </div>
           </div>
@@ -168,8 +171,8 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
             </div>
 
             <div className="text-right text-[11px]">
-              {purchase.party?.gstin && (
-                <div><span className="font-bold text-slate-500">GSTIN:</span> <span className="font-mono font-bold">{purchase.party.gstin}</span></div>
+              {purchase.party?.gstNumber && (
+                <div><span className="font-bold text-slate-500">GSTIN:</span> <span className="font-mono font-bold">{purchase.party.gstNumber}</span></div>
               )}
               {purchase.party?.dlNumber && (
                 <div><span className="font-bold text-slate-500">DL No:</span> <span className="font-mono font-bold">{purchase.party.dlNumber}</span></div>
@@ -193,10 +196,10 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
-              {items.map((item: any, idx: number) => {
+              {items.map((item, idx) => {
                 const qty = Number(item.quantity) || 0;
                 const freeQty = Number(item.freeQuantity) || 0;
-                const pRate = Number(item.purchaseRate || item.unitPrice || 0);
+                const pRate = Number(item.purchaseRate || 0);
                 const discPercent = Number(item.discountPercent || 0);
                 
                 // Line total = exact Qty x Rate minus discount
@@ -208,7 +211,7 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="py-2 px-2 font-mono text-slate-500">{idx + 1}</td>
                     <td className="py-2 px-2 font-bold text-slate-900">
-                      <div>{item.productName || item.product?.name || 'Purchased Medicine'}</div>
+                      <div>{item.product?.name || 'Purchased Medicine'}</div>
                       {discPercent > 0 && (
                         <div className="text-[9px] text-emerald-700 font-semibold">({discPercent}% Disc Applied)</div>
                       )}
@@ -277,12 +280,20 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
                 <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
               </div>
 
-              {totalDiscountVal > 0 && (
-                <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>(-) Trade & Scheme Discount:</span>
-                  <span className="font-mono">- ₹{totalDiscountVal.toFixed(2)}</span>
+              {itemDiscountsSum > 0 && (
+                <div className="flex justify-between text-slate-600">
+                  <span>(-) Item Trade Discount:</span>
+                  <span className="font-mono">- ₹{itemDiscountsSum.toFixed(2)}</span>
                 </div>
               )}
+
+              {billSchemeDiscount > 0 && (
+                <div className="flex justify-between text-slate-600">
+                  <span>(-) Bill Scheme Discount:</span>
+                  <span className="font-mono">- ₹{billSchemeDiscount.toFixed(2)}</span>
+                </div>
+              )}
+
 
               <div className="flex justify-between text-slate-800 font-bold pt-1 border-t border-dashed border-slate-300">
                 <span>(=) Net Taxable Subtotal:</span>
@@ -305,7 +316,9 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
               {roundOffVal !== 0 && (
                 <div className="flex justify-between text-slate-500 text-[11px]">
                   <span>Round Off:</span>
-                  <span className="font-mono">{roundOffVal > 0 ? `+₹${roundOffVal.toFixed(2)}` : `-₹${Math.abs(roundOffVal).toFixed(2)}`}</span>
+                  <span className="font-mono">
+                    {roundOffVal > 0 ? `+ ₹${roundOffVal.toFixed(2)}` : `- ₹${Math.abs(roundOffVal).toFixed(2)}`}
+                  </span>
                 </div>
               )}
 
@@ -339,5 +352,6 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

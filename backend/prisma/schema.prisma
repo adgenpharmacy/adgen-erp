@@ -142,9 +142,14 @@ model PurchaseBill {
   purchaseDate    DateTime           @default(now())
   subtotal        Float
   taxTotal        Float
+  /// Bill-level (scheme) discount from the supplier, on top of per-item discounts.
+  discount        Float              @default(0)
   grandTotal      Float
   amountPaid      Float              @default(0)
   isPaid          Boolean            @default(false)
+  /// Mirrors SalesBill: whether the grand total was rounded to the nearest rupee.
+  isRoundOff      Boolean            @default(true)
+  roundOffAmount  Float              @default(0)
   notes           String?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt

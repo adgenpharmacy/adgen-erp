@@ -1,104 +1,171 @@
 @import "tailwindcss";
 
 /* ============================================================
-   AdGen Pharmacy ERP — Linear/Stripe Modern Design System
+   AdGen Pharmacy ERP — Design System (light theme)
+   ------------------------------------------------------------
+   Semantic tokens drive every surface. Components reference
+   `bg-surface` / `text-fg` / `border-line` rather than raw
+   palette steps, so a colour change happens in one place.
    ============================================================ */
+
+@theme {
+  /* ── Semantic surfaces ─────────────────────────── */
+  --color-canvas: #f3f8f6;   /* soft mint-white app background */
+  --color-surface: #ffffff;  /* cards, sidebar, tables */
+  --color-raised: #f0faf6;   /* very light green */
+  --color-sunken: #e6f4ee;   /* light green tint */
+  --color-hover: #ebf5ef;    /* row / control hover */
+
+  /* ── Text ──────────────────────────────────────── */
+  --color-fg: #0f172a;
+  --color-fg-muted: #475569;
+  --color-fg-subtle: #94a3b8;
+  --color-fg-disabled: #cbd5e1;
+
+  /* ── Lines ─────────────────────────────────────── */
+  --color-line: #dfede8;
+  --color-line-light: #eef6f2;
+  --color-line-strong: #c3ddd3;
+
+  /* ── Brand — Medical Emerald ───────────────────── */
+  --color-brand: #059669;
+  --color-brand-hover: #047857;
+  --color-brand-light: #34d399;
+  --color-brand-fg: #ffffff;
+  --color-brand-subtle: #d1fae5;
+  --color-brand-line: #a7f3d0;
+
+  /* ── Status ────────────────────────────────────── */
+  --color-danger: #dc2626;
+  --color-danger-subtle: #fee2e2;
+  --color-danger-line: #fca5a5;
+
+  --color-warn: #d97706;
+  --color-warn-subtle: #fef3c7;
+  --color-warn-line: #fcd34d;
+
+  --color-info: #0ea5e9;      /* clinical sky blue */
+  --color-info-subtle: #e0f2fe;
+  --color-info-line: #7dd3fc;
+
+  --color-ok: #059669;
+  --color-ok-subtle: #d1fae5;
+  --color-ok-line: #a7f3d0;
+
+  --color-accent: #6366f1;    /* indigo — secondary series */
+  --color-accent-subtle: #eef2ff;
+
+  --color-teal: #0d9488;
+  --color-teal-subtle: #ccfbf1;
+
+  /* ── Radii (mirrors AppSpacing) ────────────────── */
+  --radius-sm: 0.375rem;   /* 6 */
+  --radius-md: 0.5rem;     /* 8 */
+  --radius-lg: 0.75rem;    /* 12 — cards */
+  --radius-xl: 1rem;       /* 16 */
+
+  /* ── Elevation (soft, clinical) ────────────────── */
+  --shadow-card: 0 2px 12px 0 rgb(0 0 0 / 0.04), 0 1px 4px 0 rgb(0 0 0 / 0.02);
+  --shadow-pop: 0 8px 24px -6px rgb(15 23 42 / 0.14), 0 2px 6px -2px rgb(15 23 42 / 0.08);
+
+  /* ── Layout ────────────────────────────────────── */
+  --spacing-sidebar: 14rem;   /* 224px — matches legacy AppSpacing.sidebarWidth */
+
+  /* ── Fonts ─────────────────────────────────────── */
+  --font-sans: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), "SF Mono", "Cascadia Code", monospace;
+}
 
 @layer base {
   html {
-    font-size: 14.5px;
+    /* 15px base — the old 14.5px plus heavy text-xs use was hard to read at a busy counter. */
+    font-size: 15px;
     line-height: 1.5;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.005em;
+    color-scheme: light;
   }
 
   body {
-    font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color: #0f172a;
-    background-color: #f8fafc;
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
   }
-  
+
   code, kbd, samp, pre, .font-mono {
-    font-family: var(--font-jetbrains), 'SF Mono', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     font-feature-settings: "tnum";
   }
 
+  /* Money and counts must align vertically down a column. */
   table, [data-metric], .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
 
-  th {
-    font-size: 0.72rem;
-    line-height: 1rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #64748b;
+  /* Visible keyboard focus everywhere — this app is driven hard by keyboard at the counter. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 
-  td {
-    font-size: 0.84rem;
-    line-height: 1.2rem;
+  ::placeholder {
+    color: var(--color-fg-subtle);
+  }
+
+  /* Respect the OS setting — vestibular disorders make sliding/scaling UI genuinely unpleasant. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
-:root {
-  --bg: #ffffff;
-  --bg-subtle: #f8fafc;
-  --surface: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-tertiary: #94a3b8;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --accent: #059669;
-  --accent-hover: #047857;
-  --accent-subtle: #ecfdf5;
-  --danger: #e11d48;
-  --warning: #d97706;
+/* ── Page enter ─────────────────────────────── */
+/* A single cheap fade+lift on the page body. Deliberately CSS rather than Framer Motion:
+   staggering hundreds of table rows costs far more than the effect is worth. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.page-enter {
+  animation: page-enter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* ── Urgency Border Stripes ─────────────────── */
-.stripe-rose {
-  border-left: 4px solid #f43f5e !important;
-}
+.stripe-rose   { border-left: 3px solid var(--color-danger) !important; }
+.stripe-amber  { border-left: 3px solid var(--color-warn) !important; }
+.stripe-yellow { border-left: 3px solid #eab308 !important; }
+.stripe-emerald{ border-left: 3px solid var(--color-ok) !important; }
 
-.stripe-amber {
-  border-left: 4px solid #f59e0b !important;
-}
-
-.stripe-yellow {
-  border-left: 4px solid #eab308 !important;
-}
-
-.stripe-emerald {
-  border-left: 4px solid #10b981 !important;
-}
-
-/* ── Linear Row Hover Elevation ─────────────── */
+/* ── Table row hover ────────────────────────── */
 .linear-row {
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  transition: background-color 0.12s ease;
 }
-
 .linear-row:hover {
-  background-color: #f1f5f9 !important;
+  background-color: var(--color-hover) !important;
 }
 
 /* ── Scrollbar ──────────────────────────────── */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--color-line-strong);
   border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background-color: var(--color-fg-subtle);
+  background-clip: content-box;
 }
 
 /* ── Print Styles (Guarantees Single-Page / Clean Multi-Page Printing) ── */
@@ -107,7 +174,7 @@
     margin: 0.8cm;
     size: auto;
   }
-  
+
   html, body {
     margin: 0 !important;
     padding: 0 !important;
@@ -136,7 +203,8 @@
     display: block !important;
   }
 
-  div.bg-white.border.rounded-3xl {
+  div.bg-white.border.rounded-3xl,
+  div.bg-surface.border.rounded-3xl {
     border: none !important;
     box-shadow: none !important;
     border-radius: 0 !important;
@@ -163,13 +231,8 @@
     overflow: visible !important;
   }
 
-  thead {
-    display: table-header-group !important;
-  }
-
-  tfoot {
-    display: table-footer-group !important;
-  }
+  thead { display: table-header-group !important; }
+  tfoot { display: table-footer-group !important; }
 
   tr {
     page-break-inside: avoid !important;
@@ -186,5 +249,5 @@
 }
 
 .emerald-gradient-header {
-  background: linear-gradient(135deg, #064E3B 0%, #047857 50%, #0D9488 100%);
+  background: linear-gradient(135deg, #064e3b 0%, #047857 50%, #0d9488 100%);
 }

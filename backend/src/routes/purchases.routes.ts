@@ -14,7 +14,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         party: true,
         items: {
           include: {
-            product: { select: { name: true, packSize: true, contentUnit: true } },
+            product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, packSize: true, packUnit: true, contentUnit: true } },
           },
         },
       },
@@ -39,7 +39,7 @@ router.get('/next-number', authenticate, async (req: AuthenticatedRequest, res: 
 // POST /api/purchases — Create Purchase Bill & Auto-Generate Inventory Batches
 router.post('/', authenticate, validateCreatePurchase, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { invoiceNumber, partyId, purchaseDate, isPaid, items } = req.body;
+    const { invoiceNumber, partyId, purchaseDate, isPaid, items, discount, isRoundOff, roundOffAmount } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Purchase bill must contain at least one item' });
@@ -84,7 +84,21 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         });
       }
 
-      const grandTotal = subtotal + taxTotal;
+      // Bill-level (scheme) discount and round-off, mirroring how SalesBill computes its total
+      // so a purchase memo's arithmetic is reproducible from its stored columns.
+      const discountAmount = Math.max(0, parseFloat(discount) || 0);
+      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
+
+      const shouldRound = isRoundOff === undefined ? true : Boolean(isRoundOff);
+      let grandTotal = rawGrandTotal;
+      let computedRoundOff = 0;
+      if (shouldRound) {
+        grandTotal = Math.round(rawGrandTotal);
+        computedRoundOff = Math.round((grandTotal - rawGrandTotal) * 100) / 100;
+      } else if (roundOffAmount !== undefined) {
+        computedRoundOff = parseFloat(roundOffAmount) || 0;
+        grandTotal = rawGrandTotal + computedRoundOff;
+      }
 
       let finalInvoiceNum = (invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
@@ -108,8 +122,12 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
           purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
           subtotal,
           taxTotal,
+          discount: discountAmount,
           grandTotal,
           isPaid: Boolean(isPaid),
+          isRoundOff: shouldRound,
+          roundOffAmount: computedRoundOff,
+          amountPaid: Boolean(isPaid) ? grandTotal : 0,
           items: {
             create: billItemsToCreate,
           },
@@ -211,7 +229,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { invoiceNumber, partyId, purchaseDate, isPaid, notes, items } = req.body;
+    const { invoiceNumber, partyId, purchaseDate, isPaid, notes, items, discount, isRoundOff, roundOffAmount } = req.body;
 
     const updated = await prisma.$transaction(async (tx) => {
       const existingBill = await tx.purchaseBill.findUnique({
@@ -307,7 +325,23 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         await tx.purchaseBillItem.createMany({ data: billItemsToCreate });
       }
 
-      const grandTotal = subtotal + taxTotal;
+      // Same bill-level discount / round-off treatment as POST, so an edit cannot silently
+      // change a bill's total just because the client omitted a field.
+      const discountAmount = discount !== undefined
+        ? Math.max(0, parseFloat(discount) || 0)
+        : existingBill.discount;
+      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
+
+      const shouldRound = isRoundOff !== undefined ? Boolean(isRoundOff) : existingBill.isRoundOff;
+      let grandTotal = rawGrandTotal;
+      let computedRoundOff = 0;
+      if (shouldRound) {
+        grandTotal = Math.round(rawGrandTotal);
+        computedRoundOff = Math.round((grandTotal - rawGrandTotal) * 100) / 100;
+      } else if (roundOffAmount !== undefined) {
+        computedRoundOff = parseFloat(roundOffAmount) || 0;
+        grandTotal = rawGrandTotal + computedRoundOff;
+      }
       const finalPartyId = partyId || existingBill.partyId;
       const finalInvoiceNumber = invoiceNumber || existingBill.invoiceNumber;
       const finalIsPaid = isPaid !== undefined ? Boolean(isPaid) : existingBill.isPaid;
@@ -322,7 +356,13 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           purchaseDate: purchaseDate ? new Date(purchaseDate) : existingBill.purchaseDate,
           subtotal,
           taxTotal,
+          discount: discountAmount,
           grandTotal,
+          isRoundOff: shouldRound,
+          roundOffAmount: computedRoundOff,
+          // Keep amountPaid consistent with the paid flag, so supplier balances and the
+          // ledger's settle maths agree with what the bill claims.
+          amountPaid: finalIsPaid ? grandTotal : Math.min(existingBill.amountPaid, grandTotal),
           notes: notes !== undefined ? notes : existingBill.notes,
         },
       });

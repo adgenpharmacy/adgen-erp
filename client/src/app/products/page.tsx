@@ -1,53 +1,87 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
-import Sidebar from '@/components/layout/Sidebar';
-import BottomNav from '@/components/layout/BottomNav';
-import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
-import { formatDate } from '@/lib/utils';
-import { 
-  Search, 
-  Plus, 
-  Edit2, 
-  Snowflake, 
+import { formatDate, formatCurrency, cn } from '@/lib/utils';
+import {
+  Search,
+  Plus,
+  Edit2,
+  Snowflake,
   Trash2,
-  X,
   Boxes,
-  Package,
   Eye,
-  RefreshCw
+  RefreshCw,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import PageMain from '@/components/layout/PageMain';
+import type { Product, InventoryItem, InventoryBatch, ProductType } from '@/types';
+import { getApiErrorMessage } from '@/types';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Select,
+  Modal,
+  PageHeader,
+  StatusChip,
+  TableWrap,
+  Table,
+  THead,
+  TH,
+  TR,
+  TD,
+  TableSkeleton,
+  useToast,
+  useConfirm,
+  Pagination,
+} from '@/components/ui';
+
+const EMPTY_FORM = {
+  name: '',
+  genericName: '',
+  companyName: '',
+  hsnCode: '',
+  gstPercent: 12,
+  mrp: 0,
+  purchaseRate: 0,
+  productType: 'TABLET',
+  packSize: 10,
+  packUnit: 'Strip',
+  contentUnit: 'Tablet',
+  requiresColdStorage: false,
+  division: 'GENERAL',
+  lowStockThreshold: 5,
+};
+
+const TYPE_TABS = [
+  { id: 'ALL', label: 'All Forms' },
+  { id: 'TABLET', label: 'Tablets' },
+  { id: 'CAPSULE', label: 'Capsules' },
+  { id: 'SYRUP', label: 'Syrups' },
+  { id: 'INJECTION', label: 'Injections' },
+  { id: 'COLD', label: 'Cold Storage' },
+];
 
 export default function ProductsPage() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const { products: cachedProducts, inventory: cachedInventory, loading, refreshData } = useErpData();
-  const [products, setProducts] = useState<any[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [isMounted, setIsMounted] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<any>(null);
-  const [inspectProduct, setInspectProduct] = useState<any>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [inspectProduct, setInspectProduct] = useState<Product | null>(null);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    genericName: '',
-    companyName: '',
-    hsnCode: '',
-    gstPercent: 12,
-    mrp: 0,
-    purchaseRate: 0,
-    productType: 'TABLET',
-    packSize: 10,
-    packUnit: 'Strip',
-    contentUnit: 'Tablet',
-    requiresColdStorage: false,
-    division: 'GENERAL',
-    lowStockThreshold: 5,
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
 
   useEffect(() => {
     setIsMounted(true);
@@ -70,22 +104,50 @@ export default function ProductsPage() {
         await api.post('/products', formData);
       }
       setShowAddModal(false);
+      toast.success(editingProduct ? 'Medicine updated' : 'Medicine added');
       setEditingProduct(null);
       await refreshData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to save product');
+    } catch (err) {
+      toast.error('Failed to save product', getApiErrorMessage(err));
     }
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this medicine product?')) return;
+    const ok = await confirm({
+      title: 'Delete this medicine?',
+      message: 'The product will be removed from the catalogue. Existing bills that reference it are not affected.',
+      confirmLabel: 'Delete medicine',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/products/${id}`);
+      toast.success('Medicine deleted');
       await refreshData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to delete product');
+    } catch (err) {
+      toast.error('Failed to delete product', getApiErrorMessage(err));
     }
+  };
+
+  const openEdit = (p: Product) => {
+    setEditingProduct(p);
+    setFormData({
+      name: p.name || '',
+      genericName: p.genericName || '',
+      companyName: p.companyName || '',
+      hsnCode: p.hsnCode || '3004',
+      gstPercent: p.gstPercent || 12,
+      mrp: p.mrp || 0,
+      purchaseRate: p.purchaseRate || 0,
+      productType: p.productType || 'TABLET',
+      packSize: p.packSize || 10,
+      packUnit: p.packUnit || 'Strip',
+      contentUnit: p.contentUnit || 'Tablet',
+      requiresColdStorage: Boolean(p.requiresColdStorage),
+      division: p.division || 'GENERAL',
+      lowStockThreshold: p.lowStockThreshold || 5,
+    });
+    setShowAddModal(true);
   };
 
   const filteredProducts = useMemo(() => {
@@ -100,504 +162,447 @@ export default function ProductsPage() {
     });
   }, [products, search, typeFilter]);
 
-  const getProductBatches = (productId: string) => {
-    return inventory.filter((b) => b.productId === productId || b.product?.id === productId);
+  // Any change to the result set should return the operator to the first page.
+  useEffect(() => { setPage(1); }, [search, typeFilter]);
+
+  /**
+   * The inventory endpoint returns ONE row per product, each carrying its own `batches` array.
+   * This previously returned those product-level rows and the modal rendered them as batches,
+   * so Batch / Expiry / Available Stock were all `undefined` on screen. Return the real batches.
+   */
+  const getProductBatches = (productId: string): InventoryBatch[] => {
+    const entry = inventory.find((inv) => inv.productId === productId);
+    return entry?.batches ?? [];
   };
 
+  const coldCount = products.filter((p) => p.requiresColdStorage).length;
+  const visibleRows = filteredProducts.slice((page - 1) * pageSize, page * pageSize);
+
   return (
-    <div className="flex bg-[#F8FAFC] text-slate-800 min-h-screen font-sans">
-      <Sidebar />
-
-      <main className="flex-1 p-3 md:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1600px] mx-auto w-full space-y-4">
-        {/* COMPACT PAGE HEADER & SUMMARY STATS */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Medicine Master Catalog</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-600">
-                {products.length} Products Formulated
-              </span>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-600 mt-1.5">
-              <span>Formulations: <strong className="text-slate-900 font-mono">{filteredProducts.length} Listed</strong></span>
-              <span className="text-slate-300">•</span>
-              <span className="flex items-center gap-1 text-blue-600 font-bold">
-                <Snowflake className="w-3.5 h-3.5" />
-                <span>{products.filter(p => p.requiresColdStorage).length} Cold Storage (2-8°C)</span>
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
+    <PageMain>
+      <PageHeader
+        title="Medicine Master Catalog"
+        subtitle={`${products.length.toLocaleString('en-IN')} products · ${filteredProducts.length.toLocaleString('en-IN')} listed · ${coldCount} need cold storage (2–8°C)`}
+        action={
+          <>
+            <Button
+              variant="outline"
+              iconOnly
               onClick={() => refreshData()}
-              className="p-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition shadow-xs"
-              title="Refresh Catalog"
+              title="Refresh catalog"
+              aria-label="Refresh catalog"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-
-            <button
+              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin text-brand')} />
+            </Button>
+            <Button
               onClick={() => {
                 setEditingProduct(null);
-                setFormData({
-                  name: '',
-                  genericName: '',
-                  companyName: '',
-                  hsnCode: '',
-                  gstPercent: 12,
-                  mrp: 0,
-                  purchaseRate: 0,
-                  productType: 'TABLET',
-                  packSize: 10,
-                  packUnit: 'Strip',
-                  contentUnit: 'Tablet',
-                  requiresColdStorage: false,
-                  division: 'GENERAL',
-                  lowStockThreshold: 5,
-                });
+                setFormData(EMPTY_FORM);
                 setShowAddModal(true);
               }}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition"
             >
-              <Plus className="w-4 h-4" />
-              <span>+ Add Medicine</span>
-            </button>
-          </div>
-        </div>
-
-        {/* SEARCH BAR & SEGMENTED DOSAGE FORM CONTROLS */}
-        <div className="bg-white border border-slate-200/80 p-2.5 rounded-2xl shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by brand name, generic composition, or company..."
-              className="w-full bg-slate-50 border border-slate-200/90 rounded-xl pl-10 pr-4 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:bg-white focus:border-emerald-600 transition"
-            />
-          </div>
-
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-            {[
-              { id: 'ALL', label: 'All Forms' },
-              { id: 'TABLET', label: 'Tablets' },
-              { id: 'CAPSULE', label: 'Capsules' },
-              { id: 'SYRUP', label: 'Syrups' },
-              { id: 'INJECTION', label: 'Injections' },
-              { id: 'COLD', label: '❄ Cold Storage' },
-            ].map((tab) => (
+              <Plus className="h-4 w-4" aria-hidden />
+              Add Medicine
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <Input
+            icon={Search}
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by brand name, generic composition, or company…"
+            className="flex-1"
+            aria-label="Search products"
+          />
+          <div className="flex items-center gap-1 rounded-md bg-sunken p-1 overflow-x-auto">
+            {TYPE_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setTypeFilter(tab.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-extrabold transition whitespace-nowrap ${
-                  typeFilter === tab.id
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                aria-pressed={typeFilter === tab.id}
+                className={cn(
+                  'flex items-center gap-1 px-3 py-1.5 rounded-sm text-xs font-bold whitespace-nowrap transition-colors',
+                  typeFilter === tab.id ? 'bg-surface text-fg shadow-card' : 'text-fg-muted hover:text-fg'
+                )}
               >
+                {tab.id === 'COLD' ? <Snowflake className="h-3.5 w-3.5 text-info" aria-hidden /> : null}
                 {tab.label}
               </button>
             ))}
           </div>
         </div>
+      </PageHeader>
 
-        {/* HIGH-DENSITY LINEAR CATALOG TABLE */}
+      <Card className="overflow-hidden">
         {!isMounted || loading ? (
-          <LoadingSkeleton type="table" rows={8} />
+          <TableSkeleton rows={10} cols={7} />
         ) : filteredProducts.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs font-bold shadow-xs">
-            No medicines match your search criteria.
-          </div>
+          <EmptyState
+            icon={Boxes}
+            title="No medicines found"
+            message={
+              search
+                ? `Nothing matches “${search}” in this category.`
+                : 'No products in this category yet.'
+            }
+            action={
+              search ? (
+                <Button variant="outline" onClick={() => setSearch('')}>
+                  Clear search
+                </Button>
+              ) : (
+                <Link
+                  href="/products/new"
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-brand-fg hover:bg-brand-hover"
+                >
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Add Medicine
+                </Link>
+              )
+            }
+          />
         ) : (
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-2.5 px-4">Medicine Brand Name & Salt</th>
-                    <th className="py-2.5 px-3">Manufacturer</th>
-                    <th className="py-2.5 px-3">Dosage Form</th>
-                    <th className="py-2.5 px-3">Pack Rule</th>
-                    <th className="py-2.5 px-3 text-right">MRP (₹)</th>
-                    <th className="py-2.5 px-3 text-right">GST %</th>
-                    <th className="py-2.5 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {filteredProducts.slice(0, 300).map((p) => (
-                    <tr 
-                      key={p.id} 
-                      onClick={() => setInspectProduct(p)}
-                      className="linear-row group cursor-pointer"
-                    >
-                      <td className="py-2 px-4">
-                        <div className="font-semibold text-slate-900 text-sm leading-tight group-hover:text-emerald-700 transition flex items-center gap-1.5">
-                          <span>{toTitleCase(p.name)}</span>
-                          {p.requiresColdStorage && (
-                            <span title="Cold Storage (2-8°C)">
-                              <Snowflake className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-normal leading-tight mt-0.5">
-                          {p.genericName ? toTitleCase(p.genericName) : 'General Salt'}
-                          <span className="text-slate-400 font-mono text-[10px] ml-1.5">HSN: {p.hsnCode || '3004'}</span>
-                        </div>
-                      </td>
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Medicine Brand Name &amp; Salt</TH>
+                  <TH className="hidden lg:table-cell">Manufacturer</TH>
+                  <TH>Dosage Form</TH>
+                  <TH className="hidden md:table-cell">Pack Rule</TH>
+                  <TH align="right">MRP</TH>
+                  <TH align="right">GST %</TH>
+                  <TH align="right">Actions</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {visibleRows.map((p) => (
+                  <TR key={p.id} onClick={() => setInspectProduct(p)} className="group cursor-pointer">
+                    <TD>
+                      <span className="flex items-center gap-1.5 font-semibold leading-tight transition-colors group-hover:text-brand-hover">
+                        {toTitleCase(p.name)}
+                        {p.requiresColdStorage ? (
+                          <Snowflake className="h-3.5 w-3.5 shrink-0 text-info" aria-label="Cold storage (2–8°C)" />
+                        ) : null}
+                      </span>
+                      <span className="block text-xs text-fg-subtle leading-tight mt-0.5">
+                        {p.genericName ? toTitleCase(p.genericName) : 'General Salt'}
+                        <span className="font-mono text-[11px] ml-1.5">HSN: {p.hsnCode || '3004'}</span>
+                      </span>
+                    </TD>
 
-                      <td className="py-2 px-3 text-slate-600 font-medium">
-                        {toTitleCase(p.companyName || 'Generic')}
-                      </td>
+                    <TD className="hidden lg:table-cell text-fg-muted">
+                      {toTitleCase(p.companyName || 'Generic')}
+                    </TD>
 
-                      <td className="py-2 px-3">
-                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
-                          {p.productType}
-                        </span>
-                      </td>
+                    <TD>
+                      <StatusChip tone="neutral" small>{p.productType}</StatusChip>
+                    </TD>
 
-                      <td className="py-2 px-3 text-slate-600 font-mono text-[11px]">
-                        1 {p.packUnit || 'Strip'} = {p.packSize || 10} {p.contentUnit || 'Units'}
-                      </td>
+                    <TD className="hidden md:table-cell font-mono text-xs text-fg-muted">
+                      1 {p.packUnit || 'Strip'} = {p.packSize || 10} {p.contentUnit || 'Units'}
+                    </TD>
 
-                      <td className="py-2 px-3 text-right font-mono font-extrabold text-slate-900 text-sm">
-                        ₹{(p.mrp || 0).toFixed(2)}
-                      </td>
+                    <TD align="right" className="font-mono font-bold">
+                      {formatCurrency(p.mrp || 0)}
+                    </TD>
 
-                      <td className="py-2 px-3 text-right font-mono font-bold text-slate-600">
-                        {p.gstPercent}%
-                      </td>
+                    <TD align="right" className="font-mono text-fg-muted">
+                      {p.gstPercent}%
+                    </TD>
 
-                      <td className="py-2 px-4 text-right">
-                        <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => setInspectProduct(p)}
-                            className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
-                            title="Inspect Batches"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingProduct(p);
-                              setFormData({
-                                name: p.name || '',
-                                genericName: p.genericName || '',
-                                companyName: p.companyName || '',
-                                hsnCode: p.hsnCode || '3004',
-                                gstPercent: p.gstPercent || 12,
-                                mrp: p.mrp || 0,
-                                purchaseRate: p.purchaseRate || 0,
-                                productType: p.productType || 'TABLET',
-                                packSize: p.packSize || 10,
-                                packUnit: p.packUnit || 'Strip',
-                                contentUnit: p.contentUnit || 'Tablet',
-                                requiresColdStorage: Boolean(p.requiresColdStorage),
-                                division: p.division || 'GENERAL',
-                                lowStockThreshold: p.lowStockThreshold || 5,
-                              });
-                              setShowAddModal(true);
-                            }}
-                            className="p-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
-                            title="Edit Product"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => handleDelete(p.id, e)}
-                            className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition"
-                            title="Delete Product"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    <TD align="right">
+                      <span
+                        className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => setInspectProduct(p)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-brand-subtle hover:text-brand"
+                          title="Inspect batches"
+                          aria-label={`Inspect batches for ${p.name}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
+                          title="Edit product"
+                          aria-label={`Edit ${p.name}`}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(p.id, e)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                          title="Delete product"
+                          aria-label={`Delete ${p.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </span>
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
-      </main>
+        {filteredProducts.length > 0 ? (
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={filteredProducts.length}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
+      </Card>
 
       {/* INSPECT PRODUCT MODAL */}
-      <AnimatePresence>
-        {inspectProduct && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <Boxes className="w-5 h-5 text-emerald-600" />
-                  <h3 className="font-extrabold text-slate-900 text-base">{toTitleCase(inspectProduct.name)}</h3>
-                </div>
-                <button onClick={() => setInspectProduct(null)} className="p-1 text-slate-400 hover:text-slate-800">
-                  <X className="w-5 h-5" />
-                </button>
+      <Modal
+        open={!!inspectProduct}
+        onClose={() => setInspectProduct(null)}
+        title={inspectProduct ? toTitleCase(inspectProduct.name) : ''}
+        subtitle={inspectProduct ? toTitleCase(inspectProduct.companyName || 'Generic') : undefined}
+        size="lg"
+      >
+        {inspectProduct ? (
+          <div className="p-5 space-y-5">
+            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+                <dt className="text-xs font-semibold text-fg-subtle">Generic Salt</dt>
+                <dd className="mt-0.5 text-sm font-bold text-fg truncate">
+                  {toTitleCase(inspectProduct.genericName || 'General')}
+                </dd>
               </div>
-
-              <div className="bg-slate-50 p-4 rounded-2xl space-y-2 text-xs font-medium">
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">Generic Salt:</span>
-                  <span className="font-bold text-slate-900">{toTitleCase(inspectProduct.genericName || 'General')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">Manufacturer:</span>
-                  <span className="font-bold text-slate-900">{toTitleCase(inspectProduct.companyName || 'Generic')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">MRP / Pack:</span>
-                  <span className="font-mono font-bold text-emerald-700">₹{(inspectProduct.mrp || 0).toFixed(2)}</span>
-                </div>
+              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+                <dt className="text-xs font-semibold text-fg-subtle">Manufacturer</dt>
+                <dd className="mt-0.5 text-sm font-bold text-fg truncate">
+                  {toTitleCase(inspectProduct.companyName || 'Generic')}
+                </dd>
               </div>
+              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+                <dt className="text-xs font-semibold text-fg-subtle">MRP / Pack</dt>
+                <dd className="mt-0.5 text-sm font-bold text-brand font-mono">
+                  {formatCurrency(inspectProduct.mrp || 0)}
+                </dd>
+              </div>
+            </dl>
 
-              <div className="space-y-2">
-                <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Active Inventory Stock Batches</h4>
-                {getProductBatches(inspectProduct.id).length > 0 ? (
-                  <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
-                    <table className="w-full text-left">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wide text-fg-muted mb-2">
+                Active Inventory Stock Batches
+              </h4>
+              {getProductBatches(inspectProduct.id).length > 0 ? (
+                <div className="rounded-md border border-line overflow-hidden">
+                  <TableWrap>
+                    <Table>
+                      <THead>
                         <tr>
-                          <th className="p-2.5">Batch</th>
-                          <th className="p-2.5">Expiry</th>
-                          <th className="p-2.5 text-right">MRP</th>
-                          <th className="p-2.5 text-right">Available Stock</th>
+                          <TH>Batch</TH>
+                          <TH>Expiry</TH>
+                          <TH align="right">MRP</TH>
+                          <TH align="right">Available Stock</TH>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium">
-                        {getProductBatches(inspectProduct.id).map((b: any, idx: number) => (
-                          <tr key={idx}>
-                            <td className="p-2.5 font-mono font-bold text-slate-900">{b.batchNumber}</td>
-                            <td className="p-2.5 text-slate-500">{formatDate(b.expiryDate)}</td>
-                            <td className="p-2.5 text-right font-mono">₹{b.mrp}</td>
-                            <td className="p-2.5 text-right font-mono font-bold text-emerald-700">{b.quantity} Units</td>
-                          </tr>
+                      </THead>
+                      <tbody>
+                        {getProductBatches(inspectProduct.id).map((b, idx) => (
+                          <TR key={idx}>
+                            <TD className="font-mono font-bold">{b.batchNumber}</TD>
+                            <TD className="text-fg-muted">{formatDate(b.expiryDate)}</TD>
+                            <TD align="right" className="font-mono">{formatCurrency(b.mrp)}</TD>
+                            <TD align="right" className="font-mono font-bold text-brand">
+                              {b.quantity} Units
+                            </TD>
+                          </TR>
                         ))}
                       </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-slate-50 rounded-xl text-center text-xs text-slate-400">
-                    No active stock batches in inventory.
-                  </div>
-                )}
-              </div>
-            </motion.div>
+                    </Table>
+                  </TableWrap>
+                </div>
+              ) : (
+                <p className="rounded-md border border-line bg-raised px-3 py-6 text-center text-sm text-fg-subtle">
+                  No active stock batches in inventory.
+                </p>
+              )}
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        ) : null}
+      </Modal>
 
       {/* ADD / EDIT MODAL */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-sm">{editingProduct ? 'Edit Medicine' : 'Add New Medicine'}</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-slate-900">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3 text-xs max-h-[75vh] overflow-y-auto pr-1">
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">Brand Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. SINAREST TABLET"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Generic Composition</label>
-                  <input
-                    type="text"
-                    value={formData.genericName}
-                    onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
-                    placeholder="Paracetamol, Phenylephrine"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Company / Manufacturer</label>
-                  <input
-                    type="text"
-                    value={formData.companyName}
-                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                    placeholder="Centaur Pharma"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
-
-              {/* Default MRP & Purchase Rate */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Default MRP/Pack (₹)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={formData.mrp || ''}
-                    onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
-                    placeholder="0.00"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Default Purchase Rate/Pack (₹)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={formData.purchaseRate || ''}
-                    onChange={(e) => setFormData({ ...formData, purchaseRate: parseFloat(e.target.value) || 0 })}
-                    placeholder="0.00"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Dosage Form & HSN Code */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Dosage Form</label>
-                  <select
-                    value={formData.productType}
-                    onChange={(e) => setFormData({ ...formData, productType: e.target.value as any })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  >
-                    <option value="TABLET">TABLET</option>
-                    <option value="CAPSULE">CAPSULE</option>
-                    <option value="SYRUP">SYRUP</option>
-                    <option value="INJECTION">INJECTION</option>
-                    <option value="CREAM">CREAM</option>
-                    <option value="DROPS">DROPS</option>
-                    <option value="OINTMENT">OINTMENT</option>
-                    <option value="POWDER">POWDER</option>
-                    <option value="OTHERS">OTHERS</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">HSN Code</label>
-                  <input
-                    type="text"
-                    value={formData.hsnCode}
-                    onChange={(e) => setFormData({ ...formData, hsnCode: e.target.value })}
-                    placeholder="3004"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
-
-              {/* Pack Size & Units */}
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Pack Size *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formData.packSize}
-                    onChange={(e) => setFormData({ ...formData, packSize: parseInt(e.target.value, 10) || 1 })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Pack Unit</label>
-                  <input
-                    type="text"
-                    value={formData.packUnit}
-                    onChange={(e) => setFormData({ ...formData, packUnit: e.target.value })}
-                    placeholder="Strip"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Content Unit</label>
-                  <input
-                    type="text"
-                    value={formData.contentUnit}
-                    onChange={(e) => setFormData({ ...formData, contentUnit: e.target.value })}
-                    placeholder="Tablet"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
-
-              {/* GST % & Low Stock Threshold */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">GST Tax Rate</label>
-                  <select
-                    value={formData.gstPercent}
-                    onChange={(e) => setFormData({ ...formData, gstPercent: parseFloat(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  >
-                    <option value={0}>0% GST</option>
-                    <option value={5}>5% GST</option>
-                    <option value={12}>12% GST</option>
-                    <option value={18}>18% GST</option>
-                    <option value={28}>28% GST</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Low Stock Alert Threshold</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formData.lowStockThreshold}
-                    onChange={(e) => setFormData({ ...formData, lowStockThreshold: parseFloat(e.target.value) || 5 })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Cold Storage Toggle */}
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="requiresColdStorage"
-                  checked={formData.requiresColdStorage}
-                  onChange={(e) => setFormData({ ...formData, requiresColdStorage: e.target.checked })}
-                  className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-                />
-                <label htmlFor="requiresColdStorage" className="text-xs font-bold text-slate-700 cursor-pointer">
-                  Requires Cold Storage Refrigeration (2-8°C)
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs hover:bg-slate-200 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 hover:bg-emerald-700 transition"
-                >
-                  Save Product
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title={editingProduct ? 'Edit Medicine' : 'Add New Medicine'}
+        subtitle={editingProduct ? editingProduct.name : 'Create a catalogue entry'}
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="product-form">
+              Save Product
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="product-form" onSubmit={handleSubmit} className="p-5 space-y-4">
+          <Field label="Brand Name" required>
+            <Input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="e.g. SINAREST TABLET"
+              className="font-semibold"
+            />
+          </Field>
 
-      <BottomNav />
-    </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Generic Composition">
+              <Input
+                type="text"
+                value={formData.genericName}
+                onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
+                placeholder="Paracetamol, Phenylephrine"
+              />
+            </Field>
+            <Field label="Company / Manufacturer">
+              <Input
+                type="text"
+                value={formData.companyName}
+                onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                placeholder="Centaur Pharma"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Default MRP / Pack (₹)">
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                value={formData.mrp || ''}
+                onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
+                placeholder="0.00"
+                className="font-mono font-semibold"
+              />
+            </Field>
+            <Field label="Default Purchase Rate / Pack (₹)">
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                value={formData.purchaseRate || ''}
+                onChange={(e) => setFormData({ ...formData, purchaseRate: parseFloat(e.target.value) || 0 })}
+                placeholder="0.00"
+                className="font-mono font-semibold"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Dosage Form">
+              <Select
+                value={formData.productType}
+                onChange={(e) => setFormData({ ...formData, productType: e.target.value as ProductType })}
+              >
+                <option value="TABLET">Tablet</option>
+                <option value="CAPSULE">Capsule</option>
+                <option value="SYRUP">Syrup</option>
+                <option value="INJECTION">Injection</option>
+                <option value="CREAM">Cream</option>
+                <option value="DROPS">Drops</option>
+                <option value="OINTMENT">Ointment</option>
+                <option value="POWDER">Powder</option>
+                <option value="OTHERS">Others</option>
+              </Select>
+            </Field>
+            <Field label="HSN Code">
+              <Input
+                type="text"
+                value={formData.hsnCode}
+                onChange={(e) => setFormData({ ...formData, hsnCode: e.target.value })}
+                placeholder="3004"
+                className="font-mono"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Pack Size" required>
+              <Input
+                type="number"
+                min="1"
+                value={formData.packSize}
+                onChange={(e) => setFormData({ ...formData, packSize: parseInt(e.target.value, 10) || 1 })}
+                className="font-mono font-semibold"
+              />
+            </Field>
+            <Field label="Pack Unit">
+              <Input
+                type="text"
+                value={formData.packUnit}
+                onChange={(e) => setFormData({ ...formData, packUnit: e.target.value })}
+                placeholder="Strip"
+              />
+            </Field>
+            <Field label="Content Unit">
+              <Input
+                type="text"
+                value={formData.contentUnit}
+                onChange={(e) => setFormData({ ...formData, contentUnit: e.target.value })}
+                placeholder="Tablet"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="GST Tax Rate">
+              <Select
+                value={formData.gstPercent}
+                onChange={(e) => setFormData({ ...formData, gstPercent: parseFloat(e.target.value) })}
+              >
+                <option value={0}>0% GST</option>
+                <option value={5}>5% GST</option>
+                <option value={12}>12% GST</option>
+                <option value={18}>18% GST</option>
+                <option value={28}>28% GST</option>
+              </Select>
+            </Field>
+            <Field label="Low Stock Alert Threshold">
+              <Input
+                type="number"
+                min="1"
+                value={formData.lowStockThreshold}
+                onChange={(e) => setFormData({ ...formData, lowStockThreshold: parseFloat(e.target.value) || 5 })}
+                className="font-mono font-semibold"
+              />
+            </Field>
+          </div>
+
+          <label className="flex items-center gap-2.5 rounded-md border border-line bg-raised px-3 py-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.requiresColdStorage}
+              onChange={(e) => setFormData({ ...formData, requiresColdStorage: e.target.checked })}
+              className="h-4 w-4 accent-brand cursor-pointer"
+            />
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-fg">
+              <Snowflake className="h-4 w-4 text-info" aria-hidden />
+              Requires cold storage refrigeration
+              <span className="font-normal text-fg-subtle">(2–8°C)</span>
+            </span>
+          </label>
+        </form>
+      </Modal>
+    </PageMain>
   );
 }

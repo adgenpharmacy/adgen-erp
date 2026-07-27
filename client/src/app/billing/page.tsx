@@ -2,40 +2,87 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { api } from '@/lib/api-client';
-import { getCachedProducts, invalidateCatalogCache } from '@/lib/catalog-cache';
-import Sidebar from '@/components/layout/Sidebar';
-import BottomNav from '@/components/layout/BottomNav';
+import { getCachedInventory, invalidateCatalogCache } from '@/lib/catalog-cache';
 import InvoicePrintModal from '@/components/invoice/InvoicePrintModal';
-import { 
-  User, 
-  Phone, 
-  Stethoscope, 
-  MapPin, 
-  CreditCard, 
-  Smartphone, 
-  Clock, 
-  Camera, 
-  Plus, 
-  Trash2, 
-  ArrowLeft, 
-  Save, 
-  Check, 
-  X, 
+import {
+  User,
+  Phone,
+  Stethoscope,
+  MapPin,
+  CreditCard,
+  Smartphone,
+  Clock,
+  Plus,
+  Trash2,
+  ArrowLeft,
+  Save,
+  X,
   Search,
   Pill,
   Banknote,
-  AlertTriangle
+  AlertTriangle,
 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import PageMain from '@/components/layout/PageMain';
+import { Button, Card, CardHeader, CardBody, Field, Input, Modal, useToast } from '@/components/ui';
+import { formatCurrency, cn } from '@/lib/utils';
+import type { InventoryItem, InventoryBatch, Sale, SaleDetail, SaleDetailItem } from '@/types';
+import { getApiErrorMessage } from '@/types';
+
+const PAYMENT_MODES = [
+  { id: 'CASH', label: 'Cash', icon: Banknote },
+  { id: 'UPI', label: 'UPI', icon: Smartphone },
+  { id: 'CARD', label: 'Card', icon: CreditCard },
+  { id: 'CREDIT', label: 'Credit', icon: Clock },
+  { id: 'SPLIT', label: 'Split', icon: Plus },
+] as const;
+
+/** One editable row on the counter. Not an API type — it holds pack/loose split before submit. */
+interface SaleLineDraft {
+  productId: string;
+  productName: string;
+  batchId: string;
+  batchNumber: string;
+  /** Display-only MM/YY string. */
+  expiryDate: string;
+  /** MRP per pack. */
+  mrp: number;
+  discountPercent: number;
+  quantityStrips: number;
+  quantityLoose: number;
+  packSize: number;
+  packUnit: string;
+  contentUnit: string;
+  /** Batches available for this product, earliest expiry first. */
+  batches: InventoryBatch[];
+  taxPercent?: number;
+  gstPercent?: number;
+}
+
+const EMPTY_ITEM: SaleLineDraft = {
+  productId: '',
+  productName: '',
+  batchId: '',
+  batchNumber: '',
+  expiryDate: '',
+  mrp: 0,
+  discountPercent: 0,
+  quantityStrips: 0,
+  quantityLoose: 0,
+  packSize: 1,
+  packUnit: 'Strip',
+  contentUnit: 'Tablet',
+  batches: [],
+};
 
 function NewSalePageContent() {
+  const toast = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
 
   const [search, setSearch] = useState('');
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<InventoryItem[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
@@ -59,25 +106,9 @@ function NewSalePageContent() {
   const [isRoundOff, setIsRoundOff] = useState<boolean>(true);
 
   // Products Line Items State
-  const [items, setItems] = useState<any[]>([
-    {
-      productId: '',
-      productName: '',
-      batchId: '',
-      batchNumber: '',
-      expiryDate: '',
-      mrp: 0,
-      discountPercent: 0,
-      quantityStrips: 0,
-      quantityLoose: 0,
-      packSize: 1,
-      packUnit: 'Strip',
-      contentUnit: 'Tablet',
-      batches: [],
-    }
-  ]);
+  const [items, setItems] = useState<SaleLineDraft[]>([{ ...EMPTY_ITEM }]);
 
-  const [createdBillForPrint, setCreatedBillForPrint] = useState<any>(null);
+  const [createdBillForPrint, setCreatedBillForPrint] = useState<Sale | null>(null);
   const inputRefs = useRef<{ [key: string]: HTMLInputElement | HTMLSelectElement | null }>({});
 
   const isFormDirty = () => {
@@ -94,6 +125,7 @@ function NewSalePageContent() {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerName, customerPhone, items]);
 
   // 2. Trackpad 2-finger swipe left / Browser Back Button (popstate) trap
@@ -112,6 +144,7 @@ function NewSalePageContent() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerName, customerPhone, items]);
 
   const handleBackClick = () => {
@@ -124,13 +157,13 @@ function NewSalePageContent() {
 
   useEffect(() => {
     if (editId) {
-      api.get(`/sales/${editId}`).then((r) => {
+      api.get<SaleDetail>(`/sales/${editId}`).then((r) => {
         const bill = r.data;
         setCustomerName(bill.customerName || bill.customer?.name || '');
         setCustomerPhone(bill.customerPhone || bill.customer?.phone || '');
         setDoctorName(bill.doctorName || bill.customer?.doctorName || '');
         setAddress(bill.notes || bill.customer?.address || '');
-        setPaymentMethod(bill.paymentMethod || 'CASH');
+        setPaymentMethod((bill.paymentMethod as typeof paymentMethod) || 'CASH');
 
         setCashAmount(bill.cashAmount || 0);
         setUpiAmount(bill.upiAmount || 0);
@@ -145,7 +178,7 @@ function NewSalePageContent() {
 
         if (bill.items && bill.items.length > 0) {
           setItems(
-            bill.items.map((i: any) => {
+            (bill.items ?? []).map((i: SaleDetailItem): SaleLineDraft => {
               const packSize = i.product?.packSize || 1;
               const strips = Math.floor((i.quantity || 0) / packSize);
               const loose = (i.quantity || 0) % packSize;
@@ -172,11 +205,14 @@ function NewSalePageContent() {
     }
   }, [editId]);
 
-  // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE
+  // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE.
+  // Must hit /inventory, not /products: only /inventory returns live `systemStock` and every
+  // batch ordered by expiry ascending. /products returns a single newest-created batch, which
+  // made the counter show a hardcoded stock of 10 and pick the wrong batch for FEFO.
   useEffect(() => {
     let isCurrent = true;
     if (search.trim()) {
-      getCachedProducts(search.trim()).then((res) => {
+      getCachedInventory(search.trim()).then((res) => {
         if (isCurrent) setProducts(res);
       });
     } else {
@@ -185,47 +221,63 @@ function NewSalePageContent() {
     return () => { isCurrent = false; };
   }, [search]);
 
-  const addEmptyItem = () => {
-    setItems((prev) => [
-      ...prev,
-      {
-        productId: '',
-        productName: '',
-        batchId: '',
-        batchNumber: '',
-        expiryDate: '',
-        mrp: 0,
-        discountPercent: 0,
-        quantityStrips: 0,
-        quantityLoose: 0,
-        packSize: 1,
-        packUnit: 'Strip',
-        contentUnit: 'Tablet',
-        batches: [],
+  // Close the medicine dropdown when clicking away from the row that owns it.
+  useEffect(() => {
+    if (activeSearchIndex === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-medicine-search]')) {
+        setActiveSearchIndex(null);
       }
-    ]);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [activeSearchIndex]);
+
+  const addEmptyItem = () => {
+    setItems((prev) => [...prev, { ...EMPTY_ITEM }]);
   };
 
-  const selectProductForItem = (index: number, invItem: any) => {
-    const prod = invItem.product || invItem;
-    const batchList = invItem.batches || prod.batches || [];
-    const firstBatch = batchList[0] || {};
+  // Counter keyboard shortcuts. The operator bills with both hands on the keyboard, so the
+  // two most frequent actions get F-keys rather than requiring a trip to the mouse.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        setItems((prev) => [...prev, { ...EMPTY_ITEM }]);
+        // Focus the new row's search box once it has rendered.
+        setTimeout(() => setActiveSearchIndex(items.length), 60);
+      }
+      if (e.key === 'F9') {
+        e.preventDefault();
+        handleSaveSale(new Event('submit') as unknown as React.FormEvent);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, customerName, customerPhone, paymentMethod, schemeDiscountValue, isRoundOff, cashAmount, upiAmount, cardAmount, creditAmount]);
+
+  const selectProductForItem = (index: number, invItem: InventoryItem) => {
+    // batches[0] is the earliest-expiring batch because /inventory sorts by expiryDate asc.
+    const batchList = invItem.batches || [];
+    const firstBatch = batchList[0];
 
     const updated = [...items];
     updated[index] = {
       ...updated[index],
-      productId: prod.id || invItem.productId || invItem.id,
-      productName: prod.name || invItem.name || invItem.productName || 'Medicine Item',
-      batchId: firstBatch.id || '',
-      batchNumber: firstBatch.batchNumber || 'DEF-001',
-      expiryDate: firstBatch.expiryDate ? new Date(firstBatch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
-      mrp: firstBatch.mrp || invItem.mrp || prod.mrp || 0,
+      productId: invItem.productId || invItem.id,
+      productName: invItem.productName || invItem.name || 'Medicine Item',
+      batchId: firstBatch?.id || '',
+      batchNumber: firstBatch?.batchNumber || 'DEF-001',
+      expiryDate: firstBatch?.expiryDate ? new Date(firstBatch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
+      mrp: firstBatch?.mrp || invItem.mrp || 0,
       discountPercent: 0,
       quantityStrips: 1,
       quantityLoose: 0,
-      packSize: prod.packSize || invItem.packSize || 1,
-      packUnit: prod.packUnit || invItem.packUnit || 'Strip',
-      contentUnit: prod.contentUnit || invItem.contentUnit || 'Tablet',
+      packSize: invItem.packSize || 1,
+      packUnit: invItem.packUnit || 'Strip',
+      contentUnit: invItem.contentUnit || 'Tablet',
       batches: batchList,
     };
     setItems(updated);
@@ -253,7 +305,7 @@ function NewSalePageContent() {
     setItems(updated);
   };
 
-  const updateItem = (index: number, field: string, value: any) => {
+  const updateItem = <K extends keyof SaleLineDraft>(index: number, field: K, value: SaleLineDraft[K]) => {
     const updated = [...items];
     updated[index][field] = value;
     setItems(updated);
@@ -276,23 +328,23 @@ function NewSalePageContent() {
     }
   };
 
-  const getItemLineTotal = (item: any) => {
+  const getItemLineTotal = (item: SaleLineDraft) => {
     if (!item.productId) return 0;
     const packSize = item.packSize || 1;
-    const totalContentUnits = ((parseFloat(item.quantityStrips) || 0) * packSize) + (parseFloat(item.quantityLoose) || 0);
-    const unitPrice = (parseFloat(item.mrp) || 0) / packSize;
+    const totalContentUnits = ((item.quantityStrips || 0) * packSize) + (item.quantityLoose || 0);
+    const unitPrice = (item.mrp || 0) / packSize;
     const lineGross = totalContentUnits * unitPrice;
-    const disc = lineGross * ((parseFloat(item.discountPercent) || 0) / 100);
+    const disc = lineGross * ((item.discountPercent || 0) / 100);
     return Math.max(0, lineGross - disc);
   };
 
   const grossSubtotal = items.reduce((sum, item) => sum + getItemLineTotal(item), 0);
   const totalItemDiscount = items.reduce((sum, item) => {
     const packSize = item.packSize || 1;
-    const totalContentUnits = ((parseFloat(item.quantityStrips) || 0) * packSize) + (parseFloat(item.quantityLoose) || 0);
-    const unitPrice = (parseFloat(item.mrp) || 0) / packSize;
+    const totalContentUnits = ((item.quantityStrips || 0) * packSize) + (item.quantityLoose || 0);
+    const unitPrice = (item.mrp || 0) / packSize;
     const lineGross = totalContentUnits * unitPrice;
-    return sum + (lineGross * ((parseFloat(item.discountPercent) || 0) / 100));
+    return sum + (lineGross * ((item.discountPercent || 0) / 100));
   }, 0);
 
   const schemeDiscountAmount = schemeDiscountType === 'percent'
@@ -313,21 +365,23 @@ function NewSalePageContent() {
   const totalContentUnits = items.reduce((sum, item) => {
     if (!item.productId) return sum;
     const packSize = item.packSize || 1;
-    return sum + (((parseFloat(item.quantityStrips) || 0) * packSize) + (parseFloat(item.quantityLoose) || 0));
+    return sum + (((item.quantityStrips || 0) * packSize) + (item.quantityLoose || 0));
   }, 0);
+
+  const splitAllocated = cashAmount + upiAmount + cardAmount + creditAmount;
 
   const handleSaveSale = async (e: React.FormEvent) => {
     e.preventDefault();
     const validItems = items.filter((i) => i.productId && (i.quantityStrips > 0 || i.quantityLoose > 0));
     if (validItems.length === 0) {
-      alert('Please select at least 1 medicine item with quantity!');
+      toast.error('Nothing to bill', 'Add at least one medicine with a quantity.');
       return;
     }
 
     if (paymentMethod === 'SPLIT') {
-      const splitSum = (parseFloat(cashAmount as any) || 0) + (parseFloat(upiAmount as any) || 0) + (parseFloat(cardAmount as any) || 0) + (parseFloat(creditAmount as any) || 0);
+      const splitSum = (cashAmount || 0) + (upiAmount || 0) + (cardAmount || 0) + (creditAmount || 0);
       if (Math.abs(splitSum - grandTotal) > 0.5) {
-        alert(`Split payment sum (₹${splitSum.toFixed(2)}) must equal Bill Grand Total (₹${grandTotal.toFixed(2)})!`);
+        toast.error('Split payment does not balance', `Allocated ₹${splitSum.toFixed(2)} but the bill total is ₹${grandTotal.toFixed(2)}.`);
         return;
       }
     }
@@ -350,16 +404,16 @@ function NewSalePageContent() {
         items: validItems.map((i) => ({
           productId: i.productId,
           batchId: i.batchId,
-          quantity: ((parseFloat(i.quantityStrips) || 0) * (i.packSize || 1)) + (parseFloat(i.quantityLoose) || 0),
-          unitPrice: (parseFloat(i.mrp) || 0) / (i.packSize || 1),
-          taxPercent: i.taxPercent !== undefined ? parseFloat(i.taxPercent) : (i.gstPercent !== undefined ? parseFloat(i.gstPercent) : 12),
+          quantity: ((i.quantityStrips || 0) * (i.packSize || 1)) + (i.quantityLoose || 0),
+          unitPrice: (i.mrp || 0) / (i.packSize || 1),
+          taxPercent: i.taxPercent !== undefined ? i.taxPercent : (i.gstPercent !== undefined ? i.gstPercent : 12),
           discountPercent: i.discountPercent || 0,
         })),
       };
 
       if (editId) {
         await api.put(`/sales/${editId}`, payload);
-        alert('Sales invoice updated successfully!');
+        toast.success('Sales invoice updated');
         setItems([]);
         router.push('/sales');
       } else {
@@ -372,555 +426,495 @@ function NewSalePageContent() {
         setAddress('');
         setCreatedBillForPrint(res.data);
       }
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to save sales invoice');
+    } catch (err) {
+      toast.error('Failed to save sales invoice', getApiErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
-      <Sidebar />
-
-      <main className="flex-1 p-3 md:p-6 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
-        {/* Header Bar */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleBackClick}
-              className="p-2 text-slate-500 hover:text-slate-900 bg-white rounded-xl border border-slate-200 shadow-xs"
-              title="Go Back"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="text-xl font-bold text-slate-900">
+    <PageMain>
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" iconOnly onClick={handleBackClick} title="Go back" aria-label="Go back">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-fg sm:text-2xl">
               {editId ? 'Edit Sales Invoice' : 'New Sale (POS)'}
             </h1>
+            <p className="text-sm text-fg-muted">
+              {totalContentUnits} units across {items.filter((i) => i.productId).length} medicines
+              <span className="ml-2 hidden sm:inline text-fg-subtle">
+                · <kbd className="font-mono font-semibold">F2</kbd> add item
+                · <kbd className="font-mono font-semibold">F9</kbd> save
+              </span>
+            </p>
           </div>
-
-          <button
-            onClick={handleSaveSale}
-            disabled={isSubmitting}
-            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-sm transition shadow-md shadow-emerald-600/20 disabled:opacity-50"
-          >
-            <Save className="w-4 h-4" />
-            <span>{isSubmitting ? (editId ? 'Updating...' : 'Saving...') : (editId ? 'Update Sale' : 'Save Sale')}</span>
-          </button>
         </div>
 
-        {/* 2-Column Grid Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          
-          {/* LEFT COLUMN: Customer Details & Summary (4 Cols) */}
-          <div className="lg:col-span-4 space-y-4">
-            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs space-y-3">
-              <h2 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">Customer Details</h2>
-              
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-medium">Customer Name</label>
-                <div className="relative">
-                  <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                  <input
-                    type="text"
-                    ref={(el) => { inputRefs.current['customerName'] = el; }}
-                    onKeyDown={(e) => handleKeyDown(e, 'customerName', 'customerPhone')}
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Walk-in Customer"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
+        <Button size="lg" onClick={handleSaveSale} loading={isSubmitting}>
+          <Save className="h-4 w-4" aria-hidden />
+          {editId ? 'Update Sale' : 'Save Sale'}
+        </Button>
+      </div>
 
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-medium">Phone Number</label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                  <input
-                    type="tel"
-                    maxLength={10}
-                    ref={(el) => { inputRefs.current['customerPhone'] = el; }}
-                    onKeyDown={(e) => handleKeyDown(e, 'customerPhone', 'doctorName')}
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                    placeholder="e.g. 9826012345"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-10 pr-3 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
+        {/* LEFT: Customer + summary */}
+        <div className="space-y-4 lg:col-span-4 lg:sticky lg:top-4">
+          <Card>
+            <CardHeader title="Customer Details" />
+            <CardBody className="space-y-3.5">
+              <Field label="Customer Name">
+                <Input
+                  icon={User}
+                  type="text"
+                  ref={(el) => { inputRefs.current['customerName'] = el; }}
+                  onKeyDown={(e) => handleKeyDown(e, 'customerName', 'customerPhone')}
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Walk-in Customer"
+                />
+              </Field>
 
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-medium">Doctor Name</label>
-                <div className="relative">
-                  <Stethoscope className="w-4 h-4 absolute left-3.5 top-3 text-emerald-600" />
-                  <input
-                    type="text"
-                    ref={(el) => { inputRefs.current['doctorName'] = el; }}
-                    onKeyDown={(e) => handleKeyDown(e, 'doctorName', 'address')}
-                    value={doctorName}
-                    onChange={(e) => setDoctorName(e.target.value)}
-                    placeholder="e.g. Dr. Sharma"
-                    className="w-full bg-emerald-50/60 border border-emerald-200 rounded-xl pl-10 pr-3 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
+              <Field label="Phone Number">
+                <Input
+                  icon={Phone}
+                  type="tel"
+                  maxLength={10}
+                  ref={(el) => { inputRefs.current['customerPhone'] = el; }}
+                  onKeyDown={(e) => handleKeyDown(e, 'customerPhone', 'doctorName')}
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="e.g. 9826012345"
+                  className="font-mono"
+                />
+              </Field>
 
-              {/* Payment Mode */}
-              <div>
-                <label className="text-xs text-slate-500 block mb-1.5 font-medium">Payment Mode</label>
+              <Field label="Doctor Name">
+                <Input
+                  icon={Stethoscope}
+                  type="text"
+                  ref={(el) => { inputRefs.current['doctorName'] = el; }}
+                  onKeyDown={(e) => handleKeyDown(e, 'doctorName', 'address')}
+                  value={doctorName}
+                  onChange={(e) => setDoctorName(e.target.value)}
+                  placeholder="e.g. Dr. Sharma"
+                />
+              </Field>
+
+              {/* Saved to the bill's notes field. Previously the Enter key jumped here from Doctor
+                  but no input existed to receive focus. */}
+              <Field label="Address / Notes">
+                <Input
+                  icon={MapPin}
+                  type="text"
+                  ref={(el) => { inputRefs.current['address'] = el; }}
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Street, city — or any bill remark"
+                />
+              </Field>
+
+              <Field label="Payment Mode">
                 <div className="grid grid-cols-5 gap-1">
-                  {[
-                    { id: 'CASH', label: 'Cash', icon: Banknote },
-                    { id: 'UPI', label: 'UPI', icon: Smartphone },
-                    { id: 'CARD', label: 'Card', icon: CreditCard },
-                    { id: 'CREDIT', label: 'Credit', icon: Clock },
-                    { id: 'SPLIT', label: 'Split', icon: Plus },
-                  ].map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setPaymentMethod(m.id as any)}
-                      className={`py-2 rounded-xl text-[10px] font-bold transition flex flex-col items-center gap-1 ${
-                        paymentMethod === m.id ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
+                  {PAYMENT_MODES.map((m) => {
+                    const Icon = m.icon;
+                    const active = paymentMethod === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setPaymentMethod(m.id)}
+                        aria-pressed={active}
+                        className={cn(
+                          'flex flex-col items-center gap-1 rounded-md py-2 text-[10px] font-bold transition-colors',
+                          active ? 'bg-brand text-brand-fg' : 'bg-sunken text-fg-muted hover:bg-hover'
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden />
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {paymentMethod === 'SPLIT' ? (
+                <div className="space-y-3 rounded-md border border-brand-line bg-brand-subtle p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-brand-hover">
+                    Multi-mode split breakdown
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {(
+                      [
+                        ['Cash', cashAmount, setCashAmount],
+                        ['UPI', upiAmount, setUpiAmount],
+                        ['Card', cardAmount, setCardAmount],
+                        ['Credit', creditAmount, setCreditAmount],
+                      ] as const
+                    ).map(([label, value, setter]) => (
+                      <Field key={label} label={`${label} (₹)`}>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={value || ''}
+                          onChange={(e) => setter(parseFloat(e.target.value) || 0)}
+                          placeholder="0.00"
+                          className="h-9 font-mono font-semibold"
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between border-t border-brand-line pt-2 text-xs font-bold">
+                    <span className="text-fg-muted">Total allocated</span>
+                    <span
+                      className={cn(
+                        'font-mono',
+                        Math.abs(splitAllocated - grandTotal) < 0.5 ? 'text-brand' : 'text-warn'
+                      )}
                     >
-                      <m.icon className="w-3.5 h-3.5" />
-                      <span>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Split Payment Breakdown Inputs */}
-                {paymentMethod === 'SPLIT' && (
-                  <div className="mt-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
-                    <div className="font-extrabold text-emerald-900 text-[11px] uppercase tracking-wider">
-                      Multi-Mode Split Breakdown
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Cash Amount (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={cashAmount || ''}
-                          onChange={(e) => setCashAmount(parseFloat(e.target.value) || 0)}
-                          placeholder="0.00"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">UPI Amount (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={upiAmount || ''}
-                          onChange={(e) => setUpiAmount(parseFloat(e.target.value) || 0)}
-                          placeholder="0.00"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Card Amount (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={cardAmount || ''}
-                          onChange={(e) => setCardAmount(parseFloat(e.target.value) || 0)}
-                          placeholder="0.00"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-0.5">Credit Amount (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={creditAmount || ''}
-                          onChange={(e) => setCreditAmount(parseFloat(e.target.value) || 0)}
-                          placeholder="0.00"
-                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="pt-1.5 border-t border-emerald-200 flex justify-between items-center text-[11px] font-bold">
-                      <span>Total Allocated:</span>
-                      <span className={`font-mono ${
-                        (cashAmount + upiAmount + cardAmount + creditAmount) === grandTotal
-                          ? 'text-emerald-700'
-                          : 'text-amber-700'
-                      }`}>
-                        ₹{(cashAmount + upiAmount + cardAmount + creditAmount).toFixed(2)} / ₹{grandTotal.toFixed(2)}
-                      </span>
-                    </div>
+                      {formatCurrency(splitAllocated)} / {formatCurrency(grandTotal)}
+                    </span>
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              ) : null}
+            </CardBody>
+          </Card>
 
-            {/* Totals Summary Card */}
-            <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs space-y-3">
-              <h2 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">Invoice Summary</h2>
-              
-              <div className="space-y-2 text-xs font-medium text-slate-600">
+          {/* Totals */}
+          <Card>
+            <CardHeader title="Invoice Summary" />
+            <CardBody className="space-y-3">
+              <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span>Gross Subtotal</span>
-                  <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
+                  <dt className="text-fg-muted">Gross Subtotal</dt>
+                  <dd className="font-mono font-bold">{formatCurrency(grossSubtotal)}</dd>
                 </div>
-                {totalItemDiscount > 0 && (
-                  <div className="flex justify-between text-emerald-600">
-                    <span>(-) Item Discounts</span>
-                    <span className="font-mono font-bold">−₹{totalItemDiscount.toFixed(2)}</span>
+                {totalItemDiscount > 0 ? (
+                  <div className="flex justify-between text-brand">
+                    <dt>(−) Item Discounts</dt>
+                    <dd className="font-mono font-bold">−{formatCurrency(totalItemDiscount)}</dd>
                   </div>
-                )}
-                
-                <div className="pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-slate-700 font-bold">Bill Discount</span>
-                    <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10px]">
+                ) : null}
+              </dl>
+
+              <div className="border-t border-line pt-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-fg">Bill Discount</span>
+                  <div className="flex items-center gap-0.5 rounded-md bg-sunken p-0.5">
+                    {(['percent', 'amount'] as const).map((t) => (
                       <button
+                        key={t}
                         type="button"
-                        onClick={() => setSchemeDiscountType('percent')}
-                        className={`px-2 py-0.5 rounded-md font-bold ${schemeDiscountType === 'percent' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
+                        onClick={() => setSchemeDiscountType(t)}
+                        aria-pressed={schemeDiscountType === t}
+                        className={cn(
+                          'rounded-sm px-2.5 py-0.5 text-xs font-bold transition-colors',
+                          schemeDiscountType === t ? 'bg-surface text-fg shadow-card' : 'text-fg-subtle'
+                        )}
                       >
-                        %
+                        {t === 'percent' ? '%' : '₹'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setSchemeDiscountType('amount')}
-                        className={`px-2 py-0.5 rounded-md font-bold ${schemeDiscountType === 'amount' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
-                      >
-                        ₹
-                      </button>
-                    </div>
+                    ))}
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={schemeDiscountValue || ''}
-                    onChange={(e) => setSchemeDiscountValue(parseFloat(e.target.value) || 0)}
-                    placeholder={schemeDiscountType === 'percent' ? '0 %' : '₹ 0.00'}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold font-mono text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
                 </div>
-
-                <div className="flex justify-between">
-                  <span>Estimated Tax / GST</span>
-                  <span className="font-mono font-bold text-slate-900">₹{gstTotal.toFixed(2)}</span>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <span className="text-slate-700 font-bold">Round Off</span>
-                  <input
-                    type="checkbox"
-                    checked={isRoundOff}
-                    onChange={(e) => setIsRoundOff(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-                  />
-                </div>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={schemeDiscountValue || ''}
+                  onChange={(e) => setSchemeDiscountValue(parseFloat(e.target.value) || 0)}
+                  placeholder={schemeDiscountType === 'percent' ? '0 %' : '₹ 0.00'}
+                  className="h-9 font-mono font-semibold"
+                  aria-label="Bill discount"
+                />
               </div>
 
-              <div className="pt-2 border-t-2 border-slate-900 flex items-center justify-between">
+              <dl className="space-y-2 border-t border-line pt-3 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-fg-muted">Estimated Tax / GST</dt>
+                  <dd className="font-mono font-bold">{formatCurrency(gstTotal)}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-fg-muted">Round Off</dt>
+                  <dd>
+                    <input
+                      type="checkbox"
+                      checked={isRoundOff}
+                      onChange={(e) => setIsRoundOff(e.target.checked)}
+                      className="h-4 w-4 cursor-pointer accent-brand"
+                      aria-label="Round off grand total"
+                    />
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="flex items-end justify-between border-t-2 border-fg pt-3">
                 <div>
-                  <span className="text-xs font-bold text-slate-500 uppercase block">Grand Total</span>
-                  <span className="text-[10px] text-slate-400 font-medium">({totalContentUnits} units)</span>
+                  <span className="block text-xs font-bold uppercase tracking-wide text-fg-subtle">
+                    Grand Total
+                  </span>
+                  <span className="text-xs text-fg-subtle">({totalContentUnits} units)</span>
                 </div>
-                <span className="text-xl font-black font-mono text-emerald-600">
-                  ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <span className="font-mono text-2xl font-extrabold text-brand">
+                  {formatCurrency(grandTotal)}
                 </span>
               </div>
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* RIGHT: line items */}
+        <div className="space-y-4 lg:col-span-8">
+          <Card className="flex items-center justify-between gap-3 p-4">
+            <div>
+              <h2 className="text-sm font-bold text-fg">Items ({items.length})</h2>
+              <p className="text-xs text-fg-subtle">Scan or search inventory medicine items instantly</p>
             </div>
-          </div>
+            <Button type="button" onClick={addEmptyItem}>
+              <Plus className="h-4 w-4" aria-hidden />
+              Add Item
+            </Button>
+          </Card>
 
-          {/* RIGHT COLUMN: STACKED CARD FORM GRID (8 Cols) - NO HORIZONTAL SCROLL! */}
-          <div className="lg:col-span-8 space-y-4">
-            <div className="flex items-center justify-between bg-white border border-slate-200 p-4 rounded-2xl shadow-xs">
-              <div>
-                <h2 className="font-bold text-slate-900 text-base">Items ({items.length})</h2>
-                <p className="text-xs text-slate-400">Scan or search inventory medicine items instantly</p>
-              </div>
-              <button
-                type="button"
-                onClick={addEmptyItem}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs transition shadow-sm"
-              >
-                <Plus className="w-4 h-4" /> Add Item
-              </button>
-            </div>
+          {items.map((item, idx) => (
+            <Card key={idx} className="p-4 space-y-4">
+              {/* Product selector */}
+              <div className="flex items-center gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-sm font-extrabold text-brand-hover">
+                  {idx + 1}
+                </span>
 
-            {/* Item Form Cards List */}
-            <div className="space-y-4">
-              {items.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="bg-white border-2 border-emerald-100/90 rounded-2xl p-5 shadow-sm space-y-4 relative transition hover:border-emerald-200"
-                >
-                  {/* Top Item Selector Row */}
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-sm flex items-center justify-center flex-shrink-0">
-                      {idx + 1}
-                    </span>
+                <div className="relative flex-1" data-medicine-search>
+                  {item.productId ? (
+                    <div className="flex items-center justify-between gap-2 rounded-md border border-brand-line bg-brand-subtle px-3 py-2.5">
+                      <span className="flex min-w-0 items-center gap-2 font-bold text-brand-hover">
+                        <Pill className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+                        <span className="truncate">{item.productName}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => clearItemProduct(idx)}
+                        title="Change medicine"
+                        aria-label="Change medicine"
+                        className="rounded-md p-1 text-brand transition-colors hover:bg-brand-line hover:text-danger"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        icon={Search}
+                        type="text"
+                        value={activeSearchIndex === idx ? search : ''}
+                        onFocus={() => setActiveSearchIndex(idx)}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search medicine stock instantly…"
+                        aria-label={`Search medicine for item ${idx + 1}`}
+                      />
 
-                    <div className="flex-1 relative">
-                      {item.productId ? (
-                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-2.5 text-emerald-900 font-bold text-sm shadow-2xs">
-                          <div className="flex items-center gap-2.5 truncate">
-                            <Pill className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                            <span className="truncate">{item.productName}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => clearItemProduct(idx)}
-                            className="text-emerald-500 hover:text-rose-600 p-1 rounded-lg transition hover:bg-emerald-100"
-                            title="Change Medicine"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <div className="relative flex items-center">
-                            <Search className="w-4 h-4 absolute left-3.5 text-slate-400" />
-                            <input
-                              type="text"
-                              value={activeSearchIndex === idx ? search : ''}
-                              onFocus={() => setActiveSearchIndex(idx)}
-                              onChange={(e) => setSearch(e.target.value)}
-                              placeholder="Search medicine stock instantly (0ms)..."
-                              className="w-full bg-slate-50 border-2 border-emerald-500 rounded-xl pl-10 pr-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:bg-white focus:ring-3 focus:ring-emerald-500/20"
-                            />
-                          </div>
-
-                          {/* Search Dropdown Popover */}
-                          {activeSearchIndex === idx && (
-                            <div className="absolute top-full left-0 right-0 z-50 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto divide-y divide-slate-100">
-                              {products.length === 0 ? (
-                                <div className="p-4 text-center text-slate-400 text-xs font-sans">
-                                  {search.trim() ? 'No matching stock found' : 'Start typing to search inventory...'}
-                                </div>
-                              ) : (
-                                products.map((inv) => {
-                                  const prod = inv.product || inv;
-                                  const batch = inv.batches?.[0] || prod.batches?.[0] || {};
-                                  return (
-                                    <div
-                                      key={inv.id}
-                                      onClick={() => selectProductForItem(idx, inv)}
-                                      className="p-3 hover:bg-emerald-50 cursor-pointer flex items-center justify-between transition font-sans"
-                                    >
-                                      <div>
-                                        <div className="font-bold text-slate-900 text-sm">{prod.name}</div>
-                                        <div className="text-xs text-slate-400">
-                                          Batch: {batch.batchNumber || 'DEF-001'} · Stock: {inv.systemStock || 10} {prod.contentUnit || 'Units'}
-                                        </div>
-                                      </div>
-                                      <span className="text-xs font-mono font-bold text-emerald-600">₹{batch.mrp || prod.mrp || 0}</span>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
+                      {activeSearchIndex === idx ? (
+                        <div className="absolute inset-x-0 top-full z-40 mt-1.5 max-h-64 overflow-y-auto rounded-md border border-line bg-surface shadow-pop">
+                          {products.length === 0 ? (
+                            <p className="px-4 py-6 text-center text-sm text-fg-subtle">
+                              {search.trim() ? 'No matching stock found' : 'Start typing to search inventory…'}
+                            </p>
+                          ) : (
+                            products.map((inv) => {
+                              const batch = inv.batches?.[0];
+                              return (
+                                <button
+                                  key={inv.id}
+                                  type="button"
+                                  onClick={() => selectProductForItem(idx, inv)}
+                                  className="flex w-full items-center justify-between gap-3 border-b border-line-light px-3 py-2.5 text-left transition-colors last:border-0 hover:bg-hover"
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-semibold text-fg">
+                                      {inv.productName || inv.name}
+                                    </span>
+                                    <span className="block text-xs text-fg-subtle">
+                                      Batch {batch?.batchNumber || 'DEF-001'} · Stock {inv.systemStock}{' '}
+                                      {inv.contentUnit || 'Units'}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 font-mono text-sm font-bold text-brand">
+                                    {formatCurrency(batch?.mrp || inv.mrp || 0)}
+                                  </span>
+                                </button>
+                              );
+                            })
                           )}
                         </div>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => removeItem(idx)}
-                      className="p-2 text-slate-400 hover:text-rose-600 transition rounded-xl hover:bg-rose-50 flex-shrink-0"
-                      title="Remove item"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Form Grid Rows (Stacked, Full Width) */}
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Row 1: Batch & Expiry */}
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        Batch No. *
-                      </label>
-                      {item.batches && item.batches.length > 1 ? (
-                        <select
-                          value={item.batchId}
-                          onChange={(e) => {
-                            const b = item.batches.find((x: any) => x.id === e.target.value);
-                            if (b) {
-                              const updated = [...items];
-                              updated[idx] = {
-                                ...updated[idx],
-                                batchId: b.id,
-                                batchNumber: b.batchNumber,
-                                mrp: b.mrp,
-                                expiryDate: b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
-                              };
-                              setItems(updated);
-                            }
-                          }}
-                          className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none cursor-pointer"
-                        >
-                          {item.batches.map((b: any) => (
-                            <option key={b.id} value={b.id}>{b.batchNumber} (MRP: ₹{b.mrp})</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          readOnly
-                          value={item.batchNumber || 'DEF-001'}
-                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600"
-                        />
-                      )}
-                    </div>
-
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        Expiry (MM/YY)
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={item.expiryDate || '07/27'}
-                        className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600"
-                      />
-                    </div>
-
-                    {/* Row 2: Qty Strips & Qty Loose */}
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        Qty (Strips/Packs) *
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        ref={(el) => { inputRefs.current[`strips-${idx}`] = el; }}
-                        value={item.quantityStrips}
-                        onChange={(e) => updateItem(idx, 'quantityStrips', parseFloat(e.target.value) || 0)}
-                        className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        Qty (Loose Units)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={item.quantityLoose}
-                        onChange={(e) => updateItem(idx, 'quantityLoose', parseFloat(e.target.value) || 0)}
-                        placeholder="0"
-                        className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none"
-                      />
-                    </div>
-
-                    {/* Row 3: MRP/Pack (₹) & Discount % */}
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        MRP/Pack (₹)
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={item.mrp || ''}
-                        onChange={(e) => updateItem(idx, 'mrp', parseFloat(e.target.value) || 0)}
-                        placeholder="0.00"
-                        className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="relative">
-                      <label className="text-[11px] font-bold text-slate-600 bg-white px-1.5 absolute -top-2.5 left-3.5 z-10">
-                        Discount %
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={item.discountPercent || ''}
-                        onChange={(e) => updateItem(idx, 'discountPercent', parseFloat(e.target.value) || 0)}
-                        placeholder="0 %"
-                        className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Row 4: Line Total Bar */}
-                  <div className="bg-emerald-100/70 border border-emerald-200/80 rounded-xl px-5 py-3 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-emerald-800 block">Line Total</span>
-                      <span className="text-[10px] text-emerald-600 font-medium">Includes MRP rate & discounts</span>
-                    </div>
-                    <span className="text-lg font-black text-emerald-900 font-mono">
-                      ₹{getItemLineTotal(item).toFixed(2)}
-                    </span>
-                  </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
-              ))}
-            </div>
-          </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeItem(idx)}
+                  title="Remove item"
+                  aria-label={`Remove item ${idx + 1}`}
+                  className="shrink-0 rounded-md p-2 text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Fields */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <Field label="Batch No." required>
+                  {item.batches && item.batches.length > 1 ? (
+                    <select
+                      value={item.batchId}
+                      onChange={(e) => {
+                        const b = item.batches.find((x) => x.id === e.target.value);
+                        if (b) {
+                          const updated = [...items];
+                          updated[idx] = {
+                            ...updated[idx],
+                            batchId: b.id,
+                            batchNumber: b.batchNumber,
+                            mrp: b.mrp,
+                            expiryDate: b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
+                          };
+                          setItems(updated);
+                        }
+                      }}
+                      className="h-10 w-full cursor-pointer rounded-md border border-line bg-surface px-3 text-sm font-semibold text-fg transition-colors hover:border-line-strong focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+                    >
+                      {item.batches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.batchNumber} (MRP: ₹{b.mrp})</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input type="text" readOnly value={item.batchNumber || 'DEF-001'} className="bg-sunken" />
+                  )}
+                </Field>
+
+                <Field label="Expiry (MM/YY)">
+                  <Input type="text" readOnly value={item.expiryDate || '07/27'} className="bg-sunken font-mono" />
+                </Field>
+
+                <Field label={`Qty (${item.packUnit || 'Strip'}s)`} required>
+                  <Input
+                    type="number"
+                    min="0"
+                    ref={(el) => { inputRefs.current[`strips-${idx}`] = el; }}
+                    value={item.quantityStrips}
+                    onChange={(e) => updateItem(idx, 'quantityStrips', parseFloat(e.target.value) || 0)}
+                    className="font-mono font-semibold"
+                  />
+                </Field>
+
+                <Field label={`Qty (loose ${item.contentUnit || 'unit'}s)`}>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={item.quantityLoose}
+                    onChange={(e) => updateItem(idx, 'quantityLoose', parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    className="font-mono font-semibold"
+                  />
+                </Field>
+
+                <Field label="MRP / Pack (₹)">
+                  <Input
+                    type="number"
+                    step="any"
+                    value={item.mrp || ''}
+                    onChange={(e) => updateItem(idx, 'mrp', parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                    className="font-mono font-semibold"
+                  />
+                </Field>
+
+                <Field label="Discount %">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={item.discountPercent || ''}
+                    onChange={(e) => updateItem(idx, 'discountPercent', parseFloat(e.target.value) || 0)}
+                    placeholder="0 %"
+                    className="font-mono font-semibold"
+                  />
+                </Field>
+              </div>
+
+              {/* Line total */}
+              <div className="flex items-center justify-between rounded-md border border-brand-line bg-brand-subtle px-4 py-2.5">
+                <span>
+                  <span className="block text-xs font-bold text-brand-hover">Line Total</span>
+                  <span className="block text-xs text-brand">Includes MRP rate &amp; discounts</span>
+                </span>
+                <span className="font-mono text-lg font-extrabold text-brand-hover">
+                  {formatCurrency(getItemLineTotal(item))}
+                </span>
+              </div>
+            </Card>
+          ))}
         </div>
-      </main>
+      </div>
 
       {/* UNSAVED DATA CONFIRMATION MODAL */}
-      {showUnsavedModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-amber-600">
-              <AlertTriangle className="w-6 h-6 flex-shrink-0" />
-              <h3 className="text-base font-bold text-slate-900">Unsaved Sales Invoice</h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              You have entered unsaved sales items or customer details. If you leave now, all your entered billing data will be lost.
-            </p>
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowUnsavedModal(false)}
-                className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition"
-              >
-                Continue Billing
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowUnsavedModal(false);
-                  router.push('/sales');
-                }}
-                className="px-3.5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-sm"
-              >
-                Discard & Leave
-              </button>
-            </div>
+      <Modal
+        open={showUnsavedModal}
+        onClose={() => setShowUnsavedModal(false)}
+        title="Unsaved Sales Invoice"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowUnsavedModal(false)}>
+              Continue Billing
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setShowUnsavedModal(false);
+                router.push('/sales');
+              }}
+            >
+              Discard &amp; Leave
+            </Button>
           </div>
+        }
+      >
+        <div className="flex items-start gap-3 p-5">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden />
+          <p className="text-sm text-fg-muted">
+            You have entered unsaved sales items or customer details. If you leave now, all your entered
+            billing data will be lost.
+          </p>
         </div>
-      )}
+      </Modal>
 
       {/* Invoice Print Modal Popup after save */}
       {createdBillForPrint && (
-        <InvoicePrintModal bill={createdBillForPrint} onClose={() => { setCreatedBillForPrint(null); router.push('/sales'); }} />
+        <InvoicePrintModal
+          bill={createdBillForPrint}
+          onClose={() => { setCreatedBillForPrint(null); router.push('/sales'); }}
+        />
       )}
-
-      <BottomNav />
-    </div>
+    </PageMain>
   );
 }
 
 export default function NewSalePage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm font-medium text-slate-500">Loading Billing Counter...</div>}>
+    <Suspense
+      fallback={
+        <PageMain>
+          <p className="p-8 text-center text-sm text-fg-muted">Loading billing counter…</p>
+        </PageMain>
+      }
+    >
       <NewSalePageContent />
     </Suspense>
   );

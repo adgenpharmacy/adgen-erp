@@ -1,15 +1,17 @@
 'use client';
 
-import { Printer, X, Download, Share2, Check } from 'lucide-react';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { Printer, X, Share2, Check } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
+import type { Sale, Purchase } from '@/types';
 import { useState } from 'react';
+import Portal from '@/components/ui/Portal';
 
 interface ReportPrintModalProps {
   dateRangeLabel: string;
   startDate: string;
   endDate: string;
-  sales: any[];
-  purchases: any[];
+  sales: Sale[];
+  purchases: Purchase[];
   metrics: {
     totalSalesRevenue: number;
     totalPurchasesCost: number;
@@ -65,6 +67,7 @@ export default function ReportPrintModal({
   };
 
   return (
+    <Portal>
     <div
       onClick={onClose}
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto"
@@ -253,5 +256,6 @@ export default function ReportPrintModal({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

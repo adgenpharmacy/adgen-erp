@@ -36,10 +36,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (isLoading || (!isAuthenticated && !isPublic)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F4F8F6]">
+      <div className="flex min-h-screen items-center justify-center bg-canvas">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-emerald-600" />
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-line-strong border-t-brand" />
+          <p className="text-xs font-bold uppercase tracking-wider text-fg-subtle">
             {isLoading ? 'Restoring session' : 'Redirecting to sign in'}
           </p>
         </div>

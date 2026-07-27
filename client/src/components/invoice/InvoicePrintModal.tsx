@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Printer, X, Share2, Check, FileText } from 'lucide-react';
+import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
+import type { Sale, SaleDetail } from '@/types';
+import Portal from '@/components/ui/Portal';
 
 interface InvoicePrintModalProps {
-  invoice?: any;
-  bill?: any;
+  invoice?: SaleDetail | Sale;
+  bill?: SaleDetail | Sale;
   onClose: () => void;
 }
 
@@ -29,7 +31,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
 
   const handleShare = async () => {
     const customer = activeInvoice.customerName || activeInvoice.customer?.name || 'Customer';
-    const text = `*ADGEN PHARMACY - RETAIL CASH MEMO*\n----------------------------\nInvoice #: ${activeInvoice.invoiceNumber}\nDate: ${formatDate(activeInvoice.saleDate || activeInvoice.createdAt)}\nCustomer: ${customer}\nDoctor: ${activeInvoice.doctorName || 'N/A'}\n----------------------------\n*Grand Total: ₹${activeInvoice.grandTotal?.toFixed(2)}*\nPayment: ${activeInvoice.paymentMethod || 'CASH'}\n----------------------------\nThank you for choosing AdGen Pharmacy!`;
+    const text = `*ADGEN PHARMACY - RETAIL CASH MEMO*\n----------------------------\nInvoice #: ${activeInvoice.invoiceNumber}\nDate: ${formatDate(activeInvoice.createdAt)}\nCustomer: ${customer}\nDoctor: ${activeInvoice.doctorName || 'N/A'}\n----------------------------\n*Grand Total: ₹${activeInvoice.grandTotal?.toFixed(2)}*\nPayment: ${activeInvoice.paymentMethod || 'CASH'}\n----------------------------\nThank you for choosing AdGen Pharmacy!`;
     
     if (navigator.share) {
       try {
@@ -49,23 +51,32 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   };
 
   const items = activeInvoice.items || [];
-  const totalQtyCount = items.reduce((acc: number, i: any) => acc + (Number(i.quantity) || 0), 0);
-  const grossSubtotal = items.reduce((acc: number, i: any) => {
+  const totalQtyCount = items.reduce((acc: number, i) => acc + (Number(i.quantity) || 0), 0);
+  // Gross at full MRP, before any discount.
+  const grossSubtotal = items.reduce((acc: number, i) => {
     const qty = Number(i.quantity) || 0;
-    const unitPrice = Number(i.unitPrice || i.price || i.mrp || 0);
+    const unitPrice = Number(i.unitPrice || 0);
     return acc + (qty * unitPrice);
   }, 0);
 
-  const discountVal = Number(activeInvoice.discount || activeInvoice.discountAmount || 0);
-  const netBilledVal = Math.max(0, grossSubtotal - discountVal);
+  // Per-item discounts, shown separately from the bill-level discount so the customer can
+  // reconcile the invoice line by line.
+  const itemDiscountsSum = items.reduce((acc: number, i) => {
+    const qty = Number(i.quantity) || 0;
+    const unitPrice = Number(i.unitPrice || 0);
+    return acc + (qty * unitPrice) * ((Number(i.discountPercent) || 0) / 100);
+  }, 0);
+
+  const discountVal = Number(activeInvoice.discount || 0);
+  const netBilledVal = Math.max(0, grossSubtotal - itemDiscountsSum - discountVal);
   const netPayableVal = Number(activeInvoice.grandTotal || netBilledVal);
   const roundOffVal = Number(activeInvoice.roundOffAmount || 0);
 
   // Exact per-item GST tax extraction
   const discountRatio = grossSubtotal > 0 ? (netBilledVal / grossSubtotal) : 1;
-  const totalGstIncluded = items.reduce((acc: number, i: any) => {
-    const itemTotal = (Number(i.quantity) || 0) * (Number(i.unitPrice || i.price || i.mrp || 0));
-    const gstRate = Number(i.gstPercent || i.product?.gstPercent || 12);
+  const totalGstIncluded = items.reduce((acc: number, i) => {
+    const itemTotal = (Number(i.quantity) || 0) * (Number(i.unitPrice || 0));
+    const gstRate = Number(i.taxPercent ?? i.product?.gstPercent ?? 12);
     const itemTax = itemTotal * (gstRate / (100 + gstRate));
     return acc + itemTax;
   }, 0) * discountRatio;
@@ -73,6 +84,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   const taxableSubtotalVal = Math.max(0, netBilledVal - totalGstIncluded);
 
   return (
+    <Portal>
     <div 
       onClick={onClose}
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto"
@@ -147,7 +159,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 INV-{activeInvoice.invoiceNumber || activeInvoice.id}
               </div>
               <div className="text-[11px] text-slate-600 font-medium mt-1">
-                Date: {formatDate(activeInvoice.saleDate || activeInvoice.createdAt)}
+                Date: {formatDate(activeInvoice.createdAt)}
               </div>
               <div className="text-[11px] font-bold text-slate-800 uppercase mt-1">
                 Payment: {activeInvoice.paymentMethod || 'CASH'}
@@ -193,9 +205,9 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
-              {items.map((item: any, idx: number) => {
-                const itemGst = Number(item.gstPercent || item.product?.gstPercent || 12);
-                const unitPrice = Number(item.unitPrice || item.price || item.mrp || 0);
+              {items.map((item, idx) => {
+                const itemGst = Number(item.taxPercent ?? item.product?.gstPercent ?? 12);
+                const unitPrice = Number(item.unitPrice || 0);
                 const qty = Number(item.quantity) || 0;
                 
                 // Line total = exact Qty x Unit MRP
@@ -205,15 +217,15 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="py-2 px-2 font-mono text-slate-500">{idx + 1}</td>
                     <td className="py-2 px-2 font-bold text-slate-900">
-                      <div>{item.product?.name || item.productName || 'Medicine Item'}</div>
+                      <div>{item.product?.name || 'Medicine Item'}</div>
                       {item.product?.genericName && (
                         <div className="text-[9px] text-slate-500 font-normal">{item.product.genericName}</div>
                       )}
                     </td>
                     <td className="py-2 px-2 font-mono text-slate-600">{item.product?.hsnCode || '3004'}</td>
-                    <td className="py-2 px-2 font-mono font-bold text-slate-900">{item.batchNumber || item.batch?.batchNumber || 'DEF'}</td>
+                    <td className="py-2 px-2 font-mono font-bold text-slate-900">{item.batch?.batchNumber || 'DEF'}</td>
                     <td className="py-2 px-2 text-slate-600 font-mono">
-                      {item.expiryDate || item.batch?.expiryDate ? formatDate(item.expiryDate || item.batch?.expiryDate) : '-'}
+                      {item.batch?.expiryDate ? formatDate(item.batch.expiryDate) : '-'}
                     </td>
                     <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">{formatQuantity(qty)}</td>
                     <td className="py-2 px-2 text-right font-mono">₹{unitPrice.toFixed(2)}</td>
@@ -282,6 +294,13 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <span className="font-mono font-bold text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
               </div>
 
+              {itemDiscountsSum > 0 && (
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>(-) Item Discount:</span>
+                  <span className="font-mono">- ₹{itemDiscountsSum.toFixed(2)}</span>
+                </div>
+              )}
+
               {discountVal > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
                   <span>(-) Special Discount Allowed:</span>
@@ -344,5 +363,6 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

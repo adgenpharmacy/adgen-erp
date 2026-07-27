@@ -3,16 +3,36 @@
 import { useState, useEffect } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
-import Sidebar from '@/components/layout/Sidebar';
-import BottomNav from '@/components/layout/BottomNav';
-import { Search, Plus, Edit2, X } from 'lucide-react';
+import { Search, Plus, Edit2, Users } from 'lucide-react';
+import PageMain from '@/components/layout/PageMain';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Modal,
+  PageHeader,
+  TableWrap,
+  Table,
+  THead,
+  TH,
+  TR,
+  TD,
+  TableSkeleton,
+  useToast,
+} from '@/components/ui';
+import { formatCurrency } from '@/lib/utils';
+import type { Customer } from '@/types';
+import { getApiErrorMessage } from '@/types';
 
 export default function CustomersPage() {
+  const toast = useToast();
   const { customers: cachedCustomers, loading, refreshData } = useErpData();
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState({ name: '', phone: '', email: '', address: '', gstNumber: '', doctorName: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -26,7 +46,7 @@ export default function CustomersPage() {
     setShowAddModal(true);
   };
 
-  const openEditModal = (cust: any) => {
+  const openEditModal = (cust: Customer) => {
     setEditingCustomer(cust);
     setFormData({ name: cust.name || '', phone: cust.phone || '', email: cust.email || '', address: cust.address || '', gstNumber: cust.gstNumber || '', doctorName: cust.doctorName || '' });
     setShowAddModal(true);
@@ -42,9 +62,10 @@ export default function CustomersPage() {
         await api.post('/customers', formData);
       }
       setShowAddModal(false);
+      toast.success(editingCustomer ? 'Customer updated' : 'Customer added');
       await refreshData();
-    } catch (e: any) {
-      alert(e.response?.data?.error || 'Failed to save customer');
+    } catch (e) {
+      toast.error('Failed to save customer', getApiErrorMessage(e));
     } finally {
       setIsSubmitting(false);
     }
@@ -60,173 +81,185 @@ export default function CustomersPage() {
   });
 
   return (
-    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
-      <Sidebar />
+    <PageMain>
+      <PageHeader
+        title="Customer Directory"
+        subtitle={`${filteredCustomers.length} registered customer ${filteredCustomers.length === 1 ? 'account' : 'accounts'}`}
+        action={
+          <Button onClick={openAddModal}>
+            <Plus className="h-4 w-4" aria-hidden />
+            Add Customer
+          </Button>
+        }
+      >
+        <Input
+          icon={Search}
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by customer name, phone, or doctor…"
+          className="max-w-md"
+          aria-label="Search customers"
+        />
+      </PageHeader>
 
-      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Customer Directory</h1>
-            <p className="text-xs text-slate-500 mt-0.5">{filteredCustomers.length} registered customer accounts</p>
-          </div>
-          <button
-            onClick={openAddModal}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Customer</span>
-          </button>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-3 rounded-2xl shadow-2xs mb-6">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by Customer Name, Phone, or Doctor..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-            />
-          </div>
-        </div>
-
-        {filteredCustomers.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs font-medium">
-            {loading ? 'Loading customers...' : 'No customers found.'}
-          </div>
+      <Card className="overflow-hidden">
+        {loading && customers.length === 0 ? (
+          <TableSkeleton rows={8} cols={6} />
+        ) : filteredCustomers.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title={search ? 'No matching customers' : 'No customers yet'}
+            message={
+              search
+                ? 'Try a different name, phone number, or doctor.'
+                : 'Add a customer to track their purchases and outstanding credit.'
+            }
+            action={
+              search ? (
+                <Button variant="outline" onClick={() => setSearch('')}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button onClick={openAddModal}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Add Customer
+                </Button>
+              )
+            }
+          />
         ) : (
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-4">Customer Name</th>
-                    <th className="py-3.5 px-4">Phone</th>
-                    <th className="py-3.5 px-4">Doctor</th>
-                    <th className="py-3.5 px-4">Address</th>
-                    <th className="py-3.5 px-4">GSTIN / Email</th>
-                    <th className="py-3.5 px-4 text-right">Outstanding Credit</th>
-                    <th className="py-3.5 px-4 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {filteredCustomers.map((c) => (
-                    <tr key={c.id} className="hover:bg-emerald-50/40 transition">
-                      <td className="py-3.5 px-4 font-bold text-slate-900">{c.name}</td>
-                      <td className="py-3.5 px-4 font-mono">{c.phone || '—'}</td>
-                      <td className="py-3.5 px-4">{c.doctorName || '—'}</td>
-                      <td className="py-3.5 px-4 text-slate-500 truncate max-w-[180px]">{c.address || '—'}</td>
-                      <td className="py-3.5 px-4 font-mono text-slate-500">
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Customer Name</TH>
+                  <TH>Phone</TH>
+                  <TH className="hidden md:table-cell">Doctor</TH>
+                  <TH className="hidden lg:table-cell">Address</TH>
+                  <TH className="hidden lg:table-cell">GSTIN / Email</TH>
+                  <TH align="right">Outstanding Credit</TH>
+                  <TH align="center">Actions</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {filteredCustomers.map((c) => {
+                  const outstanding = c.creditBalance ?? 0;
+                  return (
+                    <TR key={c.id}>
+                      <TD className="font-semibold">{c.name}</TD>
+                      <TD className="font-mono text-fg-muted">{c.phone || '—'}</TD>
+                      <TD className="hidden md:table-cell text-fg-muted">{c.doctorName || '—'}</TD>
+                      <TD className="hidden lg:table-cell text-fg-subtle max-w-50 truncate">
+                        {c.address || '—'}
+                      </TD>
+                      <TD className="hidden lg:table-cell font-mono text-fg-subtle">
                         {c.gstNumber || c.email || '—'}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-extrabold text-amber-700">
-                        ₹{(c.creditBalance || c.outstandingBalance || 0).toFixed(2)}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
+                      </TD>
+                      <TD
+                        align="right"
+                        className={`font-mono font-bold ${outstanding > 0 ? 'text-warn' : 'text-fg-subtle'}`}
+                      >
+                        {formatCurrency(outstanding)}
+                      </TD>
+                      <TD align="center">
                         <button
                           onClick={() => openEditModal(c)}
-                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                          title="Edit Customer"
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
+                          title="Edit customer"
+                          aria-label={`Edit ${c.name}`}
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="h-4 w-4" />
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
-      </main>
+      </Card>
 
-      {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-sm">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-1 text-slate-400 hover:text-slate-900 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">Customer Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Rahul Sharma"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Phone Number</label>
-                  <input
-                    type="tel"
-                    maxLength={10}
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                    placeholder="9826012345"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="customer@email.com"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">Prescribed Doctor</label>
-                  <input
-                    type="text"
-                    value={formData.doctorName}
-                    onChange={(e) => setFormData({ ...formData, doctorName: e.target.value })}
-                    placeholder="Dr. Verma"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">GSTIN Number</label>
-                  <input
-                    type="text"
-                    value={formData.gstNumber}
-                    onChange={(e) => setFormData({ ...formData, gstNumber: e.target.value })}
-                    placeholder="27ABCDE1234F1Z5"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">Address</label>
-                <input
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Street, City, Pincode"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20">{isSubmitting ? 'Saving...' : 'Save Customer'}</button>
-              </div>
-            </form>
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title={editingCustomer ? 'Edit Customer' : 'Add Customer'}
+        subtitle={editingCustomer ? editingCustomer.name : 'Create a new customer account'}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="customer-form" loading={isSubmitting}>
+              {editingCustomer ? 'Update Customer' : 'Save Customer'}
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="customer-form" onSubmit={handleSubmit} className="p-5 space-y-4">
+          <Field label="Customer Name" required>
+            <Input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="e.g. Rahul Sharma"
+            />
+          </Field>
 
-      <BottomNav />
-    </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Phone Number">
+              <Input
+                type="tel"
+                maxLength={10}
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                placeholder="9826012345"
+                className="font-mono"
+              />
+            </Field>
+            <Field label="Email Address">
+              <Input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="customer@email.com"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Prescribed Doctor">
+              <Input
+                type="text"
+                value={formData.doctorName}
+                onChange={(e) => setFormData({ ...formData, doctorName: e.target.value })}
+                placeholder="Dr. Verma"
+              />
+            </Field>
+            <Field label="GSTIN Number">
+              <Input
+                type="text"
+                value={formData.gstNumber}
+                onChange={(e) => setFormData({ ...formData, gstNumber: e.target.value })}
+                placeholder="27ABCDE1234F1Z5"
+                className="font-mono"
+              />
+            </Field>
+          </div>
+
+          <Field label="Address">
+            <Input
+              type="text"
+              value={formData.address}
+              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+              placeholder="Street, City, Pincode"
+            />
+          </Field>
+        </form>
+      </Modal>
+    </PageMain>
   );
 }

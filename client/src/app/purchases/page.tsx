@@ -3,39 +3,72 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
-import Sidebar from '@/components/layout/Sidebar';
-import BottomNav from '@/components/layout/BottomNav';
 import PurchasePrintModal from '@/components/invoice/PurchasePrintModal';
-import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
-import { formatDate } from '@/lib/utils';
-import { 
-  Search, 
-  Plus, 
-  Printer, 
-  Trash2, 
-  X, 
-  Eye, 
-  FileText, 
+import { formatDate, formatCurrency, cn } from '@/lib/utils';
+import {
+  Search,
+  Plus,
+  Printer,
+  Trash2,
+  Eye,
+  FileText,
   RefreshCw,
   Building2,
-  Package,
   ShoppingBag,
-  Edit3
+  Edit3,
+  Pencil,
+  IndianRupee,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import PageMain from '@/components/layout/PageMain';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  Modal,
+  PageHeader,
+  StatCard,
+  StatusChip,
+  TableWrap,
+  Table,
+  THead,
+  TH,
+  TR,
+  TD,
+  TableSkeleton,
+  useToast,
+  useConfirm,
+} from '@/components/ui';
+import { compactINR } from '@/lib/chart';
+import type { Purchase } from '@/types';
+import { getApiErrorMessage } from '@/types';
+
+const STATUS_TABS = [
+  { id: 'ALL', label: 'All Purchases' },
+  { id: 'PAID', label: 'Paid' },
+  { id: 'CREDIT', label: 'Pending Credit' },
+];
 
 export default function PurchasesPage() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
-  const { purchases: cachedPurchases, parties: cachedParties, loading, refreshData } = useErpData();
-  const [purchases, setPurchases] = useState<any[]>([]);
+  const { purchases: cachedPurchases, loading, refreshData } = useErpData();
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [isMounted, setIsMounted] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [inspectBill, setInspectBill] = useState<any>(null);
-  const [editingPurchase, setEditingPurchase] = useState<any>(null);
-  const [selectedPurchaseForPrint, setSelectedPurchaseForPrint] = useState<any>(null);
+  const [inspectBill, setInspectBill] = useState<Purchase | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+  const [selectedPurchaseForPrint, setSelectedPurchaseForPrint] = useState<Purchase | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -50,12 +83,18 @@ export default function PurchasesPage() {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this purchase bill?')) return;
+    const ok = await confirm({
+      title: 'Delete this purchase bill?',
+      message: 'The bill and its received stock batches will be removed. This cannot be undone.',
+      confirmLabel: 'Delete bill',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/purchases/${id}`);
+      toast.success('Purchase bill deleted');
       await refreshData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to delete purchase bill');
+    } catch (err) {
+      toast.error('Failed to delete purchase bill', getApiErrorMessage(err));
     }
   };
 
@@ -112,456 +151,420 @@ export default function PurchasesPage() {
       });
   }, [purchases, search, statusFilter]);
 
-  const getPaymentBadge = (p: any) => {
-    const isPaid = p.isPaid;
-    if (isPaid) return { label: '🟢 PAID', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' };
-    return { label: '🟡 CREDIT (UNPAID)', cls: 'bg-amber-50 text-amber-700 border border-amber-200' };
-  };
-
   return (
-    <div className="flex bg-[#F8FAFC] text-slate-800 min-h-screen font-sans">
-      <Sidebar />
-
-      <main className="flex-1 p-3 md:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1600px] mx-auto w-full space-y-4">
-        {/* COMPACT PAGE HEADER & SUMMARY KPI STRIP */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Supplier Purchase Bills</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-600">
-                {stats.totalBills} Bills Received
-              </span>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-600 mt-1.5">
-              <span className="flex items-center gap-1 text-slate-900 font-extrabold">
-                <span className="text-slate-400 font-normal">Procurement:</span>
-                <span className="font-mono text-slate-900">₹{(stats.totalProcurement / 100000).toFixed(2)}L</span>
-              </span>
-              <span className="text-slate-300">•</span>
-              <span className="text-emerald-700 font-extrabold">Paid: ₹{stats.paidTotal.toFixed(0)} ({stats.paidCount})</span>
-              <span className="text-slate-300">•</span>
-              <span className="text-amber-700 font-extrabold">Pending Credit: ₹{stats.pendingCredit.toFixed(0)} ({stats.creditCount})</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
+    <PageMain>
+      <PageHeader
+        title="Supplier Purchase Bills"
+        subtitle={`${stats.totalBills.toLocaleString('en-IN')} bills received`}
+        action={
+          <>
+            <Button
+              variant="outline"
+              iconOnly
               onClick={() => refreshData()}
-              className="p-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition shadow-xs"
-              title="Refresh Purchases"
+              title="Refresh purchases"
+              aria-label="Refresh purchases"
             >
-              <RefreshCw className={`w-4 h-4 ${isMounted && loading ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-
+              <RefreshCw className={cn('h-4 w-4', isMounted && loading && 'animate-spin text-brand')} />
+            </Button>
             <Link
               href="/purchases/new"
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl shadow-md shadow-indigo-600/20 transition"
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-brand-fg transition-colors hover:bg-brand-hover active:scale-[0.98]"
             >
-              <Plus className="w-4 h-4" />
-              <span>+ New Purchase Entry</span>
+              <Plus className="h-4 w-4" aria-hidden />
+              New Purchase Entry
             </Link>
-          </div>
-        </div>
+          </>
+        }
+      />
 
-        {/* SEARCH BAR & SEGMENTED STATUS FILTER BUTTONS */}
-        <div className="bg-white border border-slate-200/80 p-2.5 rounded-2xl shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search purchase entry by invoice # or supplier name..."
-              className="w-full bg-slate-50 border border-slate-200/90 rounded-xl pl-10 pr-4 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-600 transition"
-            />
-          </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Procurement"
+          value={compactINR(stats.totalProcurement)}
+          sublabel={`${stats.totalBills} bills received`}
+          icon={IndianRupee}
+          tone="info"
+        />
+        <StatCard
+          label="Paid"
+          value={compactINR(stats.paidTotal)}
+          sublabel={`${stats.paidCount} settled bills`}
+          icon={CheckCircle2}
+          tone="brand"
+        />
+        <StatCard
+          label="Pending Credit"
+          value={compactINR(stats.pendingCredit)}
+          sublabel={`${stats.creditCount} unpaid bills`}
+          icon={Clock}
+          tone="warn"
+          emphasizeValue
+        />
+      </div>
 
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-            {[
-              { id: 'ALL', label: 'All Purchases' },
-              { id: 'PAID', label: 'Paid' },
-              { id: 'CREDIT', label: 'Pending Credit' },
-            ].map((tab) => (
+      <Card className="mt-4 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <Input
+            icon={Search}
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by invoice # or supplier name…"
+            className="flex-1"
+            aria-label="Search purchases"
+          />
+          <div className="flex items-center gap-1 rounded-md bg-sunken p-1 overflow-x-auto">
+            {STATUS_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setStatusFilter(tab.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-extrabold transition whitespace-nowrap ${
-                  statusFilter === tab.id
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+                aria-pressed={statusFilter === tab.id}
+                className={cn(
+                  'px-3 py-1.5 rounded-sm text-xs font-bold whitespace-nowrap transition-colors',
+                  statusFilter === tab.id ? 'bg-surface text-fg shadow-card' : 'text-fg-muted hover:text-fg'
+                )}
               >
                 {tab.label}
               </button>
             ))}
           </div>
         </div>
+      </Card>
 
-        {/* HIGH-DENSITY LINEAR PURCHASES TABLE */}
+      <Card className="mt-4 overflow-hidden">
         {!isMounted || loading ? (
-          <LoadingSkeleton type="table" rows={8} />
+          <TableSkeleton rows={10} cols={6} />
         ) : filteredPurchases.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs font-bold shadow-xs">
-            No purchase bills match your search query.
-          </div>
+          <EmptyState
+            icon={ShoppingBag}
+            title="No purchase bills found"
+            message={search ? `Nothing matches “${search}” in this filter.` : 'Record a supplier bill to build up stock.'}
+            action={
+              search ? (
+                <Button variant="outline" onClick={() => setSearch('')}>Clear search</Button>
+              ) : (
+                <Link
+                  href="/purchases/new"
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-brand-fg hover:bg-brand-hover"
+                >
+                  <Plus className="h-4 w-4" aria-hidden />
+                  New Purchase Entry
+                </Link>
+              )
+            }
+          />
         ) : (
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-2.5 px-4">Invoice #</th>
-                    <th className="py-2.5 px-3">Purchase Date</th>
-                    <th className="py-2.5 px-3">Supplier Party</th>
-                    <th className="py-2.5 px-3">Payment Status</th>
-                    <th className="py-2.5 px-3 text-right">Bill Total (₹)</th>
-                    <th className="py-2.5 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {filteredPurchases.map((p) => {
-                    const badge = getPaymentBadge(p);
-                    const stripeClass = p.isPaid ? 'stripe-emerald' : 'stripe-amber';
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Invoice #</TH>
+                  <TH>Purchase Date</TH>
+                  <TH>Supplier Party</TH>
+                  <TH>Payment Status</TH>
+                  <TH align="right">Bill Total</TH>
+                  <TH align="right">Actions</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {filteredPurchases.map((p) => (
+                  <TR
+                    key={p.id}
+                    onClick={() => setInspectBill(p)}
+                    className={cn(p.isPaid ? 'stripe-emerald' : 'stripe-amber', 'group cursor-pointer')}
+                  >
+                    <TD className="font-mono text-xs text-fg-muted">
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="h-3.5 w-3.5 text-fg-subtle transition-colors group-hover:text-brand" aria-hidden />
+                        {p.invoiceNumber || p.id.slice(0, 8)}
+                      </span>
+                    </TD>
 
-                    return (
-                      <tr 
-                        key={p.id} 
-                        onClick={() => setInspectBill(p)}
-                        className={`linear-row ${stripeClass} group cursor-pointer`}
+                    <TD className="text-fg-muted whitespace-nowrap">
+                      {formatDate(p.purchaseDate || p.createdAt)}
+                    </TD>
+
+                    <TD>
+                      <span className="flex items-center gap-1.5 font-semibold">
+                        <Building2 className="h-3.5 w-3.5 text-fg-subtle shrink-0" aria-hidden />
+                        {toTitleCase(p.party?.name || 'Supplier Party')}
+                      </span>
+                    </TD>
+
+                    <TD>
+                      <StatusChip tone={p.isPaid ? 'success' : 'warning'} small>
+                        {p.isPaid ? 'PAID' : 'CREDIT (UNPAID)'}
+                      </StatusChip>
+                    </TD>
+
+                    <TD align="right" className="font-mono font-bold">
+                      {formatCurrency(p.grandTotal || 0)}
+                    </TD>
+
+                    <TD align="right">
+                      <span
+                        className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <td className="py-2 px-4 font-mono font-normal text-slate-400 text-xs">
-                          <div className="flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 transition" />
-                            <span>{p.invoiceNumber || p.id.slice(0, 8)}</span>
-                          </div>
-                        </td>
-
-                        <td className="py-2 px-3 text-slate-500 font-semibold">
-                          {formatDate(p.purchaseDate || p.createdAt)}
-                        </td>
-
-                        <td className="py-2 px-3 font-semibold text-slate-900">
-                          <div className="flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{toTitleCase(p.party?.name || 'Supplier Party')}</span>
-                          </div>
-                        </td>
-
-                        <td className="py-2 px-3">
-                          <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold ${badge.cls}`}>
-                            {badge.label}
-                          </span>
-                        </td>
-
-                        <td className="py-2 px-3 text-right font-mono font-black text-slate-900 text-[15px]">
-                          ₹{(p.grandTotal || 0).toFixed(2)}
-                        </td>
-
-                        <td className="py-2 px-4 text-right">
-                          <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => router.push(`/purchases/new?id=${p.id}`)}
-                              className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
-                              title="Edit Purchase Bill"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setInspectBill(p)}
-                              className="p-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition"
-                              title="Inspect Bill Items"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setSelectedPurchaseForPrint(p)}
-                              className="p-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition"
-                              title="Print Purchase Bill"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={(e) => handleDelete(p.id, e)}
-                              className="p-1.5 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition"
-                              title="Delete Purchase Bill"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                        <button
+                          onClick={() => router.push(`/purchases/new?id=${p.id}`)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-brand-subtle hover:text-brand"
+                          title="Edit purchase bill items"
+                          aria-label="Edit purchase items"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => setInspectBill(p)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
+                          title="Inspect bill items"
+                          aria-label="Inspect bill"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => setSelectedPurchaseForPrint(p)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
+                          title="Print purchase bill"
+                          aria-label="Print bill"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(p.id, e)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                          title="Delete purchase bill"
+                          aria-label="Delete bill"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </span>
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
-      </main>
+      </Card>
 
       {/* INSPECT PURCHASE DETAILS MODAL */}
-      <AnimatePresence>
-        {inspectBill && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="bg-white border border-slate-200/90 rounded-3xl max-w-3xl w-full p-6 shadow-2xl relative space-y-5 max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="p-2 bg-indigo-50 rounded-xl border border-indigo-200">
-                      <ShoppingBag className="w-5 h-5 text-indigo-600" />
-                    </span>
-                    <div>
-                      <h3 className="font-extrabold text-slate-900 text-lg">
-                        Purchase Invoice #{inspectBill.invoiceNumber || inspectBill.id.slice(0, 8)}
-                      </h3>
-                      <p className="text-xs text-slate-500 font-semibold">
-                        Received on {formatDate(inspectBill.purchaseDate || inspectBill.createdAt)} • Supplier: {inspectBill.party?.name}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setInspectBill(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+      <Modal
+        open={!!inspectBill}
+        onClose={() => setInspectBill(null)}
+        title={inspectBill ? `Purchase Invoice #${inspectBill.invoiceNumber || inspectBill.id.slice(0, 8)}` : ''}
+        subtitle={
+          inspectBill
+            ? `Received ${formatDate(inspectBill.purchaseDate || inspectBill.createdAt)} · ${inspectBill.party?.name || 'Supplier'}`
+            : undefined
+        }
+        size="xl"
+        footer={
+          inspectBill ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() => {
+                    router.push(`/purchases/new?id=${inspectBill.id}`);
+                    setInspectBill(null);
+                  }}
                 >
-                  <X className="w-5 h-5" />
-                </button>
+                  <Edit3 className="h-4 w-4" aria-hidden />
+                  Edit Items
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingPurchase(inspectBill);
+                    setInspectBill(null);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" aria-hidden />
+                  Edit Details
+                </Button>
+                <Button variant="outline" onClick={() => setSelectedPurchaseForPrint(inspectBill)}>
+                  <Printer className="h-4 w-4" aria-hidden />
+                  Print Purchase Memo
+                </Button>
               </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Supplier Party</div>
-                  <div className="font-extrabold text-slate-900 mt-1">
-                    {toTitleCase(inspectBill.party?.name || 'Supplier')}
-                  </div>
-                  {inspectBill.party?.phone && (
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">📞 {inspectBill.party.phone}</div>
-                  )}
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">GSTIN / DL Number</div>
-                  <div className="font-mono font-extrabold text-slate-900 mt-1">
-                    {inspectBill.party?.gstNumber || inspectBill.party?.gstin || inspectBill.party?.dlNumber || '—'}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Payment Status</div>
-                  <div className="font-extrabold text-slate-900 mt-1">{inspectBill.isPaid ? 'PAID' : 'CREDIT (UNPAID)'}</div>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Taxable Subtotal</div>
-                  <div className="font-mono font-bold text-slate-900 mt-1">
-                    ₹{(inspectBill.subtotal || 0).toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Input GST Tax</div>
-                  <div className="font-mono font-bold text-indigo-600 mt-1">
-                    ₹{(inspectBill.taxTotal || 0).toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Grand Total</div>
-                  <div className="font-mono font-extrabold text-indigo-700 text-sm mt-1">
-                    ₹{(inspectBill.grandTotal || 0).toFixed(2)}
-                  </div>
-                </div>
+              <Button variant="ghost" onClick={() => setInspectBill(null)}>
+                Close
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        {inspectBill ? (
+          <div className="p-5 space-y-5">
+            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+                <dt className="text-[11px] font-bold uppercase tracking-wide text-fg-subtle">Supplier Party</dt>
+                <dd className="mt-1 text-sm font-bold text-fg truncate">
+                  {toTitleCase(inspectBill.party?.name || 'Supplier')}
+                </dd>
+                {inspectBill.party?.phone ? (
+                  <dd className="text-xs font-mono text-fg-subtle mt-0.5">{inspectBill.party.phone}</dd>
+                ) : null}
               </div>
-
-              {inspectBill.notes && (
-                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs">
-                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Purchase Entry Notes / Remarks:</span>
-                  <span className="font-medium text-slate-800">{inspectBill.notes}</span>
+              {(
+                [
+                  ['GSTIN / DL Number', inspectBill.party?.gstNumber || inspectBill.party?.dlNumber || '—', 'font-mono'],
+                  ['Payment Status', inspectBill.isPaid ? 'PAID' : 'CREDIT (UNPAID)', ''],
+                  ['Taxable Subtotal', formatCurrency(inspectBill.subtotal || 0), 'font-mono'],
+                  ['Bill Discount', `-${formatCurrency(inspectBill.discount || 0)}`, 'font-mono text-brand'],
+                  ['Input GST Tax', formatCurrency(inspectBill.taxTotal || 0), 'font-mono text-accent'],
+                  ['Round Off', formatCurrency(inspectBill.roundOffAmount || 0), 'font-mono'],
+                  ['Grand Total', formatCurrency(inspectBill.grandTotal || 0), 'font-mono text-brand'],
+                ] as const
+              ).map(([label, value, valueClass]) => (
+                <div key={label} className="rounded-md border border-line bg-raised px-3 py-2.5">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-fg-subtle">{label}</dt>
+                  <dd className={cn('mt-1 text-sm font-bold text-fg truncate', valueClass)}>{value}</dd>
                 </div>
-              )}
+              ))}
+            </dl>
 
-              {/* Items List */}
-              <div>
-                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Received Inventory Items & Batches</h4>
-                <div className="border border-slate-200/80 rounded-2xl overflow-hidden">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-extrabold text-slate-500 uppercase">
-                        <th className="py-2.5 px-3">Medicine Item</th>
-                        <th className="py-2.5 px-3">Batch #</th>
-                        <th className="py-2.5 px-3">Expiry</th>
-                        <th className="py-2.5 px-3 text-center">Qty Rec. (Free)</th>
-                        <th className="py-2.5 px-3 text-right">P. Rate</th>
-                        <th className="py-2.5 px-3 text-right">MRP</th>
-                        <th className="py-2.5 px-3 text-right">Total</th>
+            {inspectBill.notes ? (
+              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
+                <span className="block text-[11px] font-bold uppercase tracking-wide text-fg-subtle">
+                  Purchase Entry Notes / Remarks
+                </span>
+                <span className="mt-1 block text-sm text-fg">{inspectBill.notes}</span>
+              </div>
+            ) : null}
+
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wide text-fg-muted mb-2">
+                Received Inventory Items &amp; Batches
+              </h4>
+              <div className="rounded-md border border-line overflow-hidden">
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>Medicine Item</TH>
+                        <TH>Batch #</TH>
+                        <TH>Expiry</TH>
+                        <TH align="center">Qty Rec. (Free)</TH>
+                        <TH align="right">P. Rate</TH>
+                        <TH align="right">MRP</TH>
+                        <TH align="right">Total</TH>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                      {(inspectBill.items || []).map((item: any, idx: number) => (
-                        <tr key={idx}>
-                          <td className="py-2.5 px-3 font-bold text-slate-900">
-                            {toTitleCase(item.product?.name || item.productName || 'Medicine')}
-                          </td>
-                          <td className="py-2.5 px-3 font-mono text-slate-600">
-                            {item.batchNumber || item.batch?.batchNumber || '—'}
-                          </td>
-                          <td className="py-2.5 px-3 font-mono text-slate-500">
-                            {formatDate(item.expiryDate || item.batch?.expiryDate)}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-bold font-mono text-indigo-700">
-                            {item.quantity} {item.freeQuantity ? `(+${item.freeQuantity} free)` : ''}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono">
-                            ₹{(item.purchaseRate || 0).toFixed(2)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                            ₹{(item.mrp || 0).toFixed(2)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-extrabold text-indigo-800">
-                            ₹{(item.totalAmount || (item.quantity * item.purchaseRate) || 0).toFixed(2)}
-                          </td>
-                        </tr>
+                    </THead>
+                    <tbody>
+                      {(inspectBill.items || []).map((item, idx) => (
+                        <TR key={idx}>
+                          <TD className="font-semibold">
+                            {toTitleCase(item.product?.name || 'Medicine')}
+                          </TD>
+                          <TD className="font-mono text-fg-muted">
+                            {item.batchNumber || '—'}
+                          </TD>
+                          <TD className="font-mono text-fg-subtle">
+                            {formatDate(item.expiryDate)}
+                          </TD>
+                          <TD align="center" className="font-mono font-bold text-accent">
+                            {item.quantity}
+                            {item.freeQuantity ? ` (+${item.freeQuantity} free)` : ''}
+                          </TD>
+                          <TD align="right" className="font-mono">{formatCurrency(item.purchaseRate || 0)}</TD>
+                          <TD align="right" className="font-mono font-bold">{formatCurrency(item.mrp || 0)}</TD>
+                          <TD align="right" className="font-mono font-bold text-brand">
+                            {formatCurrency(item.totalAmount || item.quantity * item.purchaseRate || 0)}
+                          </TD>
+                        </TR>
                       ))}
                     </tbody>
-                  </table>
-                </div>
+                  </Table>
+                </TableWrap>
               </div>
-
-              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      router.push(`/purchases/new?id=${inspectBill.id}`);
-                      setInspectBill(null);
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
-                  >
-                    <Edit3 className="w-4 h-4" /> Edit Purchase Entry
-                  </button>
-                  <button
-                    onClick={() => setSelectedPurchaseForPrint(inspectBill)}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
-                  >
-                    <Printer className="w-4 h-4" /> Print Purchase Memo
-                  </button>
-                </div>
-                <button
-                  onClick={() => setInspectBill(null)}
-                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition"
-                >
-                  Close
-                </button>
-              </div>
-            </motion.div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        ) : null}
+      </Modal>
 
-      {/* EDIT PURCHASE DETAILS MODAL */}
-      <AnimatePresence>
-        {editingPurchase && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5"
+      {/* EDIT PURCHASE DETAILS MODAL — quick header edit.
+          Item-level changes go through /purchases/new?id=…, which re-syncs inventory batches. */}
+      <Modal
+        open={!!editingPurchase}
+        onClose={() => setEditingPurchase(null)}
+        title="Edit Purchase Bill"
+        subtitle={editingPurchase ? editingPurchase.party?.name : undefined}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditingPurchase(null)}>
+              Cancel
+            </Button>
+            <Button
+              loading={isSavingEdit}
+              onClick={async () => {
+                if (!editingPurchase) return;
+                try {
+                  setIsSavingEdit(true);
+                  await api.put(`/purchases/${editingPurchase.id}`, {
+                    invoiceNumber: editingPurchase.invoiceNumber,
+                    grandTotal: editingPurchase.grandTotal,
+                    isPaid: editingPurchase.isPaid,
+                    notes: editingPurchase.notes,
+                  });
+                  setEditingPurchase(null);
+                  toast.success('Purchase bill updated');
+                  refreshData();
+                } catch {
+                  toast.error('Failed to update purchase bill');
+                } finally {
+                  setIsSavingEdit(false);
+                }
+              }}
             >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Edit Purchase Bill</h3>
-                <button onClick={() => setEditingPurchase(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4 text-xs font-semibold text-slate-700">
-                <div>
-                  <label className="block text-slate-500 mb-1">Invoice Number</label>
-                  <input
-                    type="text"
-                    value={editingPurchase.invoiceNumber || ''}
-                    onChange={(e) => setEditingPurchase({ ...editingPurchase, invoiceNumber: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-500 mb-1">Grand Total (₹)</label>
-                  <input
-                    type="number"
-                    value={editingPurchase.grandTotal || 0}
-                    onChange={(e) => setEditingPurchase({ ...editingPurchase, grandTotal: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-500 mb-1">Payment Status</label>
-                  <select
-                    value={editingPurchase.isPaid ? 'PAID' : 'CREDIT'}
-                    onChange={(e) => setEditingPurchase({ ...editingPurchase, isPaid: e.target.value === 'PAID' })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                  >
-                    <option value="PAID">🟢 PAID (Cash/Bank)</option>
-                    <option value="CREDIT">🟡 CREDIT (Unpaid)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-500 mb-1">Notes / Remarks</label>
-                  <textarea
-                    rows={2}
-                    value={editingPurchase.notes || ''}
-                    onChange={(e) => setEditingPurchase({ ...editingPurchase, notes: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
-                <button
-                  onClick={() => setEditingPurchase(null)}
-                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await api.put(`/purchases/${editingPurchase.id}`, {
-                        invoiceNumber: editingPurchase.invoiceNumber,
-                        grandTotal: editingPurchase.grandTotal,
-                        isPaid: editingPurchase.isPaid,
-                        notes: editingPurchase.notes,
-                      });
-                      setEditingPurchase(null);
-                      refreshData();
-                    } catch (err) {
-                      alert('Failed to update purchase bill');
-                    }
-                  }}
-                  className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition shadow-xs"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </motion.div>
+              Save Changes
+            </Button>
           </div>
-        )}
-      </AnimatePresence>
+        }
+      >
+        {editingPurchase ? (
+          <div className="p-5 space-y-4">
+            <Field label="Invoice Number">
+              <Input
+                type="text"
+                value={editingPurchase.invoiceNumber || ''}
+                onChange={(e) => setEditingPurchase({ ...editingPurchase, invoiceNumber: e.target.value })}
+                className="font-mono"
+              />
+            </Field>
+            <Field label="Grand Total (₹)">
+              <Input
+                type="number"
+                value={editingPurchase.grandTotal || 0}
+                onChange={(e) => setEditingPurchase({ ...editingPurchase, grandTotal: parseFloat(e.target.value) || 0 })}
+                className="font-mono"
+              />
+            </Field>
+            <Field label="Payment Status">
+              <Select
+                value={editingPurchase.isPaid ? 'PAID' : 'CREDIT'}
+                onChange={(e) => setEditingPurchase({ ...editingPurchase, isPaid: e.target.value === 'PAID' })}
+              >
+                <option value="PAID">Paid (Cash / Bank)</option>
+                <option value="CREDIT">Credit (Unpaid)</option>
+              </Select>
+            </Field>
+            <Field label="Notes / Remarks">
+              <Textarea
+                rows={2}
+                value={editingPurchase.notes || ''}
+                onChange={(e) => setEditingPurchase({ ...editingPurchase, notes: e.target.value })}
+              />
+            </Field>
+          </div>
+        ) : null}
+      </Modal>
 
       {selectedPurchaseForPrint && (
         <PurchasePrintModal purchase={selectedPurchaseForPrint} onClose={() => setSelectedPurchaseForPrint(null)} />
       )}
-
-      <BottomNav />
-    </div>
+    </PageMain>
   );
 }

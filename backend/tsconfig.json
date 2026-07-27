@@ -1,14 +1,20 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022"],
     "module": "CommonJS",
-    "moduleResolution": "node",
+    // "node" was renamed to "node10" in TypeScript 5 and is removed in 6.
+    // Same resolution behaviour, without the deprecation warning.
+    "moduleResolution": "node10",
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

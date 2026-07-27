@@ -1,37 +1,47 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useErpData } from '@/context/ErpDataContext';
-import Sidebar from '@/components/layout/Sidebar';
-import BottomNav from '@/components/layout/BottomNav';
-import { 
-  TrendingUp, 
-  ShoppingBag, 
-  PackageCheck, 
-  AlertTriangle, 
-  ArrowUpRight, 
-  ArrowRight,
+import {
+  TrendingUp,
+  ShoppingBag,
+  PackageCheck,
+  AlertTriangle,
   RefreshCw,
   Plus,
   Receipt,
-  FileText
+  ArrowRight,
 } from 'lucide-react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer
-} from 'recharts';
-import Link from 'next/link';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Button, Card, CardHeader, StatCard, EmptyState, PageHeader, StatCardSkeleton } from '@/components/ui';
+import PageMain from '@/components/layout/PageMain';
+import type { Sale } from '@/types';
+import { formatCurrency } from '@/lib/utils';
+import { SERIES, AXIS, TOOLTIP_STYLE, compactINR } from '@/lib/chart';
+
+interface DashboardMetrics {
+  todaySales: number;
+  todayBillsCount: number;
+  monthlySales: number;
+  lowStockItemsCount: number;
+  outOfStockCount: number;
+  inStockCount: number;
+  totalInventoryItems: number;
+  recentSales: Sale[];
+}
+
+interface ChartBucket {
+  key: string;
+  name: string;
+  sales: number;
+  purchases: number;
+}
 
 export default function Dashboard() {
   const { sales, purchases, inventory, products, loading, refreshData } = useErpData();
-  const [metrics, setMetrics] = useState<any>(null);
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [chartData, setChartData] = useState<ChartBucket[]>([]);
 
   useEffect(() => {
     // Compute metrics instantly from cached global state
@@ -42,24 +52,25 @@ export default function Dashboard() {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const saleDateOf = (s: any) => new Date(s.saleDate || s.createdAt);
+    // SalesBill has no `saleDate` column — createdAt is the only timestamp.
+    const saleDateOf = (s: Sale) => new Date(s.createdAt);
 
-    const todaySales = sales.filter((s: any) => saleDateOf(s) >= startOfToday);
+    const todaySales = sales.filter((s) => saleDateOf(s) >= startOfToday);
     const todaySalesTotal = todaySales.reduce((acc, s) => acc + (s.grandTotal || 0), 0);
 
     // Revenue for the current calendar month — not all history.
     const monthSalesTotal = sales
-      .filter((s: any) => saleDateOf(s) >= startOfMonth)
+      .filter((s) => saleDateOf(s) >= startOfMonth)
       .reduce((acc, s) => acc + (s.grandTotal || 0), 0);
 
     // Separate "needs reordering" from "never stocked". The imported catalog carries thousands of
     // products with no batches at all; counting those as low stock buried the genuine reorder list.
-    const lowStockCount = inventory.filter((inv: any) => {
+    const lowStockCount = inventory.filter((inv) => {
       const stock = inv.systemStock || 0;
       return stock > 0 && stock <= (inv.lowStockThreshold || 5);
     }).length;
 
-    const outOfStockCount = inventory.filter((inv: any) => (inv.systemStock || 0) <= 0).length;
+    const outOfStockCount = inventory.filter((inv) => (inv.systemStock || 0) <= 0).length;
 
     setMetrics({
       todaySales: todaySalesTotal,
@@ -67,17 +78,17 @@ export default function Dashboard() {
       monthlySales: monthSalesTotal,
       lowStockItemsCount: lowStockCount,
       outOfStockCount,
-      inStockCount: inventory.filter((inv: any) => (inv.systemStock || 0) > 0).length,
+      inStockCount: inventory.filter((inv) => (inv.systemStock || 0) > 0).length,
       totalInventoryItems: inventory.length || products.length,
       recentSales: [...sales]
-        .sort((a: any, b: any) => saleDateOf(b).getTime() - saleDateOf(a).getTime())
+        .sort((a, b) => saleDateOf(b).getTime() - saleDateOf(a).getTime())
         .slice(0, 5),
     });
 
     // Build the trailing 7 calendar days, so the chart matches its "Last 7 Days" label.
     // Bucketing by day-of-week folded every past week into the same seven columns.
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const buckets: { key: string; name: string; sales: number; purchases: number }[] = [];
+    const buckets: ChartBucket[] = [];
     const indexByKey = new Map<string, number>();
 
     for (let i = 6; i >= 0; i--) {
@@ -88,7 +99,7 @@ export default function Dashboard() {
       buckets.push({ key, name: dayLabels[d.getDay()], sales: 0, purchases: 0 });
     }
 
-    const addTo = (raw: any, field: 'sales' | 'purchases', amount: number) => {
+    const addTo = (raw: string, field: 'sales' | 'purchases', amount: number) => {
       const d = new Date(raw);
       if (isNaN(d.getTime())) return;
       d.setHours(0, 0, 0, 0);
@@ -96,184 +107,230 @@ export default function Dashboard() {
       if (idx !== undefined) buckets[idx][field] += amount;
     };
 
-    sales.forEach((s: any) => addTo(s.saleDate || s.createdAt, 'sales', s.grandTotal || 0));
-    purchases.forEach((p: any) => addTo(p.purchaseDate || p.createdAt, 'purchases', p.grandTotal || 0));
+    sales.forEach((s) => addTo(s.createdAt, 'sales', s.grandTotal || 0));
+    purchases.forEach((p) => addTo(p.purchaseDate || p.createdAt, 'purchases', p.grandTotal || 0));
 
     setChartData(buckets);
   }, [sales, purchases, inventory, products]);
 
+  // Week totals double as the chart's direct labels, so identity never rests on colour alone.
+  const weekTotals = useMemo(
+    () =>
+      chartData.reduce(
+        (acc, d) => ({ sales: acc.sales + d.sales, purchases: acc.purchases + d.purchases }),
+        { sales: 0, purchases: 0 }
+      ),
+    [chartData]
+  );
+
+  const showSkeleton = loading && !metrics;
+
   return (
-    <div className="flex bg-[#F4F8F6] text-slate-800 min-h-screen font-sans">
-      <Sidebar />
-
-      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto max-w-[1600px] mx-auto w-full">
-        {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Pharmacy Dashboard</h1>
-            <p className="text-xs text-slate-500 mt-0.5">Real-time overview of sales, stock alerts, and financial performance</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
+    <PageMain>
+      <PageHeader
+        title="Pharmacy Dashboard"
+        subtitle="Real-time overview of sales, stock alerts, and financial performance"
+        action={
+          <>
+            <Button
+              variant="outline"
+              size="md"
+              iconOnly
               onClick={() => refreshData()}
-              className="p-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition shadow-2xs"
-              title="Refresh Data"
+              title="Refresh data"
+              aria-label="Refresh data"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-
+              <RefreshCw className={loading ? 'h-4 w-4 animate-spin text-brand' : 'h-4 w-4'} />
+            </Button>
             <Link
               href="/billing"
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition"
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-brand-fg transition-colors hover:bg-brand-hover active:scale-[0.98]"
             >
-              <Plus className="w-4 h-4" />
-              <span>New Sale (POS)</span>
+              <Plus className="h-4 w-4" aria-hidden />
+              New Sale
             </Link>
-          </div>
-        </div>
+          </>
+        }
+      />
 
-        {/* 4 Metric KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Today's Sales</span>
-              <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
-                <TrendingUp className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold font-mono text-slate-900">
-                ₹{(metrics?.todaySales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                {metrics?.todayBillsCount || 0} Bills Generated Today
-              </div>
-            </div>
-          </div>
+      {/* KPI row */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {showSkeleton ? (
+          Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+        ) : (
+          <>
+            <StatCard
+              label="Today's Sales"
+              value={formatCurrency(metrics?.todaySales || 0)}
+              sublabel={`${metrics?.todayBillsCount || 0} bills generated today`}
+              icon={TrendingUp}
+              tone="brand"
+              href="/sales"
+            />
+            <StatCard
+              label="Monthly Revenue"
+              value={formatCurrency(metrics?.monthlySales || 0)}
+              sublabel={new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
+              icon={ShoppingBag}
+              tone="info"
+              href="/sales"
+            />
+            <StatCard
+              label="Stock Catalog"
+              value={(metrics?.totalInventoryItems || 0).toLocaleString('en-IN')}
+              sublabel={`${(metrics?.inStockCount || 0).toLocaleString('en-IN')} in stock`}
+              icon={PackageCheck}
+              tone="accent"
+              href="/inventory"
+            />
+            <StatCard
+              label="Low Stock Alerts"
+              value={metrics?.lowStockItemsCount || 0}
+              sublabel={`Running low · ${(metrics?.outOfStockCount || 0).toLocaleString('en-IN')} out of stock`}
+              icon={AlertTriangle}
+              tone="warn"
+              emphasizeValue
+              href="/inventory"
+            />
+          </>
+        )}
+      </div>
 
-          <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Monthly Revenue</span>
-              <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
-                <ShoppingBag className="w-5 h-5" />
+      {/* Trend + recent activity */}
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
+        <Card className="lg:col-span-8">
+          <CardHeader
+            title="Sales & Purchases Trend"
+            subtitle="Last 7 days"
+            action={
+              <div className="flex items-center gap-4">
+                {(
+                  [
+                    ['Sales', SERIES.sales, weekTotals.sales],
+                    ['Purchases', SERIES.purchases, weekTotals.purchases],
+                  ] as const
+                ).map(([name, color, total]) => (
+                  <span key={name} className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+                    <span className="text-xs font-semibold text-fg-muted">{name}</span>
+                    <span className="text-xs font-bold text-fg tabular-nums">{compactINR(total)}</span>
+                  </span>
+                ))}
               </div>
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold font-mono text-slate-900">
-                ₹{(metrics?.monthlySales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                {new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
-              </div>
-            </div>
+            }
+          />
+          <div className="h-64 w-full p-4 pr-5">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="fillSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={SERIES.sales} stopOpacity={0.22} />
+                    <stop offset="95%" stopColor={SERIES.sales} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="fillPurchases" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={SERIES.purchases} stopOpacity={0.16} />
+                    <stop offset="95%" stopColor={SERIES.purchases} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={AXIS.grid} />
+                <XAxis
+                  dataKey="name"
+                  stroke={AXIS.stroke}
+                  fontSize={AXIS.fontSize}
+                  tickLine={false}
+                  axisLine={false}
+                  dy={4}
+                />
+                <YAxis
+                  stroke={AXIS.stroke}
+                  fontSize={AXIS.fontSize}
+                  tickLine={false}
+                  axisLine={false}
+                  width={56}
+                  tickFormatter={compactINR}
+                />
+                <Tooltip
+                  {...TOOLTIP_STYLE}
+                  cursor={{ stroke: AXIS.stroke, strokeWidth: 1, strokeDasharray: '3 3' }}
+                  formatter={(val, name) => [formatCurrency(Number(val ?? 0)), String(name)]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="sales"
+                  name="Sales"
+                  stroke={SERIES.sales}
+                  strokeWidth={2}
+                  fill="url(#fillSales)"
+                  activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="purchases"
+                  name="Purchases"
+                  stroke={SERIES.purchases}
+                  strokeWidth={2}
+                  fill="url(#fillPurchases)"
+                  activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
+        </Card>
 
-          <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Stock Catalog</span>
-              <div className="p-2 bg-purple-50 rounded-xl text-purple-600">
-                <PackageCheck className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold font-mono text-slate-900">
-                {(metrics?.totalInventoryItems || 0).toLocaleString()}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                {(metrics?.inStockCount || 0).toLocaleString()} in stock
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Low Stock Alerts</span>
-              <div className="p-2 bg-amber-50 rounded-xl text-amber-600">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-extrabold font-mono text-amber-600">
-                {metrics?.lowStockItemsCount || 0}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                Running low · {(metrics?.outOfStockCount || 0).toLocaleString()} out of stock
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Chart & Recent Sales Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Revenue Chart */}
-          <div className="lg:col-span-8 bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-slate-900 text-sm">Weekly Sales & Purchases Trend</h2>
-              <span className="text-xs text-slate-400 font-medium">Last 7 Days</span>
-            </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#059669" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#059669" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorPurchases" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.22}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                  <XAxis dataKey="name" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0F172A', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '12px' }}
-                    formatter={(val: any, name: any) => [`₹${Number(val).toFixed(2)}`, name]}
-                  />
-                  <Legend
-                    verticalAlign="top"
-                    align="right"
-                    height={24}
-                    iconType="circle"
-                    iconSize={8}
-                    wrapperStyle={{ fontSize: '11px', fontWeight: 700, color: '#64748B' }}
-                  />
-                  <Area type="monotone" dataKey="sales" stroke="#059669" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSales)" name="Sales" />
-                  <Area type="monotone" dataKey="purchases" stroke="#6366F1" strokeWidth={2} fillOpacity={1} fill="url(#colorPurchases)" name="Purchases" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Recent Sales List */}
-          <div className="lg:col-span-4 bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="font-bold text-slate-900 text-sm">Recent Sales</h2>
-              <Link href="/sales" className="text-xs text-emerald-600 font-bold hover:underline">View All</Link>
-            </div>
-            <div className="space-y-3">
-              {(metrics?.recentSales || []).length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400">No recent sales invoices</div>
-              ) : (
-                (metrics?.recentSales || []).map((sale: any) => (
-                  <div key={sale.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-emerald-50/50 transition">
-                    <div>
-                      <div className="font-bold text-slate-900 text-xs">{sale.customerName || 'Walk-in Customer'}</div>
-                      <div className="text-[10px] text-slate-400">{new Date(sale.saleDate || sale.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                    </div>
-                    <span className="font-mono font-bold text-emerald-600 text-xs">
-                      ₹{(sale.grandTotal || 0).toFixed(2)}
-                    </span>
+        <Card className="lg:col-span-4">
+          <CardHeader
+            title="Recent Sales"
+            action={
+              <Link
+                href="/sales"
+                className="inline-flex items-center gap-1 text-xs font-bold text-brand hover:text-brand-hover"
+              >
+                View all <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            }
+          />
+          {(metrics?.recentSales || []).length === 0 ? (
+            <EmptyState
+              icon={Receipt}
+              title="No sales yet"
+              message="Invoices raised at the counter will appear here."
+              action={
+                <Link
+                  href="/billing"
+                  className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3.5 text-xs font-semibold text-brand-fg hover:bg-brand-hover"
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden />
+                  New Sale
+                </Link>
+              }
+            />
+          ) : (
+            <ul className="divide-y divide-line-light">
+              {(metrics?.recentSales || []).map((sale) => (
+                <li
+                  key={sale.id}
+                  className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-hover"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-fg">
+                      {sale.customerName || 'Walk-in Customer'}
+                    </p>
+                    <p className="text-xs text-fg-subtle">
+                      {new Date(sale.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <BottomNav />
-    </div>
+                  <span className="shrink-0 text-sm font-bold tabular-nums text-brand">
+                    {formatCurrency(sale.grandTotal || 0)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    </PageMain>
   );
 }

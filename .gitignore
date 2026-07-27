@@ -38,6 +38,12 @@ data/
 .pub-cache/
 .pub/
 
+# Flutter build output & Gradle caches (were committed by mistake — ~190MB of binaries)
+flutter_legacy/build/
+flutter_legacy/android/.gradle/
+**/.gradle/
+**/build/reports/
+
 # Symbolication related
 app.*.symbols
 

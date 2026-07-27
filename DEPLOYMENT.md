@@ -25,9 +25,10 @@ Follow these simple steps to deploy your **AdGen Pharmacy ERP** for production w
    - `JWT_SECRET`: a random string of at least 32 characters. Generate with
      `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
      The API refuses to boot in production without it.
-   - `CORS_ORIGINS`: your frontend's production URL, e.g. `https://your-app.vercel.app`
+   - `CORS_ORIGINS`: your frontend's exact production origin — `https://adgenerp.vercel.app`.
+     Without this the API rejects every browser request in production.
 4. Click **Deploy**.
-5. Once deployed, copy your backend URL (e.g. `https://pharmacy-erp-backend.vercel.app`).
+5. Once deployed, copy your backend URL (e.g. `https://adgen-erp-backend.vercel.app`).
 
 ---
 
@@ -36,9 +37,13 @@ Follow these simple steps to deploy your **AdGen Pharmacy ERP** for production w
 1. Go to [vercel.com/new](https://vercel.com/new) again and import the same GitHub repository.
 2. Select the **`client`** directory as the **Root Directory**.
 3. Under **Environment Variables**, add:
-   - `NEXT_PUBLIC_API_URL`: `https://pharmacy-erp-backend.vercel.app/api` (Replace with your backend URL from Step 1 + `/api`).
+   - `NEXT_PUBLIC_API_URL`: your backend URL from Step 1 with `/api` appended,
+     e.g. `https://adgen-erp-backend.vercel.app/api`.
+   > ⚠️ This value is **inlined at build time**. Adding or changing it requires a **redeploy** —
+   > saving the variable alone will not update an already-built frontend. If it is missing, the
+   > app logs a warning and falls back to a hardcoded backend host, which may not be yours.
 4. Click **Deploy**.
-5. Your Pharmacy ERP is now live on your Vercel production domain!
+5. Your Pharmacy ERP is now live at **https://adgenerp.vercel.app**.
 
 ---
 

@@ -3,17 +3,38 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { useAuth } from './AuthContext';
+import type {
+  Product,
+  InventoryItem,
+  Sale,
+  Purchase,
+  Customer,
+  Party,
+  LedgerEntry,
+} from '@/types';
 
 interface ErpDataContextType {
-  products: any[];
-  inventory: any[];
-  sales: any[];
-  purchases: any[];
-  customers: any[];
-  parties: any[];
-  ledgers: any[];
+  products: Product[];
+  inventory: InventoryItem[];
+  sales: Sale[];
+  purchases: Purchase[];
+  customers: Customer[];
+  parties: Party[];
+  ledgers: LedgerEntry[];
   loading: boolean;
   refreshData: () => Promise<void>;
+}
+
+/** Shape persisted to localStorage between sessions. */
+interface ErpCache {
+  products: Product[];
+  inventory: InventoryItem[];
+  sales: Sale[];
+  purchases: Purchase[];
+  customers: Customer[];
+  parties: Party[];
+  ledgers: LedgerEntry[];
+  timestamp: number;
 }
 
 const ErpDataContext = createContext<ErpDataContextType>({
@@ -34,28 +55,28 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2 mins cache TTL
 export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
 
-  const getInitialCache = () => {
+  const getInitialCache = (): ErpCache | null => {
     if (typeof window !== 'undefined') {
       try {
         const raw = localStorage.getItem(GLOBAL_CACHE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
+          const parsed = JSON.parse(raw) as ErpCache;
           if (Date.now() - parsed.timestamp < CACHE_TTL_MS) {
             return parsed;
           }
         }
-      } catch (_) {}
+      } catch {}
     }
     return null;
   };
 
-  const [products, setProducts] = useState<any[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
-  const [sales, setSales] = useState<any[]>([]);
-  const [purchases, setPurchases] = useState<any[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [parties, setParties] = useState<any[]>([]);
-  const [ledgers, setLedgers] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -84,13 +105,13 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         setLoading(true);
       }
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes] = await Promise.all([
-        api.get('/products').catch(() => ({ data: [] })),
-        api.get('/inventory').catch(() => ({ data: [] })),
-        api.get('/sales').catch(() => ({ data: [] })),
-        api.get('/purchases').catch(() => ({ data: [] })),
-        api.get('/customers').catch(() => ({ data: [] })),
-        api.get('/parties').catch(() => ({ data: [] })),
-        api.get('/ledger').catch(() => ({ data: [] })),
+        api.get<Product[]>('/products').catch(() => ({ data: [] as Product[] })),
+        api.get<InventoryItem[]>('/inventory').catch(() => ({ data: [] as InventoryItem[] })),
+        api.get<Sale[]>('/sales').catch(() => ({ data: [] as Sale[] })),
+        api.get<Purchase[]>('/purchases').catch(() => ({ data: [] as Purchase[] })),
+        api.get<Customer[]>('/customers').catch(() => ({ data: [] as Customer[] })),
+        api.get<Party[]>('/parties').catch(() => ({ data: [] as Party[] })),
+        api.get<LedgerEntry[]>('/ledger').catch(() => ({ data: [] as LedgerEntry[] })),
       ]);
 
       const prods = prodRes.data || [];
@@ -125,7 +146,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
               timestamp: Date.now(),
             })
           );
-        } catch (_) {}
+        } catch {}
       }
     } catch (e) {
       console.error('ErpDataProvider fetch error:', e);

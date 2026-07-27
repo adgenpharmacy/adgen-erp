@@ -1,38 +1,61 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { 
-  LayoutDashboard, 
-  Receipt, 
-  Package, 
-  ShoppingBag, 
-  BookOpen, 
-  Users, 
-  Building2, 
+import {
+  LayoutDashboard,
+  Receipt,
+  Package,
+  ShoppingBag,
+  BookOpen,
+  Users,
+  Building2,
   BarChart3,
   UserCheck,
   Boxes,
   LogOut,
-  Search,
   RotateCcw,
-  Download
+  ScanLine,
 } from 'lucide-react';
 import UpdateNotifier from '@/components/layout/UpdateNotifier';
+import { cn } from '@/lib/utils';
 
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Sales', href: '/sales', icon: Receipt },
-  { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
-  { name: 'Returns', href: '/returns', icon: RotateCcw },
-  { name: 'Products', href: '/products', icon: Boxes },
-  { name: 'Inventory', href: '/inventory', icon: Package },
-  { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Suppliers', href: '/parties', icon: Building2 },
-  { name: 'Ledger', href: '/ledger', icon: BookOpen },
-  { name: 'Employees', href: '/employees', icon: UserCheck },
-  { name: 'Reports', href: '/reports', icon: BarChart3 },
+/** Grouped so the daily counter workflow sits apart from master data and analysis. */
+const NAV_GROUPS: { heading: string; items: { name: string; href: string; icon: typeof Receipt }[] }[] = [
+  {
+    heading: 'Operations',
+    items: [
+      { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+      { name: 'Billing', href: '/billing', icon: ScanLine },
+      { name: 'Sales', href: '/sales', icon: Receipt },
+      { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
+      { name: 'Returns', href: '/returns', icon: RotateCcw },
+    ],
+  },
+  {
+    heading: 'Catalogue',
+    items: [
+      { name: 'Products', href: '/products', icon: Boxes },
+      { name: 'Inventory', href: '/inventory', icon: Package },
+    ],
+  },
+  {
+    heading: 'Directory',
+    items: [
+      { name: 'Customers', href: '/customers', icon: Users },
+      { name: 'Suppliers', href: '/parties', icon: Building2 },
+      { name: 'Employees', href: '/employees', icon: UserCheck },
+    ],
+  },
+  {
+    heading: 'Finance',
+    items: [
+      { name: 'Ledger', href: '/ledger', icon: BookOpen },
+      { name: 'Reports', href: '/reports', icon: BarChart3 },
+    ],
+  },
 ];
 
 export default function Sidebar() {
@@ -41,78 +64,97 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="hidden md:flex flex-col w-60 bg-white border-r border-slate-200 min-h-screen sticky top-0 h-screen select-none overflow-y-auto shadow-2xs">
+      <aside className="hidden md:flex flex-col w-sidebar shrink-0 bg-surface border-r border-line h-screen sticky top-0 select-none no-print">
         {/* Brand */}
-        <div className="px-5 pt-6 pb-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="AdGen" className="w-8 h-8 object-contain" />
-            <div>
-              <h1 className="font-extrabold text-slate-900 text-base tracking-tight leading-none">
-                AdGen <span className="text-emerald-600 font-mono text-xs font-bold ml-0.5">ERP</span>
-              </h1>
-              <span className="text-[11px] text-slate-500 font-bold tracking-wider uppercase leading-none block mt-1">
-                Clinical & POS Suite
+        <div className="px-4 py-4 border-b border-line">
+          <Link href="/" className="flex items-center gap-2.5">
+            <Image src="/logo.png" alt="" width={32} height={32} className="h-8 w-8 object-contain" />
+            <span className="min-w-0">
+              <span className="block font-extrabold text-fg text-[15px] tracking-tight leading-none">
+                AdGen <span className="text-brand font-mono text-xs ml-0.5">ERP</span>
               </span>
-            </div>
-          </div>
+              <span className="block text-[10px] text-fg-subtle font-semibold tracking-wider uppercase mt-1 leading-none">
+                Clinical &amp; POS Suite
+              </span>
+            </span>
+          </Link>
         </div>
 
-        {/* User Card */}
-        {user ? (
-          <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-extrabold text-xs shadow-xs shrink-0">
-                {user.name.charAt(0).toUpperCase()}
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.heading}>
+              <p className="px-2.5 mb-1 text-[10px] font-bold uppercase tracking-widest text-fg-subtle">
+                {group.heading}
+              </p>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'flex items-center gap-2.5 pl-2.5 pr-3 py-2 rounded-md text-[13px] font-semibold',
+                        'border-l-[3px] transition-colors',
+                        isActive
+                          ? 'bg-brand-subtle text-brand-hover border-brand'
+                          : 'text-fg-muted border-transparent hover:bg-hover hover:text-fg'
+                      )}
+                    >
+                      <Icon
+                        className={cn('h-[18px] w-[18px] shrink-0', isActive ? 'text-brand' : 'text-fg-subtle')}
+                        aria-hidden
+                      />
+                      <span className="truncate">{item.name}</span>
+                    </Link>
+                  );
+                })}
               </div>
-              <div className="min-w-0">
-                <div className="font-bold text-slate-900 text-xs truncate leading-tight">{user.name}</div>
-                <span className={`inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider mt-0.5 ${
-                  user.role === 'OWNER' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'
-                }`}>
+            </div>
+          ))}
+        </nav>
+
+        {/* User */}
+        {user ? (
+          <div className="px-3 py-3 border-t border-line flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span
+                className={cn(
+                  'h-8 w-8 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0',
+                  user.role === 'OWNER' ? 'bg-brand text-brand-fg' : 'bg-brand-subtle text-brand-hover'
+                )}
+              >
+                {user.name.charAt(0).toUpperCase()}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-bold text-fg text-xs truncate leading-tight">{user.name}</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wider text-fg-subtle mt-0.5">
                   {user.role}
                 </span>
-              </div>
+              </span>
             </div>
             <button
               onClick={logout}
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
-              title="Sign Out of Portal"
+              title="Sign out"
+              aria-label="Sign out"
+              className="p-1.5 rounded-md text-fg-subtle hover:bg-danger-subtle hover:text-danger transition-colors"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="h-4 w-4" />
             </button>
           </div>
         ) : (
-          <div className="px-4 py-3.5 border-b border-slate-100">
+          <div className="px-3 py-3 border-t border-line">
             <Link
               href="/login"
-              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-xs"
+              className="flex h-9 items-center justify-center rounded-md bg-brand text-brand-fg text-xs font-bold hover:bg-brand-hover transition-colors"
             >
-              <span>Sign In</span>
+              Sign In
             </Link>
           </div>
         )}
-
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-3 space-y-1">
-          {navigation.map((item) => {
-            const isActive = pathname === item.href;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                  isActive
-                    ? 'bg-emerald-50 text-emerald-800 border-l-4 border-emerald-600 shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                <Icon className={`w-4.5 h-4.5 shrink-0 ${isActive ? 'text-emerald-600' : 'text-slate-400'}`} />
-                <span>{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
       </aside>
 
       <UpdateNotifier />
