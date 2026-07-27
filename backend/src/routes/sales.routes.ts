@@ -5,6 +5,35 @@ import { validateCreateSale } from '../middlewares/validation.middleware';
 
 const router = Router();
 
+const INVOICE_PREFIX = 'INV-';
+
+/**
+ * Derive the next sales invoice number from the highest number already issued.
+ *
+ * Counting rows (count + 1) reuses numbers after a deletion, and reading the most
+ * recent row by createdAt breaks when bills are backdated — both produce duplicate
+ * invoice numbers, which is not acceptable on a GST invoice series.
+ */
+async function nextSalesInvoiceNumber(tx: {
+  salesBill: { findMany: (args: any) => Promise<{ invoiceNumber: string | null }[]> };
+}): Promise<string> {
+  const bills = await tx.salesBill.findMany({
+    where: { invoiceNumber: { startsWith: INVOICE_PREFIX } },
+    select: { invoiceNumber: true },
+  });
+
+  let highest = 0;
+  for (const b of bills) {
+    const match = b.invoiceNumber?.match(/(\d+)\s*$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (!Number.isNaN(n) && n > highest) highest = n;
+    }
+  }
+
+  return `${INVOICE_PREFIX}${String(highest + 1).padStart(6, '0')}`;
+}
+
 // GET /api/sales — Fetch all sales bills
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -30,8 +59,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 // GET /api/sales/next-number — Get next DB sequential sales invoice number
 router.get('/next-number', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const count = await prisma.salesBill.count();
-    const nextInvoiceNumber = `INV-${String(count + 1).padStart(6, '0')}`;
+    const nextInvoiceNumber = await nextSalesInvoiceNumber(prisma);
     res.json({ nextInvoiceNumber });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -163,16 +191,16 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
       let finalInvoiceNum = (req.body.invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
-        const lastBill = await tx.salesBill.findFirst({
-          orderBy: { createdAt: 'desc' },
-          select: { invoiceNumber: true },
+        finalInvoiceNum = await nextSalesInvoiceNumber(tx);
+      } else {
+        // Reject a duplicate rather than silently issuing two bills with the same number.
+        const clash = await tx.salesBill.findFirst({
+          where: { invoiceNumber: finalInvoiceNum },
+          select: { id: true },
         });
-        let nextNum = 1;
-        if (lastBill?.invoiceNumber) {
-          const match = lastBill.invoiceNumber.match(/\d+/);
-          if (match) nextNum = parseInt(match[0], 10) + 1;
+        if (clash) {
+          throw new Error(`Invoice number ${finalInvoiceNum} already exists.`);
         }
-        finalInvoiceNum = `INV-${String(nextNum).padStart(6, '0')}`;
       }
 
       // 4. Create SalesBill with customer metadata & FEFO line items
@@ -272,16 +300,36 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
 
       if (!bill) throw new Error('Sales bill not found');
 
-      // 1. Restore batch stock safely
+      // Items already restocked by a sales return must not be restocked a second time here.
+      const priorReturns = await tx.salesReturn.findMany({
+        where: { salesBillId: id },
+        include: { items: true },
+      });
+
+      const restockedByReturns = new Map<string, number>();
+      for (const ret of priorReturns) {
+        for (const ri of ret.items) {
+          if (ri.condition !== 'RESTOCK') continue;
+          restockedByReturns.set(ri.productId, (restockedByReturns.get(ri.productId) || 0) + ri.quantity);
+        }
+      }
+
+      // 1. Restore batch stock safely, net of anything a return already put back
       for (const item of bill.items) {
-        if (item.batchId) {
-          const batch = await tx.inventoryBatch.findUnique({ where: { id: item.batchId } });
-          if (batch) {
-            await tx.inventoryBatch.update({
-              where: { id: item.batchId },
-              data: { quantity: { increment: item.quantity } },
-            });
-          }
+        if (!item.batchId) continue;
+
+        const alreadyBack = restockedByReturns.get(item.productId) || 0;
+        const toRestore = Math.max(0, item.quantity - alreadyBack);
+        restockedByReturns.set(item.productId, Math.max(0, alreadyBack - item.quantity));
+
+        if (toRestore <= 0) continue;
+
+        const batch = await tx.inventoryBatch.findUnique({ where: { id: item.batchId } });
+        if (batch) {
+          await tx.inventoryBatch.update({
+            where: { id: item.batchId },
+            data: { quantity: { increment: toRestore } },
+          });
         }
       }
 

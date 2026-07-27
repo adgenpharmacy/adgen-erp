@@ -21,9 +21,10 @@ import {
   Area, 
   XAxis, 
   YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
 } from 'recharts';
 import Link from 'next/link';
 
@@ -34,42 +35,71 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Compute metrics instantly from cached global state
-    const todayStr = new Date().toISOString().split('T')[0];
-    
-    const todaySales = sales.filter((s: any) => 
-      (s.saleDate || s.createdAt || '').toString().startsWith(todayStr)
-    );
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const saleDateOf = (s: any) => new Date(s.saleDate || s.createdAt);
+
+    const todaySales = sales.filter((s: any) => saleDateOf(s) >= startOfToday);
     const todaySalesTotal = todaySales.reduce((acc, s) => acc + (s.grandTotal || 0), 0);
 
-    const monthSalesTotal = sales.reduce((acc, s) => acc + (s.grandTotal || 0), 0);
+    // Revenue for the current calendar month — not all history.
+    const monthSalesTotal = sales
+      .filter((s: any) => saleDateOf(s) >= startOfMonth)
+      .reduce((acc, s) => acc + (s.grandTotal || 0), 0);
 
-    const lowStockCount = inventory.filter((inv: any) => 
-      (inv.systemStock || 0) <= (inv.lowStockThreshold || 5)
-    ).length;
+    // Separate "needs reordering" from "never stocked". The imported catalog carries thousands of
+    // products with no batches at all; counting those as low stock buried the genuine reorder list.
+    const lowStockCount = inventory.filter((inv: any) => {
+      const stock = inv.systemStock || 0;
+      return stock > 0 && stock <= (inv.lowStockThreshold || 5);
+    }).length;
+
+    const outOfStockCount = inventory.filter((inv: any) => (inv.systemStock || 0) <= 0).length;
 
     setMetrics({
       todaySales: todaySalesTotal,
       todayBillsCount: todaySales.length,
       monthlySales: monthSalesTotal,
       lowStockItemsCount: lowStockCount,
+      outOfStockCount,
+      inStockCount: inventory.filter((inv: any) => (inv.systemStock || 0) > 0).length,
       totalInventoryItems: inventory.length || products.length,
-      recentSales: sales.slice(0, 5),
+      recentSales: [...sales]
+        .sort((a: any, b: any) => saleDateOf(b).getTime() - saleDateOf(a).getTime())
+        .slice(0, 5),
     });
 
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const dayTotals = days.map((d) => ({ name: d, sales: 0, purchases: 0 }));
+    // Build the trailing 7 calendar days, so the chart matches its "Last 7 Days" label.
+    // Bucketing by day-of-week folded every past week into the same seven columns.
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const buckets: { key: string; name: string; sales: number; purchases: number }[] = [];
+    const indexByKey = new Map<string, number>();
 
-    sales.forEach((s: any) => {
-      const d = new Date(s.saleDate || s.createdAt).getDay();
-      if (!isNaN(d)) dayTotals[d].sales += s.grandTotal || 0;
-    });
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(startOfToday);
+      d.setDate(startOfToday.getDate() - i);
+      const key = d.toDateString();
+      indexByKey.set(key, buckets.length);
+      buckets.push({ key, name: dayLabels[d.getDay()], sales: 0, purchases: 0 });
+    }
 
-    purchases.forEach((p: any) => {
-      const d = new Date(p.purchaseDate || p.createdAt).getDay();
-      if (!isNaN(d)) dayTotals[d].purchases += p.grandTotal || 0;
-    });
+    const addTo = (raw: any, field: 'sales' | 'purchases', amount: number) => {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return;
+      d.setHours(0, 0, 0, 0);
+      const idx = indexByKey.get(d.toDateString());
+      if (idx !== undefined) buckets[idx][field] += amount;
+    };
 
-    setChartData(dayTotals);
+    sales.forEach((s: any) => addTo(s.saleDate || s.createdAt, 'sales', s.grandTotal || 0));
+    purchases.forEach((p: any) => addTo(p.purchaseDate || p.createdAt, 'purchases', p.grandTotal || 0));
+
+    setChartData(buckets);
   }, [sales, purchases, inventory, products]);
 
   return (
@@ -132,7 +162,9 @@ export default function Dashboard() {
               <div className="text-2xl font-extrabold font-mono text-slate-900">
                 ₹{(metrics?.monthlySales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">Total Revenue Recorded</div>
+              <div className="text-xs text-slate-400 font-medium mt-0.5">
+                {new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
+              </div>
             </div>
           </div>
 
@@ -147,7 +179,9 @@ export default function Dashboard() {
               <div className="text-2xl font-extrabold font-mono text-slate-900">
                 {(metrics?.totalInventoryItems || 0).toLocaleString()}
               </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">Total Active Medicines</div>
+              <div className="text-xs text-slate-400 font-medium mt-0.5">
+                {(metrics?.inStockCount || 0).toLocaleString()} in stock
+              </div>
             </div>
           </div>
 
@@ -162,7 +196,9 @@ export default function Dashboard() {
               <div className="text-2xl font-extrabold font-mono text-amber-600">
                 {metrics?.lowStockItemsCount || 0}
               </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">Medicines needing reorder</div>
+              <div className="text-xs text-slate-400 font-medium mt-0.5">
+                Running low · {(metrics?.outOfStockCount || 0).toLocaleString()} out of stock
+              </div>
             </div>
           </div>
         </div>
@@ -183,15 +219,28 @@ export default function Dashboard() {
                       <stop offset="5%" stopColor="#059669" stopOpacity={0.3}/>
                       <stop offset="95%" stopColor="#059669" stopOpacity={0}/>
                     </linearGradient>
+                    <linearGradient id="colorPurchases" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.22}/>
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                   <XAxis dataKey="name" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
                   <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0F172A', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '12px' }} 
-                    formatter={(val: any) => [`₹${Number(val).toFixed(2)}`, '']}
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0F172A', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '12px' }}
+                    formatter={(val: any, name: any) => [`₹${Number(val).toFixed(2)}`, name]}
+                  />
+                  <Legend
+                    verticalAlign="top"
+                    align="right"
+                    height={24}
+                    iconType="circle"
+                    iconSize={8}
+                    wrapperStyle={{ fontSize: '11px', fontWeight: 700, color: '#64748B' }}
                   />
                   <Area type="monotone" dataKey="sales" stroke="#059669" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSales)" name="Sales" />
+                  <Area type="monotone" dataKey="purchases" stroke="#6366F1" strokeWidth={2} fillOpacity={1} fill="url(#colorPurchases)" name="Purchases" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

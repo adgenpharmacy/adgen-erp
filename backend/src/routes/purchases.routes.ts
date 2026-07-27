@@ -51,24 +51,24 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       const billItemsToCreate = [];
 
       for (const item of items) {
-        const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, taxPercent, gstPercent } = item;
-        const parsedTax = taxPercent !== undefined && taxPercent !== null 
-          ? parseFloat(taxPercent) 
-          : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : 0);
+        const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
 
         const prod = await tx.product.findUnique({ where: { id: productId } });
         if (!prod) throw new Error(`Product ${productId} not found`);
 
-        const packSize = prod.packSize || 1;
-        const totalPacks = parseFloat(quantity) + parseFloat(freeQuantity || 0);
-        const totalContentUnits = totalPacks * packSize; // Convert to single units (e.g. tablets)
+        // Fall back to the product's configured GST rate rather than an arbitrary constant,
+        // so a bill's totals stay identical when it is later edited via PUT.
+        const parsedTax = taxPercent !== undefined && taxPercent !== null
+          ? parseFloat(taxPercent)
+          : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : (prod.gstPercent ?? 0));
 
-        const itemSubtotal = parseFloat(quantity) * parseFloat(purchaseRate);
-        const itemTax = itemSubtotal * (parsedTax / 100);
-        const itemTotal = itemSubtotal + itemTax;
+        const lineGross = (parseFloat(quantity) || 0) * (parseFloat(purchaseRate) || 0);
+        const lineDisc = lineGross * ((parseFloat(discountPercent) || 0) / 100);
+        const lineNet = Math.max(0, lineGross - lineDisc);
+        const lineTax = lineNet * (parsedTax / 100);
 
-        subtotal += itemSubtotal;
-        taxTotal += itemTax;
+        subtotal += lineNet;
+        taxTotal += lineTax;
 
         billItemsToCreate.push({
           productId,
@@ -78,8 +78,9 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
           freeQuantity: parseFloat(freeQuantity || 0),
           purchaseRate: parseFloat(purchaseRate),
           mrp: parseFloat(mrp),
+          discountPercent: parseFloat(discountPercent) || 0,
           taxPercent: parsedTax,
-          totalAmount: itemTotal,
+          totalAmount: lineNet + lineTax,
         });
       }
 
@@ -169,7 +170,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
             transactionType: 'DEBIT',
             amount: grandTotal,
             purchaseBillId: bill.id,
-            description: `Purchase Bill #${invoiceNumber}`,
+            description: `Purchase Bill #${finalInvoiceNum}`,
             isSettled: false,
           },
         });
@@ -237,10 +238,11 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
         for (const item of items) {
           const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
-          const parsedTax = taxPercent !== undefined && taxPercent !== null 
-            ? parseFloat(taxPercent) 
-            : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : 12);
-            
+          const prodForTax = await tx.product.findUnique({ where: { id: productId } });
+          const parsedTax = taxPercent !== undefined && taxPercent !== null
+            ? parseFloat(taxPercent)
+            : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : (prodForTax?.gstPercent ?? 0));
+
           const lineGross = (parseFloat(quantity) || 1) * (parseFloat(purchaseRate) || 0);
           const lineDisc = lineGross * ((parseFloat(discountPercent) || 0) / 100);
           const lineNet = Math.max(0, lineGross - lineDisc);
@@ -360,6 +362,12 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
     const { id } = req.params;
 
     await prisma.$transaction(async (tx) => {
+      const bill = await tx.purchaseBill.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (!bill) throw new Error('Purchase bill not found');
+
       // Check if stock from this purchase bill has already been sold
       const batches = await tx.inventoryBatch.findMany({
         where: { purchaseBillId: id },
@@ -371,13 +379,47 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
         throw new Error('Cannot delete purchase bill: stock from this bill has already been sold in customer sales.');
       }
 
-      // Delete linked ledger entries
-      await tx.ledgerEntry.deleteMany({
+      // Reverse exactly the quantity this bill contributed. A batch number can be topped up by
+      // several bills, so deleting every batch row tied to this bill would wipe out stock that
+      // other bills (or manual corrections) added.
+      for (const item of bill.items) {
+        const prod = await tx.product.findUnique({ where: { id: item.productId } });
+        const packSize = prod?.packSize || 1;
+        const contributedUnits = (item.quantity + (item.freeQuantity || 0)) * packSize;
+
+        const batch = await tx.inventoryBatch.findFirst({
+          where: { productId: item.productId, batchNumber: item.batchNumber },
+          include: { salesBillItems: { select: { id: true } } },
+        });
+        if (!batch) continue;
+
+        // A batch topped up by this bill may also carry stock sold from an earlier bill.
+        if (batch.salesBillItems.length > 0) {
+          throw new Error(
+            `Cannot delete purchase bill: batch ${batch.batchNumber} has already been sold in customer sales.`
+          );
+        }
+
+        const remaining = Math.max(0, batch.quantity - contributedUnits);
+
+        if (remaining === 0 && batch.purchaseBillId === id) {
+          await tx.inventoryBatch.delete({ where: { id: batch.id } });
+        } else {
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantity: remaining },
+          });
+        }
+      }
+
+      // Detach any remaining batch rows so the bill can be removed without FK errors
+      await tx.inventoryBatch.updateMany({
         where: { purchaseBillId: id },
+        data: { purchaseBillId: null },
       });
 
-      // Delete linked inventory batches
-      await tx.inventoryBatch.deleteMany({
+      // Delete linked ledger entries
+      await tx.ledgerEntry.deleteMany({
         where: { purchaseBillId: id },
       });
 

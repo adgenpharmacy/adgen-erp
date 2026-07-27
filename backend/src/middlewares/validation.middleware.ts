@@ -32,7 +32,7 @@ export const validateCreateSale = (req: Request, res: Response, next: NextFuncti
     }
   }
 
-  const validMethods = ['CASH', 'UPI', 'CARD', 'CREDIT'];
+  const validMethods = ['CASH', 'UPI', 'CARD', 'CREDIT', 'SPLIT'];
   if (paymentMethod && !validMethods.includes(paymentMethod)) {
     return res.status(400).json({ error: `Validation Error: Invalid paymentMethod '${paymentMethod}'` });
   }

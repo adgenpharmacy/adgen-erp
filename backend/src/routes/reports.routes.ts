@@ -79,23 +79,9 @@ router.get('/dashboard', authenticate, async (req: AuthenticatedRequest, res: Re
   }
 });
 
-// POST /api/reports/sync-firebase — Sync PostgreSQL data to Firestore Cloud Backup
-router.post('/sync-firebase', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const products = await prisma.product.findMany({ take: 500 });
-    const sales = await prisma.salesBill.findMany({ take: 200, orderBy: { createdAt: 'desc' } });
-    const purchases = await prisma.purchaseBill.findMany({ take: 200, orderBy: { createdAt: 'desc' } });
-
-    res.json({
-      message: 'Cloud backup sync completed successfully',
-      syncedProducts: products.length,
-      syncedSales: sales.length,
-      syncedPurchases: purchases.length,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// NOTE: a POST /sync-firebase endpoint used to live here. It reported
+// "Cloud backup sync completed successfully" while only counting rows — it never wrote to
+// Firestore or anywhere else. It has been removed rather than left to give false assurance.
+// Use GET /api/system/export-data for a real, downloadable backup.
 
 export default router;

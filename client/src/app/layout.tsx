@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { AuthProvider } from "@/context/AuthContext";
 import { ErpDataProvider } from "@/context/ErpDataContext";
+import AuthGuard from "@/components/layout/AuthGuard";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -39,7 +40,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-white text-gray-900 selection:bg-emerald-600 selection:text-white">
         <AuthProvider>
           <ErpDataProvider>
-            {children}
+            <AuthGuard>{children}</AuthGuard>
           </ErpDataProvider>
         </AuthProvider>
       </body>

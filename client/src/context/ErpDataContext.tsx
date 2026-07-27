@@ -60,12 +60,6 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      console.log(
-        '%c🚀 AdGen Pharmacy ERP Engine Active\n%c✨ Designed & Engineered by Anshu (Anshu says hi! 👋)',
-        'color: #059669; font-weight: bold; font-size: 16px; padding: 4px 0;',
-        'color: #2563eb; font-weight: bold; font-size: 13px; background: #eff6ff; padding: 4px 8px; border-radius: 6px;'
-      );
-
       const cache = getInitialCache();
       if (cache) {
         if (cache.products) setProducts(cache.products);
@@ -89,7 +83,6 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       if (products.length === 0) {
         setLoading(true);
       }
-      console.log('⚡ [Anshu Sync Engine] Synchronizing Live Pharmacy Data...');
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes] = await Promise.all([
         api.get('/products').catch(() => ({ data: [] })),
         api.get('/inventory').catch(() => ({ data: [] })),
@@ -107,8 +100,6 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       const cust = custRes.data || [];
       const part = partyRes.data || [];
       const ledg = ledgerRes.data || [];
-
-      console.log(`✅ [Anshu Engine] Data Sync Complete! 📦 ${prods.length} Medicines | 💊 ${inv.length} Batches | 🧾 ${sal.length} Invoices | 👥 ${cust.length} Customers`);
 
       setProducts(prods);
       setInventory(inv);

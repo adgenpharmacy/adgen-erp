@@ -64,6 +64,8 @@ export default function ReportsPage() {
   const [sales, setSales] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
+  const [salesReturns, setSalesReturns] = useState<any[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
@@ -78,6 +80,8 @@ export default function ReportsPage() {
       api.get('/sales').then((r) => setSales(r.data)).catch(() => null),
       api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => null),
       api.get('/inventory').then((r) => setInventory(r.data)).catch(() => null),
+      api.get('/returns/sales').then((r) => setSalesReturns(r.data)).catch(() => null),
+      api.get('/returns/purchases').then((r) => setPurchaseReturns(r.data)).catch(() => null),
     ]).finally(() => {
       setLoading(false);
       refreshData();
@@ -113,6 +117,8 @@ export default function ReportsPage() {
 
   const filteredSales = useMemo(() => sales.filter((s) => { const d = new Date(s.saleDate || s.createdAt); return d >= startDateObj && d <= endDateObj; }), [sales, startDateObj, endDateObj]);
   const filteredPurchases = useMemo(() => purchases.filter((p) => { const d = new Date(p.purchaseDate || p.createdAt); return d >= startDateObj && d <= endDateObj; }), [purchases, startDateObj, endDateObj]);
+  const filteredSalesReturns = useMemo(() => salesReturns.filter((r) => { const d = new Date(r.createdAt); return d >= startDateObj && d <= endDateObj; }), [salesReturns, startDateObj, endDateObj]);
+  const filteredPurchaseReturns = useMemo(() => purchaseReturns.filter((r) => { const d = new Date(r.createdAt); return d >= startDateObj && d <= endDateObj; }), [purchaseReturns, startDateObj, endDateObj]);
 
   // FEFO Expiry Risk Analytics
   const expiryRiskData = useMemo(() => {
@@ -127,7 +133,10 @@ export default function ReportsPage() {
         if (b.expiryDate && b.quantity > 0) {
           const daysLeft = Math.ceil((new Date(b.expiryDate).getTime() - now.getTime()) / (1000 * 3600 * 24));
           if (daysLeft <= 90) {
-            const batchVal = b.quantity * (b.mrp || inv.mrp || 0);
+            // batch.quantity is stored in content units (tablets) while MRP is per pack (strip),
+            // so the pack size has to be divided out — otherwise risk value is inflated ~packSize times.
+            const packSize = inv.packSize || 1;
+            const batchVal = b.quantity * ((b.mrp || inv.mrp || 0) / packSize);
             if (daysLeft <= 30) risk30Val += batchVal;
             else if (daysLeft <= 60) risk60Val += batchVal;
             else risk90Val += batchVal;
@@ -139,7 +148,7 @@ export default function ReportsPage() {
               expiryDate: b.expiryDate,
               daysLeft,
               quantity: b.quantity,
-              mrp: b.mrp || inv.mrp || 0,
+              mrp: (b.mrp || inv.mrp || 0) / packSize,
               totalValue: batchVal,
             });
           }
@@ -152,30 +161,120 @@ export default function ReportsPage() {
   }, [inventory]);
 
   const metrics = useMemo(() => {
-    const totalSalesRevenue = filteredSales.reduce((sum, s) => sum + (s.grandTotal || 0), 0);
-    const totalPurchasesCost = filteredPurchases.reduce((sum, p) => sum + (p.grandTotal || 0), 0);
-    const totalOutputGst = filteredSales.reduce((sum, s) => sum + (s.taxTotal || 0), 0);
-    const totalInputGst = filteredPurchases.reduce((sum, p) => sum + (p.taxTotal || 0), 0);
+    // Credit notes reduce what the pharmacy actually earned, so revenue is reported net of them.
+    // Previously returns were recorded but never subtracted anywhere, overstating both revenue and profit.
+    const totalSalesReturns = filteredSalesReturns.reduce((sum, r) => sum + (r.totalReturnAmount || 0), 0);
+    const totalPurchaseReturns = filteredPurchaseReturns.reduce((sum, r) => sum + (r.totalReturnAmount || 0), 0);
+
+    const grossSalesRevenue = filteredSales.reduce((sum, s) => sum + (s.grandTotal || 0), 0);
+    const totalSalesRevenue = grossSalesRevenue - totalSalesReturns;
+    const totalPurchasesCost = filteredPurchases.reduce((sum, p) => sum + (p.grandTotal || 0), 0) - totalPurchaseReturns;
+    // Prefer the line items when deriving GST. Bills imported from the legacy system carry the
+    // correct per-item tax rate but a zero header taxTotal, which silently reported ₹0 liability.
+    // Retail prices are GST-inclusive, so tax = gross − gross / (1 + rate).
+    const gstFromItems = (items: any[], grossOf: (i: any) => number) =>
+      (items || []).reduce((sum: number, i: any) => {
+        const rate = (parseFloat(i.taxPercent) || 0) / 100;
+        if (rate <= 0) return sum;
+        const gross = grossOf(i);
+        return sum + (gross - gross / (1 + rate));
+      }, 0);
+
+    const totalOutputGst = filteredSales.reduce((sum, s) => {
+      if ((s.taxTotal || 0) > 0) return sum + s.taxTotal;
+      return sum + gstFromItems(s.items, (i) => i.totalAmount || (i.quantity || 0) * (i.unitPrice || 0));
+    }, 0);
+
+    // Purchase rates are GST-exclusive, so input tax is added on top of the net line value.
+    const totalInputGst = filteredPurchases.reduce((sum, p) => {
+      if ((p.taxTotal || 0) > 0) return sum + p.taxTotal;
+      return sum + (p.items || []).reduce((s2: number, i: any) => {
+        const rate = (parseFloat(i.taxPercent) || 0) / 100;
+        if (rate <= 0) return s2;
+        const net = (i.quantity || 0) * (i.purchaseRate || 0);
+        const disc = net * ((parseFloat(i.discountPercent) || 0) / 100);
+        return s2 + (net - disc) * rate;
+      }, 0);
+    }, 0);
     const netGstPayable = Math.max(0, totalOutputGst - totalInputGst);
+    // When input GST exceeds output GST the balance is credit carried forward, not simply zero.
+    const inputTaxCreditCarried = Math.max(0, totalInputGst - totalOutputGst);
 
     const totalDiscounts = filteredSales.reduce((sum, s) => sum + (s.discount || 0), 0);
-    const cashSales = filteredSales.filter((s) => s.paymentMethod === 'CASH').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
-    const upiSales = filteredSales.filter((s) => s.paymentMethod === 'UPI').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
-    const cardSales = filteredSales.filter((s) => s.paymentMethod === 'CARD').reduce((sum, s) => sum + (s.grandTotal || 0), 0);
-    const creditSales = filteredSales.filter((s) => s.paymentMethod === 'CREDIT' || s.paymentMethod === 'SPLIT').reduce((sum, s) => sum + (s.creditAmount || s.grandTotal || 0), 0);
+    // Split bills carry a real amount in each tender column, so bucketing purely by
+    // paymentMethod dropped their cash/UPI/card portions and the mix never reconciled to revenue.
+    const tenderTotal = (bill: any, field: string, method: string) => {
+      if (bill.paymentMethod === 'SPLIT') return bill[field] || 0;
+      return bill.paymentMethod === method ? (bill.grandTotal || 0) : 0;
+    };
+
+    const cashSales = filteredSales.reduce((sum, s) => sum + tenderTotal(s, 'cashAmount', 'CASH'), 0);
+    const upiSales = filteredSales.reduce((sum, s) => sum + tenderTotal(s, 'upiAmount', 'UPI'), 0);
+    const cardSales = filteredSales.reduce((sum, s) => sum + tenderTotal(s, 'cardAmount', 'CARD'), 0);
+    const creditSales = filteredSales.reduce((sum, s) => sum + tenderTotal(s, 'creditAmount', 'CREDIT'), 0);
+
+    // COGS is only counted where a real purchase rate exists. Estimating a cost (e.g. assuming a
+    // flat 25% margin) would make the P&L show a profit figure that was never actually measured.
+    let cogsCoveredRevenue = 0;
+    let cogsUnknownRevenue = 0;
 
     const totalCogs = filteredSales.reduce((sum, s) => {
-      if (s.items && s.items.length > 0) {
-        const billCogs = s.items.reduce((itemSum: number, item: any) => {
-          const pRate = item.batch?.purchaseRate || item.product?.purchaseRate || item.purchaseRate || (item.unitPrice ? item.unitPrice * 0.75 : 0);
-          return itemSum + ((item.quantity || 0) * pRate);
-        }, 0);
-        return sum + billCogs;
+      if (!s.items || s.items.length === 0) {
+        cogsUnknownRevenue += s.grandTotal || 0;
+        return sum;
       }
-      return sum + ((s.grandTotal || 0) * 0.75);
+
+      const billCogs = s.items.reduce((itemSum: number, item: any) => {
+        const packRate =
+          item.batch?.purchaseRate ??
+          item.product?.purchaseRate ??
+          item.purchaseRate ??
+          null;
+
+        const lineRevenue = (item.quantity || 0) * (item.unitPrice || 0);
+
+        if (packRate === null || packRate === undefined || packRate <= 0) {
+          cogsUnknownRevenue += lineRevenue;
+          return itemSum;
+        }
+
+        // purchaseRate is per pack (strip) while item.quantity is in content units (tablets),
+        // so it must be converted to a per-unit cost — otherwise COGS is packSize times too big
+        // and the P&L reports a large phantom loss.
+        const packSize = item.product?.packSize || 1;
+        const perUnitCost = packRate / (packSize > 0 ? packSize : 1);
+
+        cogsCoveredRevenue += lineRevenue;
+        return itemSum + ((item.quantity || 0) * perUnitCost);
+      }, 0);
+
+      return sum + billCogs;
     }, 0);
+
+    const cogsCoveragePercent =
+      cogsCoveredRevenue + cogsUnknownRevenue > 0
+        ? (cogsCoveredRevenue / (cogsCoveredRevenue + cogsUnknownRevenue)) * 100
+        : 100;
+
+    // Goods returned in resalable condition go back into stock, so their cost must come back
+    // out of COGS — otherwise netting returns off revenue alone would understate profit.
+    const costByProductId = new Map<string, number>();
+    inventory.forEach((inv: any) => {
+      const packSize = inv.packSize || 1;
+      const rate = inv.purchaseRate || 0;
+      if (rate > 0) costByProductId.set(inv.productId || inv.id, rate / (packSize > 0 ? packSize : 1));
+    });
+
+    const restockedCogs = filteredSalesReturns.reduce((sum, r) => {
+      return sum + (r.items || []).reduce((s2: number, i: any) => {
+        if (i.condition && i.condition !== 'RESTOCK') return s2;
+        const unitCost = costByProductId.get(i.productId) || 0;
+        return s2 + (i.quantity || 0) * unitCost;
+      }, 0);
+    }, 0);
+    const netCogs = Math.max(0, totalCogs - restockedCogs);
     const netSalesExclGst = Math.max(0, totalSalesRevenue - totalOutputGst);
-    const netGrossProfit = netSalesExclGst - totalCogs;
+    const netGrossProfit = netSalesExclGst - netCogs;
     const profitMarginPercent = totalSalesRevenue > 0 ? (netGrossProfit / totalSalesRevenue) * 100 : 0;
 
     // Inventory Valuation
@@ -198,7 +297,13 @@ export default function ReportsPage() {
       totalOutputGst,
       totalInputGst,
       netGstPayable,
-      totalCogs,
+      inputTaxCreditCarried,
+      grossSalesRevenue,
+      totalSalesReturns,
+      totalPurchaseReturns,
+      totalCogs: netCogs,
+      cogsCoveragePercent,
+      cogsUnknownRevenue,
       netSalesExclGst,
       netGrossProfit,
       profitMarginPercent,
@@ -210,7 +315,7 @@ export default function ReportsPage() {
       inventoryCostValue,
       potentialInventoryProfit: Math.max(0, inventoryMrpValue - inventoryCostValue),
     };
-  }, [filteredSales, filteredPurchases, inventory]);
+  }, [filteredSales, filteredPurchases, filteredSalesReturns, filteredPurchaseReturns, inventory]);
 
   const tabs = [
     { id: 'OVERVIEW', label: 'Overview' },
@@ -405,7 +510,11 @@ export default function ReportsPage() {
                       />
                     </div>
                     <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
-                    <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">
+                      {metrics.inputTaxCreditCarried > 0
+                        ? `${formatCurrency(metrics.inputTaxCreditCarried)} input credit carried forward`
+                        : 'Output GST − Input ITC'}
+                    </div>
                   </div>
                 </div>
 
@@ -650,10 +759,19 @@ export default function ReportsPage() {
                       <tr>
                         <td className="py-3 text-slate-700 font-bold flex items-center">
                           <span>Gross Sales Revenue</span>
-                          <FormulaTooltip title="Gross Revenue" formula="∑ (SalesBill.grandTotal)" note="All customer sales bills within range." />
+                          <FormulaTooltip title="Gross Revenue" formula="∑ (SalesBill.grandTotal)" note="All customer sales bills within range, before credit notes." />
                         </td>
-                        <td className="py-3 text-right font-mono font-extrabold text-slate-900">{formatCurrency(metrics.totalSalesRevenue)}</td>
+                        <td className="py-3 text-right font-mono font-extrabold text-slate-900">{formatCurrency(metrics.grossSalesRevenue)}</td>
                       </tr>
+                      {metrics.totalSalesReturns > 0 && (
+                        <tr>
+                          <td className="py-3 text-slate-600 flex items-center">
+                            <span>(-) Sales Returns / Credit Notes</span>
+                            <FormulaTooltip title="Sales Returns" formula="∑ (SalesReturn.totalReturnAmount)" note="Goods returned by customers. Restocked items also reduce COGS below." />
+                          </td>
+                          <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalSalesReturns)}</td>
+                        </tr>
+                      )}
                       <tr>
                         <td className="py-3 text-slate-600 flex items-center">
                           <span>(-) Output GST Tax Collected</span>
@@ -664,7 +782,7 @@ export default function ReportsPage() {
                       <tr className="bg-slate-50 font-bold">
                         <td className="py-3 px-3 text-slate-900 flex items-center">
                           <span>Net Sales Revenue (excl. GST)</span>
-                          <FormulaTooltip title="Net Revenue" formula="Gross Sales Revenue - Output GST" note="Real top-line sales income retained by store." />
+                          <FormulaTooltip title="Net Revenue" formula="Gross Sales - Returns - Output GST" note="Real top-line sales income retained by store." />
                         </td>
                         <td className="py-3 px-3 text-right font-mono text-emerald-800">{formatCurrency(metrics.netSalesExclGst)}</td>
                       </tr>
@@ -675,6 +793,21 @@ export default function ReportsPage() {
                         </td>
                         <td className="py-3 text-right font-mono font-bold text-rose-600">-{formatCurrency(metrics.totalCogs)}</td>
                       </tr>
+                      {metrics.cogsCoveragePercent < 99.5 && (
+                        <tr>
+                          <td colSpan={2} className="pb-3">
+                            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-900">
+                              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                              <span>
+                                Cost data covers {metrics.cogsCoveragePercent.toFixed(1)}% of sales in this period.{' '}
+                                {formatCurrency(metrics.cogsUnknownRevenue)} of revenue has no recorded purchase
+                                rate, so profit below is overstated for those items. Add purchase rates to
+                                affected products for an exact figure.
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       <tr className="border-t-2 border-slate-900 font-black text-base">
                         <td className="py-4 text-slate-900 flex items-center">
                           <span>ESTIMATED NET GROSS PROFIT</span>
@@ -725,7 +858,11 @@ export default function ReportsPage() {
                       <FormulaTooltip title="GSTR-3B Liability" formula="Math.max(0, Output GST - Input ITC)" note="Net tax payable to government cash ledger." />
                     </div>
                     <div className="text-2xl font-black font-mono text-indigo-600 mt-1">{formatCurrency(metrics.netGstPayable)}</div>
-                    <div className="text-xs text-slate-500 font-semibold mt-1">Output GST − Input ITC</div>
+                    <div className="text-xs text-slate-500 font-semibold mt-1">
+                      {metrics.inputTaxCreditCarried > 0
+                        ? `${formatCurrency(metrics.inputTaxCreditCarried)} input credit carried forward`
+                        : 'Output GST − Input ITC'}
+                    </div>
                   </div>
                 </div>
 

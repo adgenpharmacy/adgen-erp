@@ -1,12 +1,20 @@
 import { Router, Response } from 'express';
 import { exec } from 'child_process';
 import path from 'path';
-import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 
 const router = Router();
 
+// Self-update shells out to git, so it is only meaningful for the on-premise desktop install.
+// It stays disabled unless explicitly opted in, and is never available on a hosted deployment.
+const selfUpdateEnabled =
+  process.env.ALLOW_SELF_UPDATE === 'true' && process.env.NODE_ENV !== 'production';
+
 // GET /api/system/check-update — Check if new commits exist on GitHub repository
-router.get('/check-update', async (req, res: Response) => {
+router.get('/check-update', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!selfUpdateEnabled) {
+    return res.json({ hasUpdate: false, updatesDisabled: true });
+  }
   try {
     // 1. Get current local commit hash
     exec('git rev-parse HEAD', { cwd: path.join(__dirname, '../../..') }, async (err, stdout) => {
@@ -49,8 +57,11 @@ router.get('/check-update', async (req, res: Response) => {
 });
 
 // POST /api/system/apply-update — Trigger git pull origin main to auto-update
-router.post('/apply-update', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/apply-update', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!selfUpdateEnabled) {
+      return res.status(403).json({ error: 'Self-update is disabled on this deployment.' });
+    }
     const projectRoot = path.join(__dirname, '../../..');
     exec('git pull origin main', { cwd: projectRoot }, (err, stdout, stderr) => {
       if (err) {
@@ -67,7 +78,7 @@ router.post('/apply-update', authenticate, async (req: AuthenticatedRequest, res
 });
 
 // GET /api/system/export-data — Secure Full Database JSON Export
-router.get('/export-data', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/export-data', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { prisma } = await import('../config/prisma');
 

@@ -17,6 +17,23 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       },
     });
 
+    // A ledger row keeps the amount that was originally owed. Once a payment is recorded against
+    // the linked bill that row no longer reflects reality, so expose the live outstanding balance
+    // alongside it — the synthetic rows below already reported outstanding, and the two disagreed.
+    const entriesWithOutstanding = entries.map((e) => {
+      let outstandingAmount = e.amount;
+
+      if (e.salesBill) {
+        outstandingAmount = Math.max(0, e.salesBill.grandTotal - (e.salesBill.amountPaid || 0));
+      } else if (e.purchaseBill) {
+        outstandingAmount = e.purchaseBill.isPaid ? 0 : e.amount;
+      } else if (e.isSettled) {
+        outstandingAmount = 0;
+      }
+
+      return { ...e, outstandingAmount };
+    });
+
     const existingSalesBillIds = new Set(entries.map(e => e.salesBillId).filter(Boolean));
     const existingPurchaseBillIds = new Set(entries.map(e => e.purchaseBillId).filter(Boolean));
 
@@ -32,7 +49,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
     });
 
     const syntheticSalesEntries = creditSalesBills
-      .filter(b => !existingSalesBillIds.has(b.id))
+      // Only stand in for bills that still owe something. A fully-paid credit sale was previously
+      // still listed as an "Unpaid Credit Sale" while simultaneously being flagged Settled.
+      .filter(b => !existingSalesBillIds.has(b.id) && b.grandTotal - (b.amountPaid || 0) > 0.01)
       .map(b => ({
         id: `synth-sale-${b.id}`,
         partyType: 'CUSTOMER',
@@ -40,8 +59,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         partyId: null,
         transactionType: 'CREDIT',
         amount: b.grandTotal - b.amountPaid,
+        outstandingAmount: Math.max(0, b.grandTotal - b.amountPaid),
         description: `Unpaid Credit Sale Invoice #${b.invoiceNumber} (${b.customerName || b.customer?.name || 'Walk-in'})`,
-        isSettled: b.isSettled,
+        isSettled: false,
         salesBillId: b.id,
         purchaseBillId: null,
         createdAt: b.createdAt,
@@ -65,6 +85,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         partyId: b.partyId,
         transactionType: 'DEBIT',
         amount: b.grandTotal - (b.amountPaid || 0),
+        outstandingAmount: Math.max(0, b.grandTotal - (b.amountPaid || 0)),
         description: `Unpaid Supplier Purchase Bill #${b.invoiceNumber} (${b.party?.name || 'Supplier'})`,
         isSettled: false,
         salesBillId: null,
@@ -75,7 +96,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         party: b.party,
       }));
 
-    const allEntries = [...entries, ...syntheticSalesEntries, ...syntheticPurchaseEntries].sort((a: any, b: any) => {
+    const allEntries = [...entriesWithOutstanding, ...syntheticSalesEntries, ...syntheticPurchaseEntries].sort((a: any, b: any) => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 

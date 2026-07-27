@@ -4,6 +4,9 @@ Follow these simple steps to deploy your **AdGen Pharmacy ERP** for production w
 
 ---
 
+> ⚠️ **Never paste real database URLs, passwords, or API keys into this file.** It is tracked in git.
+> Keep secrets in `backend/.env` (git-ignored) and in your host's environment-variable settings.
+
 ## 📋 Prerequisites
 1. **GitHub Account**: Push this workspace repository to your GitHub account (`git push`).
 2. **Vercel Account**: Sign up at [vercel.com](https://vercel.com) (Free Hobby Plan).
@@ -15,9 +18,14 @@ Follow these simple steps to deploy your **AdGen Pharmacy ERP** for production w
 
 1. Go to [vercel.com/new](https://vercel.com/new) and import your GitHub repository.
 2. Select the **`backend`** directory as the **Root Directory**.
-3. Under **Environment Variables**, add the following 2 variables from your `backend/.env`:
-   - `DATABASE_URL`: `postgresql://postgres.qwxlmtvaupfkfixojeqb:Shre@2608adg@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`
-   - `DIRECT_URL`: `postgresql://postgres.qwxlmtvaupfkfixojeqb:Shre@2608adg@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`
+3. Under **Environment Variables**, add the following variables. Copy the real values from your
+   local `backend/.env` — **never commit them to git**:
+   - `DATABASE_URL`: transaction-mode pooler URL (port `6543`, `?pgbouncer=true`)
+   - `DIRECT_URL`: session-mode URL (port `5432`), used for migrations
+   - `JWT_SECRET`: a random string of at least 32 characters. Generate with
+     `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+     The API refuses to boot in production without it.
+   - `CORS_ORIGINS`: your frontend's production URL, e.g. `https://your-app.vercel.app`
 4. Click **Deploy**.
 5. Once deployed, copy your backend URL (e.g. `https://pharmacy-erp-backend.vercel.app`).
 

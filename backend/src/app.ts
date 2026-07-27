@@ -24,8 +24,33 @@ const PORT = process.env.PORT || 5000;
 
 // Security & Middleware
 app.use(helmet());
-app.use(cors({ origin: '*' }));
-app.use(express.json());
+
+// Restrict browser access to known origins. Set CORS_ORIGINS (comma-separated) in production.
+const configuredOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser clients (curl, health checks) which send no Origin header.
+      if (!origin) return callback(null, true);
+
+      if (configuredOrigins.includes(origin)) return callback(null, true);
+
+      // Outside production, permit local development hosts by default.
+      if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Origin ${origin} is not allowed by CORS policy`));
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 app.use(requestLogger);
 

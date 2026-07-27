@@ -116,7 +116,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 });
 
 // PUT /api/inventory/adjust — Manual Stock Adjustment & Reconciliation
-router.put('/adjust', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/adjust', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { batchId, productId, newQuantity, adjustmentType, reason } = req.body;
 
@@ -170,7 +170,7 @@ router.put('/adjust', authenticate, async (req: AuthenticatedRequest, res: Respo
       });
 
       console.log(
-        `[Anshu Engine] Stock Adjustment on Batch ${targetBatch.batchNumber} (${targetBatch.product?.name}): Old=${targetBatch.quantity} -> New=${finalQty} (${reason || 'Manual Correction'}) by User ${req.user?.name || req.user?.id}`
+        `[ERP] Stock Adjustment on Batch ${targetBatch.batchNumber} (${targetBatch.product?.name}): Old=${targetBatch.quantity} -> New=${finalQty} (${reason || 'Manual Correction'}) by User ${req.user?.name || req.user?.id}`
       );
 
       return updated;

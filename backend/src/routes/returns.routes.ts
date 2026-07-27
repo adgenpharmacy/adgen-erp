@@ -48,10 +48,36 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
           include: { items: true },
         });
         if (originalBill) {
+          // Account for everything already returned against this invoice, otherwise the same
+          // line can be returned repeatedly — each time restocking and issuing a fresh credit note.
+          const priorReturns = await tx.salesReturn.findMany({
+            where: { salesBillId },
+            include: { items: true },
+          });
+
+          const alreadyReturned = new Map<string, number>();
+          for (const ret of priorReturns) {
+            for (const ri of ret.items) {
+              alreadyReturned.set(ri.productId, (alreadyReturned.get(ri.productId) || 0) + ri.quantity);
+            }
+          }
+
           for (const retItem of items) {
-            const soldItem = originalBill.items.find((i: any) => i.productId === retItem.productId);
-            if (soldItem && parseFloat(retItem.quantity) > soldItem.quantity) {
-              throw new Error(`Return quantity (${retItem.quantity}) cannot exceed original invoice quantity (${soldItem.quantity})`);
+            const soldQty = originalBill.items
+              .filter((i: any) => i.productId === retItem.productId)
+              .reduce((sum: number, i: any) => sum + i.quantity, 0);
+
+            if (soldQty === 0) {
+              throw new Error(`Product ${retItem.productId} was not sold on invoice ${originalBill.invoiceNumber}`);
+            }
+
+            const prior = alreadyReturned.get(retItem.productId) || 0;
+            const remaining = soldQty - prior;
+
+            if (parseFloat(retItem.quantity) > remaining) {
+              throw new Error(
+                `Return quantity (${retItem.quantity}) exceeds the returnable balance (${remaining}) for this item on invoice ${originalBill.invoiceNumber}. Sold: ${soldQty}, already returned: ${prior}.`
+              );
             }
           }
         }
@@ -133,7 +159,7 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
       return record;
     });
 
-    console.log(`[Anshu Engine] Sales Return created: ${returnNumber} (₹${totalReturnAmount})`);
+    console.log(`[ERP] Sales Return created: ${returnNumber} (₹${totalReturnAmount})`);
     res.status(201).json(salesReturn);
   } catch (error) {
     console.error('Error creating sales return:', error);
@@ -275,7 +301,7 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
       return record;
     });
 
-    console.log(`[Anshu Engine] Purchase Return created: ${returnNumber} (₹${totalReturnAmount})`);
+    console.log(`[ERP] Purchase Return created: ${returnNumber} (₹${totalReturnAmount})`);
     res.status(201).json(purchaseReturn);
   } catch (error) {
     console.error('Error creating purchase return:', error);
