@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
+import { useErpData } from '@/context/ErpDataContext';
 import { Button, Card, CardHeader, CardBody, Field, Input, Select, Modal, useToast } from '@/components/ui';
 import { formatCurrency, cn } from '@/lib/utils';
 import type { Party, Product, PurchaseDetail, PurchaseDetailItem } from '@/types';
@@ -67,6 +68,7 @@ const EMPTY_ITEM: PurchaseLineDraft = {
 
 function NewPurchasePageContent() {
   const toast = useToast();
+  const { refreshData } = useErpData();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
@@ -184,6 +186,12 @@ function NewPurchasePageContent() {
       api.get('/purchases/next-number').then((r) => setInvoiceNumber(r.data.nextInvoiceNumber)).catch(() => setInvoiceNumber('PUR-001001'));
     }
   }, [editId]);
+
+  // Warm the catalogue cache on open so the first keystroke filters in-memory rather than
+  // waiting on a full product fetch.
+  useEffect(() => {
+    void getCachedProducts('');
+  }, []);
 
   // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE
   useEffect(() => {
@@ -362,6 +370,7 @@ function NewPurchasePageContent() {
         toast.success('Purchase entry saved');
       }
       invalidateCatalogCache();
+      await refreshData();
       setItems([]);
       router.push('/purchases');
     } catch (err) {

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Portal from './Portal';
 
 const WIDTHS = {
   sm: 'max-w-md',
@@ -47,11 +48,16 @@ export default function Modal({
     };
   }, [open, onClose]);
 
+  // Rendered into <body>. A `position: fixed` element resolves against the nearest ancestor
+  // that has a transform/filter/will-change — and a page-level enter animation is enough to
+  // make one. That made dialogs centre on the whole page instead of the viewport, so on a
+  // scrolled screen they opened partly (or entirely) out of view.
   return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="backdrop"
+    <Portal>
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            key="backdrop"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -98,7 +104,8 @@ export default function Modal({
             ) : null}
           </motion.div>
         </motion.div>
-      ) : null}
-    </AnimatePresence>
+        ) : null}
+      </AnimatePresence>
+    </Portal>
   );
 }

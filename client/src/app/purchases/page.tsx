@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
 import PurchasePrintModal from '@/components/invoice/PurchasePrintModal';
@@ -22,7 +22,7 @@ import {
   Clock,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
 import {
   Button,
@@ -56,10 +56,12 @@ const STATUS_TABS = [
   { id: 'CREDIT', label: 'Pending Credit' },
 ];
 
-export default function PurchasesPage() {
+function PurchasesPageContent() {
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const billIdFromUrl = searchParams.get('bill');
   const { purchases: cachedPurchases, loading, refreshData } = useErpData();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [isMounted, setIsMounted] = useState(false);
@@ -74,6 +76,14 @@ export default function PurchasesPage() {
     setIsMounted(true);
     setPurchases(cachedPurchases);
   }, [cachedPurchases]);
+
+  // Deep link from an inventory batch: /purchases?bill=<id> opens that bill's details
+  // directly, so the operator lands on the supplier invoice the stock came from.
+  useEffect(() => {
+    if (!billIdFromUrl || purchases.length === 0) return;
+    const target = purchases.find((p) => p.id === billIdFromUrl);
+    if (target) setInspectBill(target);
+  }, [billIdFromUrl, purchases]);
 
   // Helper for Title Case
   const toTitleCase = (str: string) => {
@@ -352,7 +362,10 @@ export default function PurchasesPage() {
       {/* INSPECT PURCHASE DETAILS MODAL */}
       <Modal
         open={!!inspectBill}
-        onClose={() => setInspectBill(null)}
+        onClose={() => {
+          setInspectBill(null);
+          if (billIdFromUrl) router.replace('/purchases');
+        }}
         title={inspectBill ? `Purchase Invoice #${inspectBill.invoiceNumber || inspectBill.id.slice(0, 8)}` : ''}
         subtitle={
           inspectBill
@@ -566,5 +579,19 @@ export default function PurchasesPage() {
         <PurchasePrintModal purchase={selectedPurchaseForPrint} onClose={() => setSelectedPurchaseForPrint(null)} />
       )}
     </PageMain>
+  );
+}
+
+export default function PurchasesPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageMain>
+          <p className="p-8 text-center text-sm text-fg-muted">Loading purchases…</p>
+        </PageMain>
+      }
+    >
+      <PurchasesPageContent />
+    </Suspense>
   );
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
 import { formatDate, formatPackQuantity, formatCurrency, cn } from '@/lib/utils';
+import Link from 'next/link';
 import {
   Search,
   RefreshCw,
@@ -13,6 +14,8 @@ import {
   Boxes,
   IndianRupee,
   Clock,
+  FileText,
+  ExternalLink,
 } from 'lucide-react';
 
 import { api } from '@/lib/api-client';
@@ -511,6 +514,20 @@ export default function InventoryPage() {
                           </span>
                           <span className="block text-xs text-fg-muted">MRP {formatCurrency(b.mrp)}</span>
                         </div>
+                        {/* Every batch is created by a purchase bill, so jump straight to the
+                            bill that brought this stock in — useful for checking a rate or expiry
+                            against what the supplier actually invoiced. */}
+                        {b.purchaseBillId ? (
+                          <Link
+                            href={`/purchases?bill=${b.purchaseBillId}`}
+                            title="Open the purchase bill this batch came from"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-xs font-semibold text-fg transition-colors hover:bg-hover"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-info" aria-hidden />
+                            Bill
+                            <ExternalLink className="h-3 w-3 text-fg-subtle" aria-hidden />
+                          </Link>
+                        ) : null}
                         <Button
                           size="sm"
                           variant="outline"

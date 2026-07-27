@@ -11,6 +11,8 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
+import { useErpData } from '@/context/ErpDataContext';
+import { invalidateCatalogCache } from '@/lib/catalog-cache';
 import type { ReturnRecord, Product } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import {
@@ -64,6 +66,7 @@ const EMPTY_PR_ITEM: PurchaseReturnLineDraft = {
 
 export default function ReturnsPage() {
   const toast = useToast();
+  const { refreshData } = useErpData();
   const [activeTab, setActiveTab] = useState<'SALES' | 'PURCHASE'>('SALES');
   const [salesReturns, setSalesReturns] = useState<ReturnRecord[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<ReturnRecord[]>([]);
@@ -143,6 +146,8 @@ export default function ReturnsPage() {
         items: itemsToSubmit,
       });
 
+      invalidateCatalogCache();
+      await refreshData();
       toast.success('Credit note created', 'Inventory has been updated.');
       setShowSalesReturnModal(false);
       setSrItems([{ ...EMPTY_SR_ITEM }]);
@@ -187,6 +192,8 @@ export default function ReturnsPage() {
         items: itemsToSubmit,
       });
 
+      invalidateCatalogCache();
+      await refreshData();
       toast.success('Debit note created', 'Stock has been deducted.');
       setShowPurchaseReturnModal(false);
       setPrItems([{ ...EMPTY_PR_ITEM }]);

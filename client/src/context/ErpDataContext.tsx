@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { useAuth } from './AuthContext';
+import { invalidateCatalogCache } from '@/lib/catalog-cache';
 import type {
   Product,
   InventoryItem,
@@ -101,6 +102,12 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       return;
     }
     try {
+      // There are two caches: this global one, and the counter's catalogue/inventory cache in
+      // lib/catalog-cache. A refresh means "the data changed", so both must drop together —
+      // otherwise adding a medicine refreshed this list while the billing screen kept serving
+      // a stale catalogue for up to its TTL, and the new medicine was unsearchable.
+      invalidateCatalogCache();
+
       if (products.length === 0) {
         setLoading(true);
       }

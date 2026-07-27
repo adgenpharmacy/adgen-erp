@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
+import { useErpData } from '@/context/ErpDataContext';
 import { Button, Card, CardHeader, CardBody, Field, Input, Modal, useToast } from '@/components/ui';
 import { formatCurrency, cn } from '@/lib/utils';
 import type { InventoryItem, InventoryBatch, Sale, SaleDetail, SaleDetailItem } from '@/types';
@@ -77,6 +78,7 @@ const EMPTY_ITEM: SaleLineDraft = {
 
 function NewSalePageContent() {
   const toast = useToast();
+  const { refreshData } = useErpData();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
@@ -204,6 +206,13 @@ function NewSalePageContent() {
       }).catch(console.error);
     }
   }, [editId]);
+
+  // Warm the medicine cache the moment the counter opens. Without this the FIRST keystroke
+  // paid for a full inventory fetch (~3k rows) before showing anything — the operator is
+  // typing the customer's name during this, so the wait is free.
+  useEffect(() => {
+    void getCachedInventory('');
+  }, []);
 
   // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE.
   // Must hit /inventory, not /products: only /inventory returns live `systemStock` and every
@@ -413,12 +422,15 @@ function NewSalePageContent() {
 
       if (editId) {
         await api.put(`/sales/${editId}`, payload);
+        invalidateCatalogCache();
+        await refreshData();
         toast.success('Sales invoice updated');
         setItems([]);
         router.push('/sales');
       } else {
         const res = await api.post('/sales', payload);
         invalidateCatalogCache();
+        await refreshData();
         setItems([]);
         setCustomerName('');
         setCustomerPhone('');

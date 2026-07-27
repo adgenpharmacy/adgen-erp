@@ -129,15 +129,19 @@
 }
 
 /* ── Page enter ─────────────────────────────── */
-/* A single cheap fade+lift on the page body. Deliberately CSS rather than Framer Motion:
-   staggering hundreds of table rows costs far more than the effect is worth. */
+/* A single cheap fade on the page body. Deliberately CSS rather than Framer Motion:
+   staggering hundreds of table rows costs far more than the effect is worth.
+
+   Deliberately opacity-only — NO transform. A transform (even an animated one settling on
+   `none`) turns the element into a containing block for `position: fixed` descendants, which
+   made every dialog inside a page centre on the page instead of the viewport. */
 @keyframes page-enter {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .page-enter {
-  animation: page-enter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: page-enter 0.2s ease-out both;
 }
 
 /* ── Urgency Border Stripes ─────────────────── */
