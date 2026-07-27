@@ -12,9 +12,14 @@ const getJwtSecret = (): string => {
   }
 
   // Never allow an unset/weak secret to silently sign real tokens.
+  //
+  // Note this fires on first use, not at boot: on serverless the app is imported per-request,
+  // so there is no startup phase to fail during. In practice that means the deployment looks
+  // healthy until someone tries to sign in.
   if (process.env.NODE_ENV === 'production') {
     throw new Error(
-      'JWT_SECRET is missing or too short (min 32 chars). Refusing to start in production with an insecure signing key.'
+      'Server auth is not configured: JWT_SECRET is missing or shorter than 32 characters. ' +
+      'Set it in the backend deployment environment and redeploy.'
     );
   }
 

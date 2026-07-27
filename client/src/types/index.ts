@@ -337,11 +337,30 @@ export interface ApiErrorBody {
 }
 
 /**
+ * True when the request never produced a readable response — the server was unreachable,
+ * or the browser blocked the response (CORS). Axios reports both with no `response`.
+ *
+ * Worth distinguishing: a blocked request previously surfaced as "check your credentials",
+ * which sends people hunting for a wrong password when the real cause is configuration.
+ */
+export function isNetworkError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const maybe = err as { response?: unknown; request?: unknown; code?: string };
+  return maybe.response === undefined && (maybe.request !== undefined || maybe.code === 'ERR_NETWORK');
+}
+
+/** Operator-facing explanation for an unreachable/blocked API. */
+export const NETWORK_ERROR_MESSAGE =
+  'Could not reach the server. Check your internet connection — if this persists, the API address or its allowed origins (CORS) may be misconfigured.';
+
+/**
  * Narrow an unknown catch value to the backend's error message.
  * Replaces `catch (err: any) { err.response?.data?.error }`, which silently
  * returned undefined whenever the failure was a network error rather than a 4xx/5xx.
  */
 export function getApiErrorMessage(err: unknown, fallback?: string): string | undefined {
+  if (isNetworkError(err)) return NETWORK_ERROR_MESSAGE;
+
   if (typeof err === 'object' && err !== null) {
     const maybe = err as { response?: { data?: ApiErrorBody }; message?: string };
     const serverMessage = maybe.response?.data?.error;

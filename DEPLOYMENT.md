@@ -24,7 +24,10 @@ Follow these simple steps to deploy your **AdGen Pharmacy ERP** for production w
    - `DIRECT_URL`: session-mode URL (port `5432`), used for migrations
    - `JWT_SECRET`: a random string of at least 32 characters. Generate with
      `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
-     The API refuses to boot in production without it.
+     Use a value that is **not** your local development secret.
+     > On serverless there is no boot phase, so a missing secret does not fail the
+     > deploy — it fails the first **sign-in** with a 500. A deployment can look
+     > healthy and still be unusable, so verify by actually logging in.
    - `CORS_ORIGINS`: your frontend's exact production origin — `https://adgenerp.vercel.app`.
      Without this the API rejects every browser request in production.
 4. Click **Deploy**.

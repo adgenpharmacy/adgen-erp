@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
+import { getApiErrorMessage } from '@/types';
 
 interface User {
   id?: string;
@@ -91,8 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       router.push(destination);
     } catch (err: unknown) {
-      const errorMsg = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
-      throw new Error(errorMsg || 'Login failed. Please check credentials.');
+      // A blocked or unreachable request is not a credentials problem — saying so sends the
+      // operator hunting for a wrong password when the API address or CORS is misconfigured.
+      throw new Error(getApiErrorMessage(err, 'Login failed. Please check credentials.'));
     }
   };
 
@@ -101,8 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.post('/users/register', { name, email, password });
       return res.data.message || 'Registration submitted! Awaiting owner approval.';
     } catch (err: unknown) {
-      const errorMsg = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
-      throw new Error(errorMsg || 'Registration failed.');
+      throw new Error(getApiErrorMessage(err, 'Registration failed.'));
     }
   };
 
