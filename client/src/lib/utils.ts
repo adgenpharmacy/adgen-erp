@@ -85,6 +85,29 @@ export function numberToWords(num: number): string {
  * reaching for the slash. Accepts "0727", "07/27", "7/27", "72027" and returns "07/27".
  * Anything not yet recognisable is returned as typed so the field stays editable mid-entry.
  */
+/**
+ * Renders a stored date as the MM/YY the expiry field expects, or '' when it cannot.
+ *
+ * `new Date('nonsense').toLocaleDateString()` returns the literal string "Invalid Date",
+ * which used to be written straight into the expiry input when an existing bill was opened
+ * for editing. It carries no slash, so it slipped through the submit mapping untouched and
+ * reached Prisma as `new Date("Invalid Date")`, failing the whole save.
+ */
+export function toExpiryMMYY(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' });
+}
+
+/** True when the text is a complete MM/YY with a real month. */
+export function isCompleteExpiry(raw: string): boolean {
+  const m = /^(\d{2})\/(\d{2})$/.exec((raw || '').trim());
+  if (!m) return false;
+  const month = parseInt(m[1], 10);
+  return month >= 1 && month <= 12;
+}
+
 export function normalizeExpiryInput(raw: string): string {
   const digits = (raw || '').replace(/\D/g, '');
   if (digits.length === 0) return '';
@@ -92,9 +115,14 @@ export function normalizeExpiryInput(raw: string): string {
   // 1-2 digits: still typing the month.
   if (digits.length <= 2) return digits;
 
-  // 3 digits: single-digit month + 2-digit year, e.g. "727" -> 07/27
+  // 3 digits is ambiguous: "727" means July 2027, but "122" is someone halfway through
+  // typing 12/2x. Only treat the first digit as a whole month when it cannot begin a
+  // two-digit month — that is, 2..9. Leading 0 or 1 keeps both digits as the month, so
+  // October, November and December stay reachable. Assuming a single digit here silently
+  // rewrote 12/25 to 01/25 and saved the batch under the wrong expiry.
   if (digits.length === 3) {
-    return `0${digits[0]}/${digits.slice(1)}`;
+    if (digits[0] >= '2') return `0${digits[0]}/${digits.slice(1)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2)}`;
   }
 
   // 4 digits: MMYY

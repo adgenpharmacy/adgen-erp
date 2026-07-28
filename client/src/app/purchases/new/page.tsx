@@ -20,7 +20,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
 import { useErpData } from '@/context/ErpDataContext';
 import { Button, Card, CardHeader, CardBody, Field, Input, Select, Modal, useToast } from '@/components/ui';
-import { formatCurrency, cn, normalizeExpiryInput } from '@/lib/utils';
+import { formatCurrency, cn, normalizeExpiryInput, toExpiryMMYY, isCompleteExpiry } from '@/lib/utils';
 import type { Party, Product, PurchaseDetail, PurchaseDetailItem } from '@/types';
 import { getApiErrorMessage } from '@/types';
 
@@ -169,7 +169,7 @@ function NewPurchasePageContent() {
               productId: i.productId,
               productName: i.product?.name || 'Medicine Item',
               batchNumber: i.batchNumber || '',
-              expiryDate: i.expiryDate ? new Date(i.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
+              expiryDate: toExpiryMMYY(i.expiryDate),
               quantity: i.quantity || 1,
               freeQuantity: i.freeQuantity || 0,
               mrp: i.mrp || 0,
@@ -237,7 +237,7 @@ function NewPurchasePageContent() {
       productId: prod.id,
       productName: prod.name,
       batchNumber: latestBatch?.batchNumber || '',
-      expiryDate: latestBatch?.expiryDate ? new Date(latestBatch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '',
+      expiryDate: toExpiryMMYY(latestBatch?.expiryDate),
       mrp: defaultMrp,
       purchaseRate: defaultRate,
       gstPercent: prod.gstPercent !== undefined && prod.gstPercent !== null ? prod.gstPercent : 12,
@@ -337,6 +337,17 @@ function NewPurchasePageContent() {
       return;
     }
 
+    // Catch a half-typed or unparseable expiry here. Left to the server it arrives as an
+    // unusable date and comes back as a raw Prisma dump the counter staff cannot act on.
+    const badExpiry = validItems.find((i) => !isCompleteExpiry(i.expiryDate));
+    if (badExpiry) {
+      toast.error(
+        'Check the expiry date',
+        `"${badExpiry.productName}" needs an expiry as MM/YY, for example 07/27.`
+      );
+      return;
+    }
+
     submitLock.current = true;
     try {
       setIsSubmitting(true);
@@ -351,17 +362,12 @@ function NewPurchasePageContent() {
         isRoundOff,
         roundOffAmount: grandTotal - rawGrandTotal,
         items: validItems.map((i) => {
-          let formattedExpiry = i.expiryDate;
-          if (i.expiryDate && i.expiryDate.includes('/')) {
-            const parts = i.expiryDate.split('/');
-            const month = parts[0].padStart(2, '0');
-            let year = parts[1] || '';
-            if (year.length === 2) year = `20${year}`;
-            formattedExpiry = `${year}-${month}-01`;
-          }
+          // Guaranteed complete by the check above, so this always yields a real ISO date
+          // rather than passing the raw text through for the server to choke on.
+          const [mm, yy] = i.expiryDate.split('/');
           return {
             ...i,
-            expiryDate: formattedExpiry,
+            expiryDate: `20${yy}-${mm.padStart(2, '0')}-01`,
           };
         }),
       };

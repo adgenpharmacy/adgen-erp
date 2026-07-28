@@ -5,6 +5,22 @@ import { validateCreatePurchase } from '../middlewares/validation.middleware';
 
 const router = Router();
 
+/**
+ * Parses a batch expiry, refusing anything unusable.
+ *
+ * `new Date(...)` happily returns an Invalid Date for junk input, which Prisma then rejects
+ * with a raw driver dump — the counter saw the whole `purchaseBill.create` payload on screen
+ * and no indication of which line was at fault. A stock batch with no valid expiry must never
+ * reach the database anyway: FEFO ordering depends on it.
+ */
+function parseExpiry(value: unknown, label: string): Date {
+  const parsed = new Date(String(value ?? '').trim());
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Expiry date for "${label}" is missing or invalid. Enter it as MM/YY.`);
+  }
+  return parsed;
+}
+
 // GET /api/purchases — Fetch all purchase bills
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -73,7 +89,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         billItemsToCreate.push({
           productId,
           batchNumber,
-          expiryDate: new Date(expiryDate),
+          expiryDate: parseExpiry(expiryDate, prod.name),
           quantity: parseFloat(quantity),
           freeQuantity: parseFloat(freeQuantity || 0),
           purchaseRate: parseFloat(purchaseRate),
@@ -160,7 +176,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
               quantity: { increment: totalContentUnits },
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
-              expiryDate: new Date(expiryDate),
+              expiryDate: parseExpiry(expiryDate, prod?.name ?? batchNumber),
             },
           });
         } else {
@@ -168,7 +184,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
             data: {
               productId,
               batchNumber,
-              expiryDate: new Date(expiryDate),
+              expiryDate: parseExpiry(expiryDate, prod?.name ?? batchNumber),
               quantity: totalContentUnits,
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
@@ -273,7 +289,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             purchaseBillId: id,
             productId,
             batchNumber: batchNumber || 'DEF-001',
-            expiryDate: expiryDate ? new Date(expiryDate) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            expiryDate: expiryDate ? parseExpiry(expiryDate, prodForTax?.name ?? batchNumber) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
             quantity: parseFloat(quantity) || 1,
             freeQuantity: parseFloat(freeQuantity) || 0,
             purchaseRate: parseFloat(purchaseRate) || 0,
@@ -303,7 +319,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
                 quantity: updatedBatchQty,
                 mrp: parseFloat(mrp) || matchBatch.mrp,
                 purchaseRate: parseFloat(purchaseRate) || matchBatch.purchaseRate,
-                expiryDate: expiryDate ? new Date(expiryDate) : matchBatch.expiryDate,
+                expiryDate: expiryDate ? parseExpiry(expiryDate, prod?.name ?? batchNumber) : matchBatch.expiryDate,
               },
             });
           } else {
@@ -311,7 +327,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
               data: {
                 productId,
                 batchNumber: batchNumber || 'DEF-001',
-                expiryDate: expiryDate ? new Date(expiryDate) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                expiryDate: expiryDate ? parseExpiry(expiryDate, prod?.name ?? batchNumber) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
                 quantity: newQty,
                 mrp: parseFloat(mrp) || 0,
                 purchaseRate: parseFloat(purchaseRate) || 0,
