@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Building2, Save, ShieldAlert, Users, Database, ExternalLink } from 'lucide-react';
+import { Building2, Save, ShieldAlert, Users, Database, ExternalLink, History } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
 import { useErpData } from '@/context/ErpDataContext';
@@ -96,10 +96,18 @@ export default function AdminPage() {
         title="Admin"
         subtitle="Details printed on every invoice, GRN and receipt"
         action={
-          <Button type="submit" form="settings-form" loading={saving}>
-            <Save className="h-4 w-4" aria-hidden />
-            Save Settings
-          </Button>
+          <div className="flex items-center gap-2">
+            <Link href="/admin/stock-adjustments">
+              <Button variant="outline">
+                <History className="h-4 w-4" aria-hidden />
+                Stock Adjustments
+              </Button>
+            </Link>
+            <Button type="submit" form="settings-form" loading={saving}>
+              <Save className="h-4 w-4" aria-hidden />
+              Save Settings
+            </Button>
+          </div>
         }
       />
 

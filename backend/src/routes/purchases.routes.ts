@@ -162,10 +162,28 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         const totalPacks = parseFloat(quantity) + parseFloat(freeQuantity || 0);
         const totalContentUnits = totalPacks * packSize;
 
+        /*
+         * Match on expiry as well as batch number.
+         *
+         * Suppliers here are inconsistent about batch numbers — many lines carry the
+         * distributor's name ("ANILA", "MEDIHUB") rather than a real batch code, so the same
+         * label recurs across deliveries with different expiries. Matching on the label alone
+         * merged those into one row and then overwrote its expiry with the newest delivery's,
+         * which both destroys the earlier expiry date and breaks FEFO: stock expiring sooner
+         * becomes invisible and is dispensed last.
+         *
+         * The month is the granularity that matters — a batch is stamped MM/YY — and it is the
+         * same key rebuild-inventory groups by, so stock and the bills cannot drift apart.
+         */
+        const parsedExpiry = parseExpiry(expiryDate, prod?.name ?? batchNumber);
+        const monthStart = new Date(Date.UTC(parsedExpiry.getUTCFullYear(), parsedExpiry.getUTCMonth(), 1));
+        const nextMonth = new Date(Date.UTC(parsedExpiry.getUTCFullYear(), parsedExpiry.getUTCMonth() + 1, 1));
+
         const existingBatch = await tx.inventoryBatch.findFirst({
           where: {
             productId,
             batchNumber,
+            expiryDate: { gte: monthStart, lt: nextMonth },
           },
         });
 
@@ -176,7 +194,6 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
               quantity: { increment: totalContentUnits },
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
-              expiryDate: parseExpiry(expiryDate, prod?.name ?? batchNumber),
             },
           });
         } else {
@@ -305,7 +322,17 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           const totalPacks = (parseFloat(quantity) || 1) + (parseFloat(freeQuantity) || 0);
           const newQty = totalPacks * packSize;
 
-          const matchBatch = existingBatches.find(b => b.productId === productId && b.batchNumber === batchNumber);
+          // Same expiry-aware matching as the create path, so editing a bill cannot merge two
+          // different-expiry batches that were correctly kept apart when it was first saved.
+          const editExpiry = expiryDate ? parseExpiry(expiryDate, prodForTax?.name ?? batchNumber) : null;
+          const sameMonth = (a: Date, b: Date) =>
+            a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth();
+          const matchBatch = existingBatches.find(
+            (b) =>
+              b.productId === productId &&
+              b.batchNumber === batchNumber &&
+              (editExpiry ? sameMonth(b.expiryDate, editExpiry) : true)
+          );
           if (matchBatch) {
             const oldItem = existingBill.items.find(i => i.productId === productId && i.batchNumber === batchNumber);
             const oldPacks = oldItem ? (oldItem.quantity + (oldItem.freeQuantity || 0)) : 0;

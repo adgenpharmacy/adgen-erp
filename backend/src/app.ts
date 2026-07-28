@@ -18,6 +18,7 @@ import reportsRoutes from './routes/reports.routes';
 import usersRoutes from './routes/users.routes';
 import systemRoutes from './routes/system.routes';
 import settingsRoutes from './routes/settings.routes';
+import stockAdjustmentRoutes from './routes/stock-adjustments.routes';
 
 import { requestLogger } from './middlewares/logger.middleware';
 
@@ -104,6 +105,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/stock-adjustments', stockAdjustmentRoutes);
 
 // Welcome & Status
 app.get(['/', '/api'], (req, res) => {

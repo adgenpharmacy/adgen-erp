@@ -73,8 +73,49 @@ model User {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   salesBills   SalesBill[]
+  adjustments  StockAdjustment[]
 
   @@map("users")
+}
+
+/// Why a batch's quantity is not simply purchases minus sales.
+enum AdjustmentSource {
+  /// Someone corrected the shelf by hand in this app.
+  MANUAL
+  /// Carried over from the legacy Firebase app's own manual adjustments.
+  LEGACY_IMPORT
+  /// Written by reconcile-inventory-from-bills, which rebuilds stock from the documents.
+  RECONCILIATION
+  /// Result of a physical stock count.
+  PHYSICAL_COUNT
+}
+
+/// An audit trail for every stock movement that is not a purchase or a sale.
+///
+/// Without this a correction is indistinguishable from a bug: the legacy app overwrote batch
+/// quantities in place, so when its stock stopped agreeing with its own bills there was no
+/// record of who changed what, or whether anyone had. Each row here stores the before and
+/// after, so any adjustment can be explained and reversed.
+model StockAdjustment {
+  id               String           @id @default(uuid())
+  batchId          String
+  productId        String
+  /// Signed: negative removes stock, positive adds it.
+  quantityDelta    Float
+  previousQuantity Float
+  newQuantity      Float
+  reason           String
+  source           AdjustmentSource @default(MANUAL)
+  userId           String?
+  createdAt        DateTime         @default(now())
+
+  batch   InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id])
+  user    User?          @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([productId])
+  @@map("stock_adjustments")
 }
 
 model Product {
@@ -99,6 +140,7 @@ model Product {
   batches             InventoryBatch[]
   purchaseBillItems   PurchaseBillItem[]
   salesBillItems      SalesBillItem[]
+  adjustments         StockAdjustment[]
 
   @@index([name])
   @@map("products")
@@ -153,6 +195,7 @@ model InventoryBatch {
   purchaseBill   PurchaseBill?   @relation(fields: [purchaseBillId], references: [id])
   product        Product         @relation(fields: [productId], references: [id])
   salesBillItems SalesBillItem[]
+  adjustments    StockAdjustment[]
 
   @@index([productId])
   @@index([batchNumber])
