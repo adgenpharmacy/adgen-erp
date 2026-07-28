@@ -170,6 +170,7 @@ async function main() {
   const shortBills: { bill: LegacyBill; dbId: string; missingItems: LegacyItem[]; dbTotal: number }[] = [];
   const renamedLines: { invoice: string; legacyOnly: string[]; dbOnly: string[] }[] = [];
   const wrongPaymentState: { bill: LegacyBill; dbId: string; shouldBe: boolean; was: boolean }[] = [];
+  const staleTotals: { bill: LegacyBill; dbId: string; was: number }[] = [];
 
   for (const [k, group] of Object.entries(legacyGroups)) {
     // Pair heaviest-first so a duplicated invoice number lines its two bills up sensibly.
@@ -195,6 +196,12 @@ async function main() {
       const settled = isSettled(lb);
       if (match.isPaid !== settled) {
         wrongPaymentState.push({ bill: lb, dbId: match.id, shouldBe: settled, was: match.isPaid });
+      }
+
+      // A bill edited in the legacy app after an earlier export leaves our header stale even
+      // though every line still matches. Legacy is the authority on what the supplier billed.
+      if (Math.abs(match.grandTotal - (lb.grandTotal || 0)) > 0.51) {
+        staleTotals.push({ bill: lb, dbId: match.id, was: match.grandTotal });
       }
 
       // Which legacy lines have no counterpart on the stored bill?
@@ -284,6 +291,16 @@ async function main() {
   );
   console.log(`  effect on supplier payables: ${money(owedDelta)}\n`);
 
+  const staleDelta = staleTotals.reduce((s, t) => s + ((t.bill.grandTotal || 0) - t.was), 0);
+  console.log(`--- ${staleTotals.length} BILLS EDITED IN LEGACY SINCE OUR COPY ---`);
+  staleTotals.forEach((t) =>
+    console.log(
+      `  ${(t.bill.invoiceNumber || '?').padEnd(16).slice(0, 16)} ${(t.bill.partyName || '?').padEnd(26).slice(0, 26)}` +
+        `${money(t.was).padStart(11)} -> ${money(t.bill.grandTotal || 0)}`
+    )
+  );
+  console.log(`  net effect on purchases: ${money(staleDelta)}\n`);
+
   console.log('--- RECONCILIATION ---');
   console.log(`  database total       : ${money(dbTotal)}`);
   console.log(`  + absent bills       : ${money(missingTotal)}`);
@@ -327,6 +344,22 @@ async function main() {
     });
   }
   console.log(`Payment state corrected on ${wrongPaymentState.length} bills`);
+
+  // ---- 1c. Re-seat headers edited in the legacy app after our copy was taken -------------
+  for (const t of staleTotals) {
+    await prisma.purchaseBill.update({
+      where: { id: t.dbId },
+      data: {
+        subtotal: Number(t.bill.subtotal) || 0,
+        taxTotal: Number(t.bill.totalGst) || 0,
+        discount: Number(t.bill.schemeDiscountAmount) || 0,
+        grandTotal: Number(t.bill.grandTotal) || 0,
+        roundOffAmount: Number(t.bill.roundOffAmount) || 0,
+        amountPaid: isSettled(t.bill) ? Number(t.bill.grandTotal) || 0 : 0,
+      },
+    });
+  }
+  console.log(`Stale totals re-seated on ${staleTotals.length} bills`);
 
   /**
    * Resolves a legacy line to a catalogue product, creating one from the line's own

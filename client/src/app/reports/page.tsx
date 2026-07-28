@@ -519,13 +519,16 @@ export default function ReportsPage() {
                   />
 
                   <MetricCard
-                    label="Total Purchases Cost"
+                    label="Purchases — Money Spent"
                     value={formatCurrency(metrics.totalPurchasesCost)}
-                    sublabel={`${filteredPurchases.length} purchase invoices`}
+                    sublabel={`${filteredPurchases.length} supplier bills in this period`}
                     tooltip={{
-                      title: 'Total Procurement Cost',
+                      title: 'Purchases — Money Spent',
                       formula: '∑ (PurchaseBill.grandTotal)',
-                      note: 'Sum of all supplier invoice bill amounts received within selected date range.',
+                      note:
+                        'What you paid suppliers over the selected period. This is money going out over time, ' +
+                        'NOT the value of stock on the shelf — see "Stock on Hand" below. Goods bought and ' +
+                        'already sold still count here.',
                     }}
                   />
 
@@ -562,33 +565,54 @@ export default function ReportsPage() {
                   />
                 </div>
 
-                {/* Inventory Stock Valuation Card */}
+                {/* Stock on hand — a level, not a flow. Deliberately headed and worded to
+                    contrast with the "Purchases — Money Spent" card above, because the two
+                    were previously "Total Purchases Cost" and "Total Purchase Cost Value":
+                    near-identical labels on near-identical figures that mean opposite things. */}
                 <div className="bg-surface border border-line p-5 rounded-lg shadow-xs">
                   <div className="flex items-center justify-between border-b border-line-light pb-3 mb-4">
                     <div className="flex items-center gap-2">
                       <Package className="w-5 h-5 text-brand" />
-                      <h3 className="font-extrabold text-fg text-sm">Store Inventory Capital Valuation</h3>
+                      <div>
+                        <h3 className="font-extrabold text-fg text-sm">Stock on Hand — Shelf Value Today</h3>
+                        <p className="text-[11px] text-fg-muted mt-0.5">
+                          What is physically in the store right now. Not affected by the date filter.
+                        </p>
+                      </div>
                     </div>
                     <FormulaTooltip
-                      title="Store Inventory Valuation"
-                      formula="Valuation at MRP: ∑(Qty × MRP) | Valuation at Cost: ∑(Qty × Purchase Rate)"
-                      note="Total capital tied up in active pharmacy medicine batches sitting in stock."
+                      title="Stock on Hand"
+                      formula="At cost: ∑(Qty × PurchaseRate ÷ PackSize) | At MRP: ∑(Qty × MRP ÷ PackSize)"
+                      note="Live valuation of every batch still carrying quantity. A snapshot of this moment, so the date filter does not apply to it."
                     />
                   </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                     <div className="p-3.5 bg-raised border border-line rounded-xl">
-                      <span className="text-fg-subtle font-extrabold uppercase text-[10px]">Total MRP Stock Value</span>
-                      <div className="text-lg font-black font-mono text-fg mt-1">{formatCurrency(metrics.inventoryMrpValue)}</div>
+                      <span className="text-fg-subtle font-extrabold uppercase text-[10px]">Stock at Cost</span>
+                      <div className="text-lg font-black font-mono text-accent mt-1">{formatCurrency(metrics.inventoryCostValue)}</div>
+                      <span className="text-[10px] text-fg-subtle block mt-0.5">Capital tied up on the shelf</span>
                     </div>
                     <div className="p-3.5 bg-raised border border-line rounded-xl">
-                      <span className="text-fg-subtle font-extrabold uppercase text-[10px]">Total Purchase Cost Value</span>
-                      <div className="text-lg font-black font-mono text-accent mt-1">{formatCurrency(metrics.inventoryCostValue)}</div>
+                      <span className="text-fg-subtle font-extrabold uppercase text-[10px]">Stock at MRP</span>
+                      <div className="text-lg font-black font-mono text-fg mt-1">{formatCurrency(metrics.inventoryMrpValue)}</div>
+                      <span className="text-[10px] text-fg-subtle block mt-0.5">Revenue if all of it sells</span>
                     </div>
                     <div className="p-3.5 bg-brand-subtle/70 border border-brand-line/80 rounded-xl">
-                      <span className="text-brand-hover font-extrabold uppercase text-[10px]">Potential Profit in Stock</span>
+                      <span className="text-brand-hover font-extrabold uppercase text-[10px]">Margin Held in Stock</span>
                       <div className="text-lg font-black font-mono text-brand-hover mt-1">{formatCurrency(metrics.potentialInventoryProfit)}</div>
+                      <span className="text-[10px] text-brand-hover/80 block mt-0.5">Stock at MRP − Stock at Cost</span>
                     </div>
                   </div>
+
+                  <p className="mt-4 text-[11px] leading-relaxed text-fg-muted border-t border-line-light pt-3">
+                    <span className="font-bold text-fg">Why is Stock at Cost bigger than Purchases?</span>{' '}
+                    They measure different things. <span className="font-semibold">Purchases</span> is money
+                    spent over the selected period. <span className="font-semibold">Stock at Cost</span> is
+                    what sits on the shelf at this moment — it includes opening stock that was loaded when the
+                    store went live and never came through a supplier bill, while Purchases includes goods that
+                    have since been sold and left the shelf. Neither number contains the other.
+                  </p>
                 </div>
 
                 {/* Collection Method Cards */}

@@ -104,7 +104,9 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0 print:hidden">
           <div className="flex items-center gap-2 font-extrabold text-slate-900 text-sm">
             <Printer className="w-4 h-4 text-emerald-600" />
-            <span>Retail Tax Invoice INV-{activeInvoice.invoiceNumber || activeInvoice.id}</span>
+            {/* No "INV-" literal here: the stored number already carries its own series
+                prefix, so prepending one printed "INV-INV-000008" on the tax invoice. */}
+            <span>Retail Tax Invoice {activeInvoice.invoiceNumber || activeInvoice.id}</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -159,7 +161,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 RETAIL TAX INVOICE
               </span>
               <div className="text-xs font-mono font-extrabold text-slate-900">
-                INV-{activeInvoice.invoiceNumber || activeInvoice.id}
+                {activeInvoice.invoiceNumber || activeInvoice.id}
               </div>
               <div className="text-[11px] text-slate-600 font-medium mt-1">
                 Date: {formatDate(activeInvoice.createdAt)}
@@ -213,8 +215,16 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 const unitPrice = Number(item.unitPrice || 0);
                 const qty = Number(item.quantity) || 0;
                 
-                // Line total = exact Qty x Unit MRP
-                const lineTotal = item.totalAmount !== undefined ? Number(item.totalAmount) : (qty * unitPrice);
+                // Line total = exact Qty x Unit MRP, less any per-item discount.
+                // A stored zero is treated as missing, not as a genuine free line: the original
+                // Firebase import never wrote totalAmount, so 81 legacy rows hold 0 and printed
+                // "Rs 0.00" against real quantities while the bill total read correctly.
+                const stored = Number(item.totalAmount);
+                const discountPercent = Number(item.discountPercent) || 0;
+                const lineTotal =
+                  Number.isFinite(stored) && stored > 0
+                    ? stored
+                    : qty * unitPrice * (1 - discountPercent / 100);
 
                 return (
                   <tr key={idx} className="hover:bg-slate-50">
