@@ -174,8 +174,12 @@
 
 /* ── Print Styles (Guarantees Single-Page / Clean Multi-Page Printing) ── */
 @media print {
+  /* Zero page margin is what suppresses the browser's own header and footer — the document
+     title, the source URL, the page counter and the timestamp. Browsers only draw that
+     furniture inside the page margin, so any non-zero value brings it back. The invoice
+     supplies its own breathing room via `.print-area` padding below. */
   @page {
-    margin: 0.8cm;
+    margin: 0;
     size: auto;
   }
 
@@ -191,6 +195,16 @@
   /* Completely remove background app layout elements from DOM print flow */
   aside, nav, header, main, footer, button, .no-print {
     display: none !important;
+  }
+
+  /* The AppShell root keeps `min-h-screen`. In print, 100vh resolves to a whole sheet, so the
+     wrapper reserved an entire blank first page even though every one of its children was
+     hidden above — which is what pushed the portalled invoice onto page 2 and left the
+     letterhead stranded at the foot of page 1. Collapse any full-height wrapper. */
+  .min-h-screen,
+  .h-screen {
+    min-height: 0 !important;
+    height: auto !important;
   }
 
   /* Reset modal backdrop wrappers so they don't force extra page height.
@@ -239,7 +253,9 @@
     /* Cancel `flex-1` so the sheet grows to its content instead of a scroll viewport. */
     flex: none !important;
     margin: 0 !important;
-    padding: 0 !important;
+    /* Stands in for the page margin, which is zero so the browser omits its header/footer.
+       Applied here rather than on @page so every printed sheet keeps the same gutter. */
+    padding: 10mm 9mm !important;
     background: #ffffff !important;
     overflow: visible !important;
   }

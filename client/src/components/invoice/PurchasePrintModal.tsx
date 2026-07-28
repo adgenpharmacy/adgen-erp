@@ -91,12 +91,8 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
         onClick={(e) => e.stopPropagation()}
         className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col transition-all print:block print:max-h-none print:m-0 print:w-full print:max-w-full print:border-0 print:shadow-none print:rounded-none print:overflow-visible"
       >
-        <style>{`
-          @media print {
-            @page { margin: 0.8cm; size: auto; }
-            html, body { margin: 0; padding: 0; background: #ffffff; }
-          }
-        `}</style>
+        {/* Print rules live in globals.css. A local @page block here used to re-declare a
+            0.8cm margin, which is the gutter browsers draw their own header and footer into. */}
         {/* Top Control Bar (Hidden on print) */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0 print:hidden">
           <div className="flex items-center gap-2 font-extrabold text-slate-900 text-sm">
