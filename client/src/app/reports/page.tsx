@@ -606,12 +606,14 @@ export default function ReportsPage() {
                   </div>
 
                   <p className="mt-4 text-[11px] leading-relaxed text-fg-muted border-t border-line-light pt-3">
-                    <span className="font-bold text-fg">Why is Stock at Cost bigger than Purchases?</span>{' '}
-                    They measure different things. <span className="font-semibold">Purchases</span> is money
-                    spent over the selected period. <span className="font-semibold">Stock at Cost</span> is
-                    what sits on the shelf at this moment — it includes opening stock that was loaded when the
-                    store went live and never came through a supplier bill, while Purchases includes goods that
-                    have since been sold and left the shelf. Neither number contains the other.
+                    <span className="font-bold text-fg">Why doesn&apos;t Stock at Cost match Purchases?</span>{' '}
+                    They measure different things, so they are not meant to agree.{' '}
+                    <span className="font-semibold">Purchases</span> is money paid to suppliers over the selected
+                    period and includes GST. <span className="font-semibold">Stock at Cost</span> is what sits on
+                    the shelf right now, valued excluding GST, so it is lower by the tax you reclaim as input
+                    credit. It is lower again by the cost of everything already sold, and higher by any trade
+                    discount your supplier gave, because a batch is valued at the rate printed on the bill.
+                    Neither number contains the other.
                   </p>
                 </div>
 

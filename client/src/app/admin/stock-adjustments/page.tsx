@@ -109,7 +109,11 @@ export default function StockAdjustmentsPage() {
       total: rows.length,
       added: added.reduce((s, r) => s + r.quantityDelta, 0),
       removed: removed.reduce((s, r) => s + Math.abs(r.quantityDelta), 0),
-      byHand: rows.filter((r) => r.source === 'MANUAL' || r.source === 'PHYSICAL_COUNT').length,
+      // Legacy rows count too: they are the owner's own corrections, just made in the old
+      // app. Excluding them reported "0 done by hand" while ten such rows sat in the table.
+      byHand: rows.filter(
+        (r) => r.source === 'MANUAL' || r.source === 'PHYSICAL_COUNT' || r.source === 'LEGACY_IMPORT'
+      ).length,
     };
   }, [rows]);
 
@@ -250,7 +254,7 @@ export default function StockAdjustmentsPage() {
                     {r.quantityDelta > 0 ? '+' : ''}
                     {r.quantityDelta}
                   </TD>
-                  <TD className="max-w-[22rem]">
+                  <TD className="max-w-88">
                     <StatusChip tone={SOURCE_TONE[r.source]}>{SOURCE_LABEL[r.source]}</StatusChip>
                     <span className="mt-1 block text-xs text-fg-muted">{r.reason}</span>
                   </TD>
