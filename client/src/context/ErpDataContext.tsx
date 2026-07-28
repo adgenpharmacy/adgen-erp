@@ -12,6 +12,7 @@ import type {
   Customer,
   Party,
   LedgerEntry,
+  PharmacyProfile,
 } from '@/types';
 
 interface ErpDataContextType {
@@ -22,6 +23,7 @@ interface ErpDataContextType {
   customers: Customer[];
   parties: Party[];
   ledgers: LedgerEntry[];
+  profile: PharmacyProfile | null;
   loading: boolean;
   refreshData: () => Promise<void>;
 }
@@ -46,6 +48,7 @@ const ErpDataContext = createContext<ErpDataContextType>({
   customers: [],
   parties: [],
   ledgers: [],
+  profile: null,
   loading: true,
   refreshData: async () => {},
 });
@@ -78,6 +81,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
+  const [profile, setProfile] = useState<PharmacyProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -111,7 +115,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       if (products.length === 0) {
         setLoading(true);
       }
-      const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes] = await Promise.all([
+      const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes, profileRes] = await Promise.all([
         api.get<Product[]>('/products').catch(() => ({ data: [] as Product[] })),
         api.get<InventoryItem[]>('/inventory').catch(() => ({ data: [] as InventoryItem[] })),
         api.get<Sale[]>('/sales').catch(() => ({ data: [] as Sale[] })),
@@ -119,6 +123,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         api.get<Customer[]>('/customers').catch(() => ({ data: [] as Customer[] })),
         api.get<Party[]>('/parties').catch(() => ({ data: [] as Party[] })),
         api.get<LedgerEntry[]>('/ledger').catch(() => ({ data: [] as LedgerEntry[] })),
+        api.get<PharmacyProfile | null>('/settings').catch(() => ({ data: null })),
       ]);
 
       const prods = prodRes.data || [];
@@ -136,6 +141,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       setCustomers(cust);
       setParties(part);
       setLedgers(ledg);
+      setProfile(profileRes.data ?? null);
       setLoading(false);
 
       if (typeof window !== 'undefined') {
@@ -186,6 +192,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         customers,
         parties,
         ledgers,
+        profile,
         loading,
         refreshData: fetchAllData,
       }}

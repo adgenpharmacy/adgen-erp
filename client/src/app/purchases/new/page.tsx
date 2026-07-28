@@ -20,7 +20,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
 import { useErpData } from '@/context/ErpDataContext';
 import { Button, Card, CardHeader, CardBody, Field, Input, Select, Modal, useToast } from '@/components/ui';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency, cn, normalizeExpiryInput } from '@/lib/utils';
 import type { Party, Product, PurchaseDetail, PurchaseDetailItem } from '@/types';
 import { getApiErrorMessage } from '@/types';
 
@@ -95,6 +95,8 @@ function NewPurchasePageContent() {
   const [items, setItems] = useState<PurchaseLineDraft[]>([{ ...EMPTY_ITEM }]);
 
   const inputRefs = useRef<{ [key: string]: HTMLInputElement | HTMLSelectElement | null }>({});
+  /** Synchronous submit lock — see the note in the billing screen. */
+  const submitLock = useRef(false);
 
   const isFormDirty = () => {
     return Boolean(partyId || items.some((i) => i.productId || i.batchNumber || i.mrp > 0 || i.purchaseRate > 0));
@@ -324,6 +326,7 @@ function NewPurchasePageContent() {
 
   const handleSavePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLock.current) return;
     if (!partyId) {
       toast.error('Supplier required', 'Choose the supplier this bill came from.');
       return;
@@ -334,6 +337,7 @@ function NewPurchasePageContent() {
       return;
     }
 
+    submitLock.current = true;
     try {
       setIsSubmitting(true);
       const payload = {
@@ -370,10 +374,11 @@ function NewPurchasePageContent() {
         toast.success('Purchase entry saved');
       }
       invalidateCatalogCache();
-      await refreshData();
+      void refreshData();
       setItems([]);
       router.push('/purchases');
     } catch (err) {
+      submitLock.current = false;
       toast.error('Failed to save purchase bill', getApiErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -678,8 +683,12 @@ function NewPurchasePageContent() {
                     ref={(el) => { inputRefs.current[`expiry-${idx}`] = el; }}
                     onKeyDown={(e) => handleKeyDown(e, `expiry-${idx}`, `qty-${idx}`)}
                     value={item.expiryDate}
-                    onChange={(e) => updateItem(idx, 'expiryDate', e.target.value)}
-                    placeholder="07/27"
+                    // Typing the four digits off the strip ("0727") is the counter's natural
+                    // flow; the slash is inserted for them.
+                    onChange={(e) => updateItem(idx, 'expiryDate', normalizeExpiryInput(e.target.value))}
+                    placeholder="07/27  (type 0727)"
+                    inputMode="numeric"
+                    maxLength={5}
                     className="font-mono font-semibold"
                   />
                 </Field>

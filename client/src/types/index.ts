@@ -329,6 +329,33 @@ export interface LedgerEntry {
   party?: Pick<Party, 'id' | 'name'> | null;
 }
 
+// ─── Settings ───────────────────────────────────────────────────────────────
+
+/**
+ * The pharmacy's own identity, printed on every tax invoice and GRN.
+ * Single row; owner-editable via the admin portal.
+ */
+export interface PharmacyProfile {
+  id: string;
+  name: string;
+  tagline?: string | null;
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  gstNumber?: string | null;
+  dlNumber?: string | null;
+  invoiceFooter?: string | null;
+}
+
+/** One-line address for invoice headers, skipping any parts that aren't filled in. */
+export function formatPharmacyAddress(p?: PharmacyProfile | null): string {
+  if (!p) return '';
+  return [p.addressLine, p.city, p.state, p.pincode].filter(Boolean).join(', ');
+}
+
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
 /** The `{ error: string }` body every backend route returns on failure. */

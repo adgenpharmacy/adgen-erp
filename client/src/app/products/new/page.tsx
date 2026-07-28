@@ -26,6 +26,9 @@ export default function NewProductPage() {
     contentUnit: 'Tablet',
     requiresColdStorage: false,
     division: 'GENERAL',
+    // Defaults prefilled onto a purchase line when this medicine is next bought in.
+    mrp: 0,
+    purchaseRate: 0,
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -114,6 +117,31 @@ export default function NewProductPage() {
                 onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
               />
             </Field>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Default MRP / Pack (₹)" hint="Prefilled when purchasing this medicine">
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={formData.mrp || ''}
+                  onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
+                  placeholder="0.00"
+                  className="font-mono font-semibold"
+                />
+              </Field>
+              <Field label="Default Purchase Rate / Pack (₹)" hint="Also used as the COGS fallback">
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={formData.purchaseRate || ''}
+                  onChange={(e) => setFormData({ ...formData, purchaseRate: parseFloat(e.target.value) || 0 })}
+                  placeholder="0.00"
+                  className="font-mono font-semibold"
+                />
+              </Field>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Manufacturer / Company">

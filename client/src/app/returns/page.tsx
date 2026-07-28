@@ -147,7 +147,7 @@ export default function ReturnsPage() {
       });
 
       invalidateCatalogCache();
-      await refreshData();
+      void refreshData();
       toast.success('Credit note created', 'Inventory has been updated.');
       setShowSalesReturnModal(false);
       setSrItems([{ ...EMPTY_SR_ITEM }]);
@@ -193,7 +193,7 @@ export default function ReturnsPage() {
       });
 
       invalidateCatalogCache();
-      await refreshData();
+      void refreshData();
       toast.success('Debit note created', 'Stock has been deducted.');
       setShowPurchaseReturnModal(false);
       setPrItems([{ ...EMPTY_PR_ITEM }]);

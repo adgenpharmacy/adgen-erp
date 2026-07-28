@@ -70,11 +70,11 @@ export default function ReportPrintModal({
     <Portal>
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto"
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white border border-slate-200 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col transition-all"
+        className="bg-white border border-slate-200 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col transition-all print:block print:max-h-none print:m-0 print:w-full print:max-w-full print:border-0 print:shadow-none print:rounded-none print:overflow-visible"
       >
         {/* Top Controls Bar */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0 print:hidden">
@@ -110,7 +110,7 @@ export default function ReportPrintModal({
         </div>
 
         {/* Printable Report Content */}
-        <div className="print-area p-8 text-slate-900 text-xs font-sans print:p-0 print:text-black flex-1 overflow-y-auto">
+        <div className="print-area p-8 text-slate-900 text-xs font-sans print:p-0 print:text-black flex-1 overflow-y-auto print:flex-none print:overflow-visible print:max-h-none">
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-6">
             <div>

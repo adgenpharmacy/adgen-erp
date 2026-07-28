@@ -193,9 +193,12 @@
     display: none !important;
   }
 
-  /* Reset modal backdrop wrappers so they don't force extra page height */
+  /* Reset modal backdrop wrappers so they don't force extra page height.
+     `align-items: center` on the backdrop was pushing the document down the page — which is
+     what produced a completely blank first sheet and left the letterhead stranded at the
+     bottom of page 2. Centring must be neutralised, not just the sizing. */
   div.fixed.inset-0 {
-    position: relative !important;
+    position: static !important;
     inset: auto !important;
     background: transparent !important;
     padding: 0 !important;
@@ -205,6 +208,8 @@
     max-height: none !important;
     overflow: visible !important;
     display: block !important;
+    align-items: normal !important;
+    justify-content: normal !important;
   }
 
   div.bg-white.border.rounded-3xl,
@@ -216,6 +221,7 @@
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
+    /* Must be block, not flex: a flex column with `my-auto` re-centres the sheet. */
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
@@ -229,14 +235,21 @@
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    max-height: none !important;
+    /* Cancel `flex-1` so the sheet grows to its content instead of a scroll viewport. */
+    flex: none !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
     overflow: visible !important;
   }
 
+  /* Column headings SHOULD repeat across pages so a long item list stays readable. */
   thead { display: table-header-group !important; }
-  tfoot { display: table-footer-group !important; }
+
+  /* A summary footer must NOT repeat: `table-footer-group` printed the
+     "TOTAL ITEMS / INWARD SUBTOTAL" band at the bottom of every single page. */
+  tfoot { display: table-row-group !important; }
 
   tr {
     page-break-inside: avoid !important;

@@ -18,6 +18,7 @@ import {
   LogOut,
   RotateCcw,
   ScanLine,
+  Settings,
 } from 'lucide-react';
 import UpdateNotifier from '@/components/layout/UpdateNotifier';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,9 @@ const NAV_GROUPS: { heading: string; items: { name: string; href: string; icon: 
     ],
   },
 ];
+
+/** Owner-only. Holds the statutory details printed on every invoice. */
+const ADMIN_ITEM = { name: 'Admin', href: '/admin', icon: Settings };
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -115,6 +119,31 @@ export default function Sidebar() {
               </div>
             </div>
           ))}
+
+          {user?.role === 'OWNER' ? (
+            <div>
+              <p className="px-2.5 mb-1 text-[10px] font-bold uppercase tracking-widest text-fg-subtle">
+                Configuration
+              </p>
+              <Link
+                href={ADMIN_ITEM.href}
+                aria-current={pathname === ADMIN_ITEM.href ? 'page' : undefined}
+                className={cn(
+                  'flex items-center gap-2.5 pl-2.5 pr-3 py-2 rounded-md text-[13px] font-semibold',
+                  'border-l-[3px] transition-colors',
+                  pathname === ADMIN_ITEM.href
+                    ? 'bg-brand-subtle text-brand-hover border-brand'
+                    : 'text-fg-muted border-transparent hover:bg-hover hover:text-fg'
+                )}
+              >
+                <ADMIN_ITEM.icon
+                  className={cn('h-[18px] w-[18px] shrink-0', pathname === ADMIN_ITEM.href ? 'text-brand' : 'text-fg-subtle')}
+                  aria-hidden
+                />
+                <span className="truncate">{ADMIN_ITEM.name}</span>
+              </Link>
+            </div>
+          ) : null}
         </nav>
 
         {/* User */}

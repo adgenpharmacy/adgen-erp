@@ -78,7 +78,7 @@ const EMPTY_ITEM: SaleLineDraft = {
 
 function NewSalePageContent() {
   const toast = useToast();
-  const { refreshData } = useErpData();
+  const { refreshData, customers } = useErpData();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
@@ -111,6 +111,12 @@ function NewSalePageContent() {
   const [items, setItems] = useState<SaleLineDraft[]>([{ ...EMPTY_ITEM }]);
 
   const [createdBillForPrint, setCreatedBillForPrint] = useState<Sale | null>(null);
+  /**
+   * Synchronous submit lock. `isSubmitting` alone is not enough: React state updates are
+   * async, so two fast clicks (or a click plus F9) both enter the handler before the
+   * re-render disables the button — which saved the same bill twice and double-deducted stock.
+   */
+  const submitLock = useRef(false);
   const inputRefs = useRef<{ [key: string]: HTMLInputElement | HTMLSelectElement | null }>({});
 
   const isFormDirty = () => {
@@ -381,6 +387,7 @@ function NewSalePageContent() {
 
   const handleSaveSale = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLock.current) return;
     const validItems = items.filter((i) => i.productId && (i.quantityStrips > 0 || i.quantityLoose > 0));
     if (validItems.length === 0) {
       toast.error('Nothing to bill', 'Add at least one medicine with a quantity.');
@@ -395,6 +402,7 @@ function NewSalePageContent() {
       }
     }
 
+    submitLock.current = true;
     try {
       setIsSubmitting(true);
       const payload = {
@@ -423,14 +431,16 @@ function NewSalePageContent() {
       if (editId) {
         await api.put(`/sales/${editId}`, payload);
         invalidateCatalogCache();
-        await refreshData();
+        // Refresh in the background: awaiting a 7-endpoint refetch here made every save
+        // feel sluggish even though the write itself had already committed.
+        void refreshData();
         toast.success('Sales invoice updated');
         setItems([]);
         router.push('/sales');
       } else {
         const res = await api.post('/sales', payload);
         invalidateCatalogCache();
-        await refreshData();
+        void refreshData();
         setItems([]);
         setCustomerName('');
         setCustomerPhone('');
@@ -439,6 +449,9 @@ function NewSalePageContent() {
         setCreatedBillForPrint(res.data);
       }
     } catch (err) {
+      // Only release on failure. On success the screen navigates away (or opens the print
+      // modal), so staying locked prevents a stray second click from re-submitting.
+      submitLock.current = false;
       toast.error('Failed to save sales invoice', getApiErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -479,16 +492,37 @@ function NewSalePageContent() {
           <Card>
             <CardHeader title="Customer Details" />
             <CardBody className="space-y-3.5">
-              <Field label="Customer Name">
+              <Field label="Customer Name" hint="Pick a saved customer to fill phone & doctor">
                 <Input
                   icon={User}
                   type="text"
+                  list="billing-customer-list"
                   ref={(el) => { inputRefs.current['customerName'] = el; }}
                   onKeyDown={(e) => handleKeyDown(e, 'customerName', 'customerPhone')}
                   value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCustomerName(value);
+                    // Selecting a saved customer pulls through their phone and usual doctor,
+                    // which is the whole point of keeping a customer directory.
+                    const match = customers.find(
+                      (c) => c.name.toLowerCase().trim() === value.toLowerCase().trim()
+                    );
+                    if (match) {
+                      if (match.phone) setCustomerPhone(match.phone);
+                      if (match.doctorName) setDoctorName(match.doctorName);
+                      if (match.address) setAddress(match.address);
+                    }
+                  }}
                   placeholder="Walk-in Customer"
                 />
+                <datalist id="billing-customer-list">
+                  {customers.slice(0, 500).map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.phone ?? ''}
+                    </option>
+                  ))}
+                </datalist>
               </Field>
 
               <Field label="Phone Number">
@@ -819,6 +853,7 @@ function NewSalePageContent() {
                     type="number"
                     min="0"
                     ref={(el) => { inputRefs.current[`strips-${idx}`] = el; }}
+                    onKeyDown={(e) => handleKeyDown(e, `strips-${idx}`, `loose-${idx}`)}
                     value={item.quantityStrips}
                     onChange={(e) => updateItem(idx, 'quantityStrips', parseFloat(e.target.value) || 0)}
                     className="font-mono font-semibold"
@@ -829,6 +864,8 @@ function NewSalePageContent() {
                   <Input
                     type="number"
                     min="0"
+                    ref={(el) => { inputRefs.current[`loose-${idx}`] = el; }}
+                    onKeyDown={(e) => handleKeyDown(e, `loose-${idx}`, `mrp-${idx}`)}
                     value={item.quantityLoose}
                     onChange={(e) => updateItem(idx, 'quantityLoose', parseFloat(e.target.value) || 0)}
                     placeholder="0"
@@ -840,6 +877,8 @@ function NewSalePageContent() {
                   <Input
                     type="number"
                     step="any"
+                    ref={(el) => { inputRefs.current[`mrp-${idx}`] = el; }}
+                    onKeyDown={(e) => handleKeyDown(e, `mrp-${idx}`, `disc-${idx}`)}
                     value={item.mrp || ''}
                     onChange={(e) => updateItem(idx, 'mrp', parseFloat(e.target.value) || 0)}
                     placeholder="0.00"
@@ -852,6 +891,10 @@ function NewSalePageContent() {
                     type="number"
                     min="0"
                     max="100"
+                    ref={(el) => { inputRefs.current[`disc-${idx}`] = el; }}
+                    // End of the row: Enter jumps to the next item's quantity, matching how the
+                    // operator actually moves down a bill.
+                    onKeyDown={(e) => handleKeyDown(e, `disc-${idx}`, `strips-${idx + 1}`)}
                     value={item.discountPercent || ''}
                     onChange={(e) => updateItem(idx, 'discountPercent', parseFloat(e.target.value) || 0)}
                     placeholder="0 %"

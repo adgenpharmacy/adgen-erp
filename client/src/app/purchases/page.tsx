@@ -425,6 +425,18 @@ function PurchasesPageContent() {
                   ['GSTIN / DL Number', inspectBill.party?.gstNumber || inspectBill.party?.dlNumber || '—', 'font-mono'],
                   ['Payment Status', inspectBill.isPaid ? 'PAID' : 'CREDIT (UNPAID)', ''],
                   ['Taxable Subtotal', formatCurrency(inspectBill.subtotal || 0), 'font-mono'],
+                  // Legacy/imported bills carry their discount per LINE, not on the header —
+                  // showing only the bill-level figure made every imported bill read as ₹0.
+                  [
+                    'Item Discount',
+                    `-${formatCurrency(
+                      (inspectBill.items || []).reduce(
+                        (s, i) => s + i.quantity * i.purchaseRate * ((i.discountPercent || 0) / 100),
+                        0
+                      )
+                    )}`,
+                    'font-mono text-brand',
+                  ],
                   ['Bill Discount', `-${formatCurrency(inspectBill.discount || 0)}`, 'font-mono text-brand'],
                   ['Input GST Tax', formatCurrency(inspectBill.taxTotal || 0), 'font-mono text-accent'],
                   ['Round Off', formatCurrency(inspectBill.roundOffAmount || 0), 'font-mono'],

@@ -93,6 +93,8 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
       contentUnit,
       requiresColdStorage,
       lowStockThreshold,
+      mrp,
+      purchaseRate,
     } = req.body;
 
     const product = await prisma.product.create({
@@ -109,6 +111,10 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
         contentUnit: contentUnit || 'Tablet',
         requiresColdStorage: Boolean(requiresColdStorage),
         lowStockThreshold: parseFloat(lowStockThreshold ?? 1),
+        // Previously dropped on create (only PUT handled them), so a new medicine always
+        // started at ₹0 and prefilled nothing when it was later added to a purchase bill.
+        mrp: parseFloat(mrp ?? 0) || 0,
+        purchaseRate: parseFloat(purchaseRate ?? 0) || 0,
       },
     });
 

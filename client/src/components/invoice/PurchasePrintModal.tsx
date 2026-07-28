@@ -5,6 +5,8 @@ import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 import type { Purchase, PurchaseDetail } from '@/types';
 import Portal from '@/components/ui/Portal';
+import { useErpData } from '@/context/ErpDataContext';
+import { formatPharmacyAddress } from '@/types';
 
 interface PurchasePrintModalProps {
   purchase: PurchaseDetail | Purchase;
@@ -13,6 +15,9 @@ interface PurchasePrintModalProps {
 
 export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintModalProps) {
   const [copied, setCopied] = useState(false);
+  // Pharmacy identity is owner-configurable in Admin; it was hardcoded here,
+  // which meant a placeholder GSTIN printed on real tax invoices.
+  const { profile } = useErpData();
 
   if (!purchase) return null;
 
@@ -80,11 +85,11 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
     <Portal>
     <div 
       onClick={onClose}
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto"
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col transition-all"
+        className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col transition-all print:block print:max-h-none print:m-0 print:w-full print:max-w-full print:border-0 print:shadow-none print:rounded-none print:overflow-visible"
       >
         <style>{`
           @media print {
@@ -126,20 +131,22 @@ export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintM
         </div>
 
         {/* Printable Bill Container */}
-        <div className="print-area p-8 text-slate-900 text-xs font-sans print:p-0 print:text-black flex-1 overflow-y-auto">
+        <div className="print-area p-8 text-slate-900 text-xs font-sans print:p-0 print:text-black flex-1 overflow-y-auto print:flex-none print:overflow-visible print:max-h-none">
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
             <div className="flex items-start gap-3">
               <img src="/logo.png" alt="AdGen Pharma" className="h-12 w-auto object-contain shrink-0" />
               <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">ADGEN PHARMA</h1>
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+                  {profile?.name || 'ADGEN PHARMA'}
+                </h1>
                 <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider mt-1">
-                  GOODS INWARD RECEIPT & PURCHASE INVOICE
+                  {profile?.tagline || 'GOODS INWARD RECEIPT & PURCHASE INVOICE'}
                 </p>
                 <div className="text-[10px] text-slate-600 font-medium mt-1 leading-tight">
-                  27-A Chandra Nagar, Barfani Dham, MR-9, Indore (M.P) 452001<br />
-                  <strong>DL No:</strong> 20B/5441/12/2024 | <strong>GSTIN:</strong> 27ABCDE1234F1Z5<br />
-                  <strong>Phone:</strong> +91 88396 40968 | <strong>Email:</strong> adgenpharmacy2024@gmail.com
+                  {formatPharmacyAddress(profile) || '—'}<br />
+                  <strong>DL No:</strong> {profile?.dlNumber || '—'} | <strong>GSTIN:</strong> {profile?.gstNumber || '—'}<br />
+                  <strong>Phone:</strong> {profile?.phone || '—'} | <strong>Email:</strong> {profile?.email || '—'}
                 </div>
               </div>
             </div>

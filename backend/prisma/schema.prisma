@@ -36,6 +36,30 @@ enum LedgerTransactionType {
   CREDIT
 }
 
+/// Single-row table holding the pharmacy's own identity.
+/// These values print on every tax invoice and GRN, so they must be editable by the owner
+/// rather than hardcoded in the UI (they were, including a placeholder GSTIN).
+model PharmacyProfile {
+  id            String   @id @default("default")
+  name          String   @default("AdGen Pharma")
+  tagline       String?
+  addressLine   String?
+  city          String?
+  state         String?
+  pincode       String?
+  phone         String?
+  email         String?
+  /// Printed on GST tax invoices — legally required to be the real GSTIN.
+  gstNumber     String?
+  /// Drug licence number, required on a pharmacy invoice in India.
+  dlNumber      String?
+  invoiceFooter String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("pharmacy_profile")
+}
+
 model User {
   id           String        @id @default(uuid())
   email        String        @unique

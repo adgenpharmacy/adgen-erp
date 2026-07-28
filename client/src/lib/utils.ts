@@ -78,6 +78,38 @@ export function numberToWords(num: number): string {
   return words + ' Only';
 }
 
+/**
+ * Normalises what an operator types into an expiry field to `MM/YY`.
+ *
+ * At the counter people type the four digits straight off the strip — "0727" — rather than
+ * reaching for the slash. Accepts "0727", "07/27", "7/27", "72027" and returns "07/27".
+ * Anything not yet recognisable is returned as typed so the field stays editable mid-entry.
+ */
+export function normalizeExpiryInput(raw: string): string {
+  const digits = (raw || '').replace(/\D/g, '');
+  if (digits.length === 0) return '';
+
+  // 1-2 digits: still typing the month.
+  if (digits.length <= 2) return digits;
+
+  // 3 digits: single-digit month + 2-digit year, e.g. "727" -> 07/27
+  if (digits.length === 3) {
+    return `0${digits[0]}/${digits.slice(1)}`;
+  }
+
+  // 4 digits: MMYY
+  if (digits.length === 4) {
+    const mm = digits.slice(0, 2);
+    const yy = digits.slice(2);
+    return `${mm}/${yy}`;
+  }
+
+  // 5-6 digits: MMYYYY -> keep the last two year digits.
+  const mm = digits.slice(0, 2);
+  const yy = digits.slice(-2);
+  return `${mm}/${yy}`;
+}
+
 export function formatQuantity(quantity: number | null | undefined): string {
   if (quantity === null || quantity === undefined || isNaN(quantity)) return '0';
   const num = Number(quantity);

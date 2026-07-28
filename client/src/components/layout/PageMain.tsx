@@ -15,7 +15,9 @@ export default function PageMain({
   return (
     <main
       className={cn(
-        'page-enter w-full max-w-[1600px] mx-auto flex-1 p-4 md:p-6 pb-24 md:pb-6',
+        // Bottom padding clears the floating Ctrl+K search button on desktop too — without it
+        // the FAB sat on top of the table pagination controls and blocked the next-page arrow.
+        'page-enter w-full max-w-[1600px] mx-auto flex-1 p-4 md:p-6 pb-24 md:pb-24',
         className
       )}
     >
