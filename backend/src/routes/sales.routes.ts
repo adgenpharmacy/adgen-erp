@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 import { validateCreateSale } from '../middlewares/validation.middleware';
+import { resolveBillTimestamp, nextSeriesNumber } from '../lib/billing-math';
 
 const router = Router();
 
@@ -22,16 +23,7 @@ async function nextSalesInvoiceNumber(tx: {
     select: { invoiceNumber: true },
   });
 
-  let highest = 0;
-  for (const b of bills) {
-    const match = b.invoiceNumber?.match(/(\d+)\s*$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (!Number.isNaN(n) && n > highest) highest = n;
-    }
-  }
-
-  return `${INVOICE_PREFIX}${String(highest + 1).padStart(6, '0')}`;
+  return nextSeriesNumber(bills.map((b) => b.invoiceNumber), INVOICE_PREFIX);
 }
 
 // GET /api/sales — Fetch all sales bills
@@ -92,33 +84,9 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
      * catches up after a power cut, so the counter can override the date. Anything unparseable
      * or in the future falls back to now rather than being written blindly.
      */
-    let saleTimestamp: Date | undefined;
-    if (billDate) {
-      const raw = String(billDate).trim();
-      const now = new Date();
-      const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    // Rule lives in lib/billing-math and is covered by billing-math.test.ts.
+    const saleTimestamp = resolveBillTimestamp(billDate, new Date());
 
-      /*
-       * Only override the timestamp when the bill is genuinely backdated.
-       *
-       * The form sends a plain date, and `new Date('2026-07-29')` is midnight UTC — so
-       * stamping every bill with it put each sale at 05:30 IST regardless of when it was rung
-       * up. Today's bills sorted below yesterday's and the counter's newest sale did not
-       * appear at the top of the list.
-       *
-       * For a backdated bill the current time of day is carried over, so several entered in
-       * one sitting still order sensibly among themselves.
-       */
-      if (raw && raw !== todayLocal) {
-        const [y, m, d] = raw.split('-').map((n) => parseInt(n, 10));
-        if (y && m && d) {
-          const backdated = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
-          if (!Number.isNaN(backdated.getTime()) && backdated.getTime() <= Date.now()) {
-            saleTimestamp = backdated;
-          }
-        }
-      }
-    }
     const userId = req.user!.id;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -581,23 +549,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
        * edit form previously showed today rather than the bill's own date and discarded any
        * change — so correcting a mis-dated sale appeared to work and did nothing.
        */
-      let editTimestamp: Date | undefined;
-      if (req.body.billDate) {
-        // Same midnight-UTC trap as the create path: keep the bill's existing time of day and
-        // move only the calendar date, so re-saving a bill never shifts it to 05:30.
-        const raw = String(req.body.billDate).trim();
-        const existing = existingBill.createdAt;
-        const existingLocal = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`;
-        if (raw && raw !== existingLocal) {
-          const [y, m, d] = raw.split('-').map((n) => parseInt(n, 10));
-          if (y && m && d) {
-            const moved = new Date(y, m - 1, d, existing.getHours(), existing.getMinutes(), existing.getSeconds());
-            if (!Number.isNaN(moved.getTime()) && moved.getTime() <= Date.now()) {
-              editTimestamp = moved;
-            }
-          }
-        }
-      }
+      // Moves only the calendar date, keeping the bill's own time of day.
+      const editTimestamp = resolveBillTimestamp(req.body.billDate, existingBill.createdAt);
 
       // Update SalesBill header
       const updatedBill = await tx.salesBill.update({

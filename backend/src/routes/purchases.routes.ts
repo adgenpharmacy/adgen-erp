@@ -2,20 +2,17 @@ import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 import { validateCreatePurchase } from '../middlewares/validation.middleware';
+import { parseExpiry as parseExpiryValue, nextSeriesNumber, resolveBillTimestamp } from '../lib/billing-math';
 
 const router = Router();
 
 /**
- * Parses a batch expiry, refusing anything unusable.
- *
- * `new Date(...)` happily returns an Invalid Date for junk input, which Prisma then rejects
- * with a raw driver dump — the counter saw the whole `purchaseBill.create` payload on screen
- * and no indication of which line was at fault. A stock batch with no valid expiry must never
- * reach the database anyway: FEFO ordering depends on it.
+ * Wraps the tested parser, turning a rejected value into a message the counter can act on.
+ * The rule itself lives in lib/billing-math and is covered by billing-math.test.ts.
  */
 function parseExpiry(value: unknown, label: string): Date {
-  const parsed = new Date(String(value ?? '').trim());
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseExpiryValue(value);
+  if (!parsed) {
     throw new Error(`Expiry date for "${label}" is missing or invalid. Enter it as MM/YY.`);
   }
   return parsed;
@@ -52,8 +49,12 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 // GET /api/purchases/next-number — Get next DB sequential purchase invoice number
 router.get('/next-number', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const count = await prisma.purchaseBill.count();
-    const nextInvoiceNumber = `PUR-${String(count + 1).padStart(6, '0')}`;
+    // count + 1 reuses a number after a deletion; derive from the highest issued instead.
+    const bills = await prisma.purchaseBill.findMany({
+      where: { invoiceNumber: { startsWith: 'PUR-' } },
+      select: { invoiceNumber: true },
+    });
+    const nextInvoiceNumber = nextSeriesNumber(bills.map((b) => b.invoiceNumber), 'PUR-');
     res.json({ nextInvoiceNumber });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -68,6 +69,17 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Purchase bill must contain at least one item' });
     }
+
+    /*
+     * Same midnight-UTC trap as the sales bill date.
+     *
+     * The form posts a bare date and `new Date('2026-07-29')` is midnight UTC — 05:30 IST — so
+     * a bill entered this evening sorted below one already carrying a real time and did not
+     * appear at the top of the list. Today's bills keep the current time; a backdated one is
+     * moved by calendar date only.
+     */
+    const now = new Date();
+    const billTimestamp = resolveBillTimestamp(purchaseDate, now, now) ?? now;
 
     /*
      * Load every product up front, outside the transaction.
@@ -138,16 +150,18 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
 
       let finalInvoiceNum = (invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
-        const lastBill = await tx.purchaseBill.findFirst({
-          orderBy: { createdAt: 'desc' },
+        /*
+         * Derive from the highest PUR- number, not the newest row.
+         *
+         * The old code read the most recent bill and took the FIRST run of digits in it, so a
+         * supplier invoice like "FY26-27/208" yielded 26 and the next generated number
+         * collided with one already issued.
+         */
+        const issued = await tx.purchaseBill.findMany({
+          where: { invoiceNumber: { startsWith: 'PUR-' } },
           select: { invoiceNumber: true },
         });
-        let nextNum = 1;
-        if (lastBill?.invoiceNumber) {
-          const match = lastBill.invoiceNumber.match(/\d+/);
-          if (match) nextNum = parseInt(match[0], 10) + 1;
-        }
-        finalInvoiceNum = `PUR-${String(nextNum).padStart(6, '0')}`;
+        finalInvoiceNum = nextSeriesNumber(issued.map((b) => b.invoiceNumber), 'PUR-');
       }
 
       // 1. Create PurchaseBill
@@ -155,7 +169,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
         data: {
           invoiceNumber: finalInvoiceNum,
           partyId,
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+          purchaseDate: billTimestamp,
           subtotal,
           taxTotal,
           discount: discountAmount,
@@ -225,7 +239,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
               quantity: totalContentUnits,
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
-              purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+              purchaseDate: billTimestamp,
               purchaseBillId: bill.id,
             },
           });
@@ -389,7 +403,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
                 quantity: newQty,
                 mrp: parseFloat(mrp) || 0,
                 purchaseRate: parseFloat(purchaseRate) || 0,
-                purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+                purchaseDate:
+                  resolveBillTimestamp(purchaseDate, existingBill.purchaseDate) ?? existingBill.purchaseDate,
                 purchaseBillId: id,
               },
             });
@@ -427,7 +442,10 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           invoiceNumber: finalInvoiceNumber,
           partyId: finalPartyId,
           isPaid: finalIsPaid,
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : existingBill.purchaseDate,
+          // Edit keeps the bill's own time of day and moves only the calendar date, so
+          // re-saving never shifts a bill to 05:30.
+          purchaseDate:
+            resolveBillTimestamp(purchaseDate, existingBill.purchaseDate) ?? existingBill.purchaseDate,
           subtotal,
           taxTotal,
           discount: discountAmount,

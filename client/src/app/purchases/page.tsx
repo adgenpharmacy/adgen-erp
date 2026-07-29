@@ -303,8 +303,18 @@ function PurchasesPageContent() {
                       </span>
                     </TD>
 
+                    {/* Time as well as date, matching Sales: the list orders by exact time and
+                        with only the day shown a dozen bills from one afternoon looked
+                        randomly arranged. */}
                     <TD className="text-fg-muted whitespace-nowrap">
                       {formatDate(p.purchaseDate || p.createdAt)}
+                      <span className="mt-0.5 block font-mono text-[10px] text-fg-subtle">
+                        {new Date(p.purchaseDate || p.createdAt).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        })}
+                      </span>
                     </TD>
 
                     <TD>

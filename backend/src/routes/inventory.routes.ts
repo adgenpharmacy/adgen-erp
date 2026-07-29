@@ -169,9 +169,26 @@ router.put('/adjust', authenticate, requireOwner, async (req: AuthenticatedReque
         include: { product: true },
       });
 
-      console.log(
-        `[ERP] Stock Adjustment on Batch ${targetBatch.batchNumber} (${targetBatch.product?.name}): Old=${targetBatch.quantity} -> New=${finalQty} (${reason || 'Manual Correction'}) by User ${req.user?.name || req.user?.id}`
-      );
+      /*
+       * Record the adjustment, do not merely log it.
+       *
+       * This handler used to change the quantity and print a line to the server console, so an
+       * owner correcting stock left no trace anywhere in the app — the Stock Adjustments screen
+       * showed nothing, and the change was indistinguishable from a bug. The audit row carries
+       * the before, the after and who made it.
+       */
+      await tx.stockAdjustment.create({
+        data: {
+          batchId: targetBatch.id,
+          productId: targetBatch.productId,
+          quantityDelta: Math.round((finalQty - targetBatch.quantity) * 1000) / 1000,
+          previousQuantity: targetBatch.quantity,
+          newQuantity: finalQty,
+          reason: (reason || '').trim() || 'Manual correction (no reason given)',
+          source: reason === 'PHYSICAL_AUDIT_COUNT' ? 'PHYSICAL_COUNT' : 'MANUAL',
+          userId: req.user?.id ?? null,
+        },
+      });
 
       return updated;
     });
