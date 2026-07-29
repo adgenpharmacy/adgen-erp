@@ -331,11 +331,45 @@ function NewPurchasePageContent() {
       toast.error('Supplier required', 'Choose the supplier this bill came from.');
       return;
     }
-    const validItems = items.filter((i) => i.productId && i.batchNumber);
-    if (validItems.length === 0) {
-      toast.error('No valid items', 'Each item needs a medicine and a batch number.');
+    /*
+     * A row the user has touched must either save or block the save — never be dropped.
+     *
+     * This used to be `items.filter(i => i.productId && i.batchNumber)`, so any line whose
+     * batch number was blank disappeared and the bill still reported success. Batch number
+     * prefills from the medicine's previous batch, which means a medicine bought for the
+     * first time always starts blank — enter five new products, and only the ones that
+     * happened to have prior stock were saved.
+     */
+    const inUse = items.filter(
+      (i) => i.productId || i.productName.trim() || i.batchNumber.trim() || Number(i.quantity) > 0
+    );
+
+    if (inUse.length === 0) {
+      toast.error('No items on this bill', 'Search for a medicine to add the first line.');
       return;
     }
+
+    const unmatched = inUse.find((i) => !i.productId);
+    if (unmatched) {
+      toast.error(
+        'Medicine not selected',
+        `"${unmatched.productName.trim() || 'One line'}" was typed but not picked from the list. Choose it from the suggestions so the right product is billed.`
+      );
+      return;
+    }
+
+    const noQty = inUse.find((i) => !(Number(i.quantity) > 0));
+    if (noQty) {
+      toast.error('Quantity missing', `Enter how many packs of "${noQty.productName}" arrived.`);
+      return;
+    }
+
+    // Blank batch numbers are filled rather than rejected: many suppliers here do not print
+    // one, and refusing the line would block a legitimate purchase. Expiry still drives FEFO.
+    const validItems = inUse.map((i) => ({
+      ...i,
+      batchNumber: i.batchNumber.trim() || 'DEFAULT',
+    }));
 
     // Catch a half-typed or unparseable expiry here. Left to the server it arrives as an
     // unusable date and comes back as a raw Prisma dump the counter staff cannot act on.

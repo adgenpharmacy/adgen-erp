@@ -157,6 +157,11 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
       }
 
       return record;
+    }, {
+      // Same reason as purchases: a long bill exceeds Prisma's 5s interactive-transaction
+      // limit, the transaction closes, and the next write fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     console.log(`[ERP] Sales Return created: ${returnNumber} (₹${totalReturnAmount})`);
@@ -299,6 +304,11 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
       }
 
       return record;
+    }, {
+      // Same reason as purchases: a long bill exceeds Prisma's 5s interactive-transaction
+      // limit, the transaction closes, and the next write fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     console.log(`[ERP] Purchase Return created: ${returnNumber} (₹${totalReturnAmount})`);

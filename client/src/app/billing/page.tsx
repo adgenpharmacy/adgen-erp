@@ -394,6 +394,18 @@ function NewSalePageContent() {
       return;
     }
 
+    // A line where the medicine was typed but never picked from the suggestions has no
+    // productId, and the filter above drops it without a word — the customer would be charged
+    // for fewer medicines than were rung up. Stop the sale and say which line is at fault.
+    const notSelected = items.find((i) => !i.productId && i.productName.trim());
+    if (notSelected) {
+      toast.error(
+        'Medicine not selected',
+        `"${notSelected.productName.trim()}" was typed but not chosen from the list. Pick it from the suggestions, or clear the line.`
+      );
+      return;
+    }
+
     if (paymentMethod === 'SPLIT') {
       const splitSum = (cashAmount || 0) + (upiAmount || 0) + (cardAmount || 0) + (creditAmount || 0);
       if (Math.abs(splitSum - grandTotal) > 0.5) {

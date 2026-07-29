@@ -289,6 +289,11 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       }
 
       return bill;
+    }, {
+      // Same reason as purchases: a long bill exceeds Prisma's 5s interactive-transaction
+      // limit, the transaction closes, and the next write fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.status(201).json(saleResult);
@@ -351,6 +356,11 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
 
       // 4. Delete bill (Cascades to items)
       await tx.salesBill.delete({ where: { id } });
+    }, {
+      // Same reason as purchases: a long bill exceeds Prisma's 5s interactive-transaction
+      // limit, the transaction closes, and the next write fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.json({ message: 'Sale deleted and stock restored successfully' });
@@ -566,6 +576,11 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       }
 
       return updatedBill;
+    }, {
+      // Same reason as purchases: a long bill exceeds Prisma's 5s interactive-transaction
+      // limit, the transaction closes, and the next write fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.json(saleResult);

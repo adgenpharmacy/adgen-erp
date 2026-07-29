@@ -61,6 +61,18 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       return res.status(400).json({ error: 'Purchase bill must contain at least one item' });
     }
 
+    /*
+     * Load every product up front, outside the transaction.
+     *
+     * The loops below used to call findUnique per line — twice, once for the bill item and
+     * again for the stock batch — so a 70-line bill opened 140 sequential round trips inside
+     * an interactive transaction. Against Supabase's pooler that runs past Prisma's 5s limit,
+     * the transaction closes mid-flight, and the next write fails with "Transaction not found".
+     */
+    const productIds = [...new Set(items.map((i: { productId: string }) => i.productId))];
+    const productList = await prisma.product.findMany({ where: { id: { in: productIds } } });
+    const productMap = new Map(productList.map((p) => [p.id, p]));
+
     const purchaseResult = await prisma.$transaction(async (tx) => {
       let subtotal = 0;
       let taxTotal = 0;
@@ -69,7 +81,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       for (const item of items) {
         const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
 
-        const prod = await tx.product.findUnique({ where: { id: productId } });
+        const prod = productMap.get(productId);
         if (!prod) throw new Error(`Product ${productId} not found`);
 
         // Fall back to the product's configured GST rate rather than an arbitrary constant,
@@ -157,7 +169,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       // 2. Auto-create/Ingest into InventoryBatch linked with purchaseBillId (Deduplicate matching batchNumber)
       for (const item of items) {
         const { productId, batchNumber, expiryDate, quantity, freeQuantity, mrp, purchaseRate } = item;
-        const prod = await tx.product.findUnique({ where: { id: productId } });
+        const prod = productMap.get(productId);
         const packSize = prod?.packSize || 1;
         const totalPacks = parseFloat(quantity) + parseFloat(freeQuantity || 0);
         const totalContentUnits = totalPacks * packSize;
@@ -228,6 +240,11 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       }
 
       return bill;
+    }, {
+      // A long bill does many sequential writes; Prisma's 5s default closes the transaction
+      // mid-flight and the next statement fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.status(201).json(purchaseResult);
@@ -264,6 +281,12 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
     const { id } = req.params;
     const { invoiceNumber, partyId, purchaseDate, isPaid, notes, items, discount, isRoundOff, roundOffAmount } = req.body;
 
+    // Prefetched outside the transaction for the same reason as the create path: per-line
+    // lookups inside an interactive transaction blow past Prisma's time limit on a long bill.
+    const editProductIds: string[] = [...new Set(((items ?? []) as { productId: string }[]).map((i) => i.productId))];
+    const editProductList = await prisma.product.findMany({ where: { id: { in: editProductIds } } });
+    const productMap = new Map(editProductList.map((p) => [p.id, p]));
+
     const updated = await prisma.$transaction(async (tx) => {
       const existingBill = await tx.purchaseBill.findUnique({
         where: { id },
@@ -289,7 +312,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
         for (const item of items) {
           const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
-          const prodForTax = await tx.product.findUnique({ where: { id: productId } });
+          const prodForTax = productMap.get(productId);
           const parsedTax = taxPercent !== undefined && taxPercent !== null
             ? parseFloat(taxPercent)
             : (gstPercent !== undefined && gstPercent !== null ? parseFloat(gstPercent) : (prodForTax?.gstPercent ?? 0));
@@ -317,7 +340,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           });
 
           // Sync InventoryBatch
-          const prod = await tx.product.findUnique({ where: { id: productId } });
+          const prod = productMap.get(productId);
           const packSize = prod?.packSize || 1;
           const totalPacks = (parseFloat(quantity) || 1) + (parseFloat(freeQuantity) || 0);
           const newQty = totalPacks * packSize;
@@ -431,6 +454,11 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         where: { id },
         include: { party: true, items: true },
       });
+    }, {
+      // A long bill does many sequential writes; Prisma's 5s default closes the transaction
+      // mid-flight and the next statement fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.json(updated);
@@ -508,6 +536,11 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
 
       // Delete purchase bill (items cascade delete)
       await tx.purchaseBill.delete({ where: { id } });
+    }, {
+      // A long bill does many sequential writes; Prisma's 5s default closes the transaction
+      // mid-flight and the next statement fails with "Transaction not found".
+      timeout: 30000,
+      maxWait: 15000,
     });
 
     res.json({ message: 'Purchase bill, batches, and ledger entries deleted successfully' });
