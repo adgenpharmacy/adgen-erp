@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 import type { Purchase, PurchaseDetail } from '@/types';
 import Portal from '@/components/ui/Portal';
 import { useErpData } from '@/context/ErpDataContext';
+import { api } from '@/lib/api-client';
 import { formatPharmacyAddress } from '@/types';
 
 interface PurchasePrintModalProps {
@@ -13,12 +14,37 @@ interface PurchasePrintModalProps {
   onClose: () => void;
 }
 
-export default function PurchasePrintModal({ purchase, onClose }: PurchasePrintModalProps) {
+export default function PurchasePrintModal({ purchase: source, onClose }: PurchasePrintModalProps) {
   const [copied, setCopied] = useState(false);
   // Pharmacy identity is owner-configurable in Admin; it was hardcoded here,
   // which meant a placeholder GSTIN printed on real tax invoices.
   const { profile } = useErpData();
 
+  /*
+   * The purchases list is fetched without its lines, so a bill passed straight from a list row
+   * printed "TOTAL ITEMS: 0 MEDICINES" above a correct total. Fetch the detail here rather
+   * than depending on what the caller happened to be holding.
+   */
+  const [detail, setDetail] = useState<PurchaseDetail | Purchase | null>(null);
+  const needsDetail = !!source && !(source.items && source.items.length > 0);
+
+  useEffect(() => {
+    if (!source || !needsDetail) return;
+    let cancelled = false;
+    api
+      .get<PurchaseDetail>(`/purchases/${source.id}`)
+      .then((r) => {
+        if (!cancelled) setDetail(r.data);
+      })
+      .catch(() => {
+        /* header figures still print correctly without the lines */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source?.id, needsDetail]);
+
+  const purchase = detail ?? source;
   if (!purchase) return null;
 
   const handlePrint = () => {

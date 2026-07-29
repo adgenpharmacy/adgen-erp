@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 import type { Sale, SaleDetail } from '@/types';
 import Portal from '@/components/ui/Portal';
 import { useErpData } from '@/context/ErpDataContext';
+import { api } from '@/lib/api-client';
 import { formatPharmacyAddress } from '@/types';
 
 interface InvoicePrintModalProps {
@@ -20,7 +21,33 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   // which meant a placeholder GSTIN printed on real tax invoices.
   const { profile } = useErpData();
 
-  const activeInvoice = bill || invoice;
+  const source = bill || invoice;
+
+  /*
+   * The sales list is fetched without its lines, so a bill handed straight from a list row has
+   * no items and printed "TOTAL ITEMS: 0 MEDICINES" over a correct grand total. The modal
+   * fetches its own detail rather than trusting whatever the caller happened to hold.
+   */
+  const [detail, setDetail] = useState<SaleDetail | Sale | null>(null);
+  const needsDetail = !!source && !(source.items && source.items.length > 0);
+
+  useEffect(() => {
+    if (!source || !needsDetail) return;
+    let cancelled = false;
+    api
+      .get<SaleDetail>(`/sales/${source.id}`)
+      .then((r) => {
+        if (!cancelled) setDetail(r.data);
+      })
+      .catch(() => {
+        /* header figures still print correctly without the lines */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source?.id, needsDetail]);
+
+  const activeInvoice = detail ?? source;
   if (!activeInvoice) return null;
 
   const handlePrint = () => {

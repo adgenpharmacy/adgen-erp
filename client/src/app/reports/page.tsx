@@ -120,20 +120,32 @@ export default function ReportsPage() {
   const [purchaseReturns, setPurchaseReturns] = useState<ReturnRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  /*
+   * A failed fetch used to leave the arrays empty, so a network error rendered as a confident
+   * "Rs 0.00" across every card — indistinguishable from a day with no trade. Financial
+   * figures must never present a failure as a real number.
+   */
+  const [loadFailed, setLoadFailed] = useState<string[]>([]);
 
+  /*
+   * Only inventory is seeded from the shared context.
+   *
+   * The context fetches sales and purchases with `?summary=1`, which omits the lines. Seeding
+   * from it made every bill look like it had no items, so COGS computed as zero and the page
+   * flashed an inflated net profit until this page's own full fetch replaced it. Reports must
+   * wait for data that actually carries the lines.
+   */
   useEffect(() => {
-    if (cachedSales?.length > 0) setSales(cachedSales);
-    if (cachedPurchases?.length > 0) setPurchases(cachedPurchases);
     if (cachedInventory?.length > 0) setInventory(cachedInventory);
-  }, [cachedSales, cachedPurchases, cachedInventory]);
+  }, [cachedInventory]);
 
   useEffect(() => {
     Promise.all([
-      api.get('/sales').then((r) => setSales(r.data)).catch(() => null),
-      api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => null),
-      api.get('/inventory').then((r) => setInventory(r.data)).catch(() => null),
-      api.get('/returns/sales').then((r) => setSalesReturns(r.data)).catch(() => null),
-      api.get('/returns/purchases').then((r) => setPurchaseReturns(r.data)).catch(() => null),
+      api.get('/sales').then((r) => setSales(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Sales']); return null; }),
+      api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Purchases']); return null; }),
+      api.get('/inventory').then((r) => setInventory(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Inventory']); return null; }),
+      api.get('/returns/sales').then((r) => setSalesReturns(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Sales returns']); return null; }),
+      api.get('/returns/purchases').then((r) => setPurchaseReturns(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Purchase returns']); return null; }),
     ]).finally(() => {
       setLoading(false);
       refreshData();
@@ -393,6 +405,22 @@ export default function ReportsPage() {
   return (
     <PageMain>
       <>
+        {loadFailed.length > 0 ? (
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2.5 rounded-lg border border-danger-line bg-danger-subtle px-4 py-3"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
+            <div className="text-sm">
+              <span className="font-bold text-danger">Some data could not be loaded</span>
+              <p className="mt-0.5 text-fg-muted">
+                {[...new Set(loadFailed)].join(', ')} failed to load, so the figures below are
+                incomplete. Do not rely on them or file GST from this view until it loads cleanly.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <PageHeader
           title="Reports & Financial Analytics"
           subtitle={`${rangeLabel} · ${filteredSales.length} sales invoices · ${filteredPurchases.length} purchase bills`}

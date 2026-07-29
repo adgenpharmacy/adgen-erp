@@ -66,7 +66,7 @@ const EMPTY_PR_ITEM: PurchaseReturnLineDraft = {
 
 export default function ReturnsPage() {
   const toast = useToast();
-  const { refreshData } = useErpData();
+  const { refreshData, parties } = useErpData();
   const [activeTab, setActiveTab] = useState<'SALES' | 'PURCHASE'>('SALES');
   const [salesReturns, setSalesReturns] = useState<ReturnRecord[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<ReturnRecord[]>([]);
@@ -537,13 +537,22 @@ export default function ReturnsPage() {
       >
         <form id="purchase-return-form" onSubmit={handleCreatePurchaseReturn} className="p-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Suppliers are suggested from the directory. The field was free text with no
+                list at all, so the name had to be typed from memory and any typo produced a
+                debit note that could not be matched to the supplier's ledger. */}
             <Field label="Supplier Party Name">
               <Input
                 type="text"
+                list="purchase-return-parties"
                 value={prPartyName}
                 onChange={(e) => setPrPartyName(e.target.value)}
-                placeholder="e.g. A TO Z Wholesale"
+                placeholder="Start typing a supplier name"
               />
+              <datalist id="purchase-return-parties">
+                {parties.map((party) => (
+                  <option key={party.id} value={party.name} />
+                ))}
+              </datalist>
             </Field>
             <Field label="Refund Method">
               <Select value={prRefundMethod} onChange={(e) => setPrRefundMethod(e.target.value as typeof prRefundMethod)}>
