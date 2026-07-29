@@ -47,6 +47,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
     };
   }, [source?.id, needsDetail]);
 
+  const loadingLines = needsDetail && !detail;
   const activeInvoice = detail ?? source;
   if (!activeInvoice) return null;
 
@@ -147,10 +148,13 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
 
             <button
               onClick={handlePrint}
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
+              disabled={loadingLines}
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-wait text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Cash Memo</span>
+              {/* Disabled until the lines land: printing early produced a memo reading
+                  "TOTAL ITEMS: 0 MEDICINES" under a correct total. */}
+              <span>{loadingLines ? 'Loading items…' : 'Print Cash Memo'}</span>
             </button>
 
             <button

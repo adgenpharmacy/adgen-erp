@@ -283,12 +283,24 @@ export default function SalesPage() {
                       <TD className="font-mono text-xs text-fg-muted">
                         <span className="flex items-center gap-1.5">
                           <FileText className="h-3.5 w-3.5 text-fg-subtle transition-colors group-hover:text-brand" aria-hidden />
-                          INV-{s.invoiceNumber || s.id.slice(0, 8)}
+                          {/* The stored number already carries its series prefix; prepending one rendered
+                              "INV-INV-000049" in the list. */}
+                          {s.invoiceNumber || s.id.slice(0, 8)}
                         </span>
                       </TD>
 
+                      {/* Time as well as date: the list is ordered by exact sale time, and with
+                          only the day shown a dozen bills from one afternoon looked randomly
+                          arranged. */}
                       <TD className="text-fg-muted whitespace-nowrap">
                         {formatDate(s.createdAt)}
+                        <span className="mt-0.5 block font-mono text-[10px] text-fg-subtle">
+                          {new Date(s.createdAt).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          })}
+                        </span>
                       </TD>
 
                       <TD>
@@ -443,6 +455,22 @@ export default function SalesPage() {
                       </tr>
                     </THead>
                     <tbody>
+                      {/* Lines arrive on a second request. Without this the dialog opened with an
+                          empty table under a real grand total, then rows appeared a moment later —
+                          which reads as a bill with nothing on it. Say it is loading instead. */}
+                      {!inspectBill.items ? (
+                        <TR>
+                          <TD className="py-6 text-center text-fg-muted" colSpan={6}>
+                            Loading medicines…
+                          </TD>
+                        </TR>
+                      ) : inspectBill.items.length === 0 ? (
+                        <TR>
+                          <TD className="py-6 text-center text-fg-muted" colSpan={6}>
+                            This bill has no line items.
+                          </TD>
+                        </TR>
+                      ) : null}
                       {(inspectBill.items || []).map((item, idx) => (
                         <TR key={idx}>
                           <TD className="font-semibold">

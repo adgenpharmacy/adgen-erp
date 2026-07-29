@@ -94,9 +94,29 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
      */
     let saleTimestamp: Date | undefined;
     if (billDate) {
-      const parsed = new Date(String(billDate));
-      if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now() + 86400000) {
-        saleTimestamp = parsed;
+      const raw = String(billDate).trim();
+      const now = new Date();
+      const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      /*
+       * Only override the timestamp when the bill is genuinely backdated.
+       *
+       * The form sends a plain date, and `new Date('2026-07-29')` is midnight UTC — so
+       * stamping every bill with it put each sale at 05:30 IST regardless of when it was rung
+       * up. Today's bills sorted below yesterday's and the counter's newest sale did not
+       * appear at the top of the list.
+       *
+       * For a backdated bill the current time of day is carried over, so several entered in
+       * one sitting still order sensibly among themselves.
+       */
+      if (raw && raw !== todayLocal) {
+        const [y, m, d] = raw.split('-').map((n) => parseInt(n, 10));
+        if (y && m && d) {
+          const backdated = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+          if (!Number.isNaN(backdated.getTime()) && backdated.getTime() <= Date.now()) {
+            saleTimestamp = backdated;
+          }
+        }
       }
     }
     const userId = req.user!.id;
@@ -563,9 +583,19 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
        */
       let editTimestamp: Date | undefined;
       if (req.body.billDate) {
-        const parsed = new Date(String(req.body.billDate));
-        if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now() + 86400000) {
-          editTimestamp = parsed;
+        // Same midnight-UTC trap as the create path: keep the bill's existing time of day and
+        // move only the calendar date, so re-saving a bill never shifts it to 05:30.
+        const raw = String(req.body.billDate).trim();
+        const existing = existingBill.createdAt;
+        const existingLocal = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`;
+        if (raw && raw !== existingLocal) {
+          const [y, m, d] = raw.split('-').map((n) => parseInt(n, 10));
+          if (y && m && d) {
+            const moved = new Date(y, m - 1, d, existing.getHours(), existing.getMinutes(), existing.getSeconds());
+            if (!Number.isNaN(moved.getTime()) && moved.getTime() <= Date.now()) {
+              editTimestamp = moved;
+            }
+          }
         }
       }
 

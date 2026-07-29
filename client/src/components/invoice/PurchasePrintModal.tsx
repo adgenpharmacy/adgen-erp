@@ -44,6 +44,7 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
     };
   }, [source?.id, needsDetail]);
 
+  const loadingLines = needsDetail && !detail;
   const purchase = detail ?? source;
   if (!purchase) return null;
 
@@ -137,10 +138,11 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
 
             <button
               onClick={handlePrint}
+              disabled={loadingLines}
               className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Purchase Bill</span>
+              <span>{loadingLines ? 'Loading items…' : 'Print Purchase Bill'}</span>
             </button>
 
             <button
