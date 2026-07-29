@@ -115,11 +115,14 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
       if (products.length === 0) {
         setLoading(true);
       }
+      // Lines are omitted here: the shared context feeds the list screens, which show a row
+      // count. Reports fetches its own full copies for COGS and GST. This was the single
+      // largest payload in the app.
       const [prodRes, invRes, salesRes, purRes, custRes, partyRes, ledgerRes, profileRes] = await Promise.all([
         api.get<Product[]>('/products').catch(() => ({ data: [] as Product[] })),
         api.get<InventoryItem[]>('/inventory').catch(() => ({ data: [] as InventoryItem[] })),
-        api.get<Sale[]>('/sales').catch(() => ({ data: [] as Sale[] })),
-        api.get<Purchase[]>('/purchases').catch(() => ({ data: [] as Purchase[] })),
+        api.get<Sale[]>('/sales?summary=1').catch(() => ({ data: [] as Sale[] })),
+        api.get<Purchase[]>('/purchases?summary=1').catch(() => ({ data: [] as Purchase[] })),
         api.get<Customer[]>('/customers').catch(() => ({ data: [] as Customer[] })),
         api.get<Party[]>('/parties').catch(() => ({ data: [] as Party[] })),
         api.get<LedgerEntry[]>('/ledger').catch(() => ({ data: [] as LedgerEntry[] })),

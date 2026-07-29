@@ -24,15 +24,23 @@ function parseExpiry(value: unknown, label: string): Date {
 // GET /api/purchases — Fetch all purchase bills
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // `?summary=1` omits the lines — see the note on the sales list route. The purchases
+    // screen only shows an item count, but Reports needs the lines for its GST breakdown.
+    const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
+
     const bills = await prisma.purchaseBill.findMany({
       orderBy: [{ purchaseDate: 'desc' }, { createdAt: 'desc' }],
       include: {
         party: true,
-        items: {
-          include: {
-            product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, packSize: true, packUnit: true, contentUnit: true } },
-          },
-        },
+        ...(summaryOnly
+          ? { _count: { select: { items: true } } }
+          : {
+              items: {
+                include: {
+                  product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, packSize: true, packUnit: true, contentUnit: true } },
+                },
+              },
+            }),
       },
     });
     res.json(bills);

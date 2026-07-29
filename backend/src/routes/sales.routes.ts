@@ -37,17 +37,30 @@ async function nextSalesInvoiceNumber(tx: {
 // GET /api/sales — Fetch all sales bills
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    /*
+     * `?summary=1` returns bills without their lines.
+     *
+     * The full shape carries every item plus its product and batch for every bill on record —
+     * hundreds of kilobytes that the list screen renders as a row count. Reports still needs
+     * the lines to compute COGS, so the trim is opt-in rather than the default.
+     */
+    const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
+
     const bills = await prisma.salesBill.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
         customer: true,
         user: { select: { id: true, name: true } },
-        items: {
-          include: {
-            product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
-            batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true } },
-          },
-        },
+        ...(summaryOnly
+          ? { _count: { select: { items: true } } }
+          : {
+              items: {
+                include: {
+                  product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
+                  batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true } },
+                },
+              },
+            }),
       },
     });
     res.json(bills);

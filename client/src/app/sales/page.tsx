@@ -64,7 +64,20 @@ export default function SalesPage() {
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [inspectBill, setInspectBill] = useState<Sale | null>(null);
-  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+
+  /**
+   * The list is fetched without its lines, so the detail view loads them on demand. Shows the
+   * summary row immediately, then fills in the items when they arrive.
+   */
+  const openInspect = async (sale: Sale) => {
+    setInspectBill(sale);
+    try {
+      const res = await api.get(`/sales/${sale.id}`);
+      setInspectBill((current) => (current && current.id === sale.id ? res.data : current));
+    } catch {
+      /* keep the summary view; the header figures are already correct */
+    }
+  };
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Sale | null>(null);
 
   useEffect(() => {
@@ -264,7 +277,7 @@ export default function SalesPage() {
                   return (
                     <TR
                       key={s.id}
-                      onClick={() => setInspectBill(s)}
+                      onClick={() => openInspect(s)}
                       className={cn(stripeClass, 'group cursor-pointer')}
                     >
                       <TD className="font-mono text-xs text-fg-muted">
@@ -311,7 +324,7 @@ export default function SalesPage() {
                             <Edit3 className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => setInspectBill(s)}
+                            onClick={() => openInspect(s)}
                             className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-brand-subtle hover:text-brand"
                             title="Inspect full details"
                             aria-label="Inspect details"
@@ -367,17 +380,7 @@ export default function SalesPage() {
                   }}
                 >
                   <Edit3 className="h-4 w-4" aria-hidden />
-                  Edit Items in POS
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setEditingSale(inspectBill);
-                    setInspectBill(null);
-                  }}
-                >
-                  <Pencil className="h-4 w-4" aria-hidden />
-                  Edit Details
+                  Edit Bill
                 </Button>
                 <Button variant="outline" onClick={() => setSelectedInvoiceForPrint(inspectBill)}>
                   <Printer className="h-4 w-4" aria-hidden />
@@ -471,98 +474,6 @@ export default function SalesPage() {
         ) : null}
       </Modal>
 
-      {/* EDIT SALES DETAILS MODAL — quick header edit (customer, doctor, payment, notes).
-          Item-level changes go through the POS editor, which restores and re-deducts batch stock. */}
-      <Modal
-        open={!!editingSale}
-        onClose={() => setEditingSale(null)}
-        title="Edit Sales Bill"
-        size="md"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEditingSale(null)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                if (!editingSale) return;
-                try {
-                  await api.put(`/sales/${editingSale.id}`, {
-                    customerName: editingSale.customerName,
-                    customerPhone: editingSale.customerPhone,
-                    doctorName: editingSale.doctorName,
-                    paymentMethod: editingSale.paymentMethod,
-                    grandTotal: editingSale.grandTotal,
-                    notes: editingSale.notes,
-                  });
-                  setEditingSale(null);
-                  toast.success('Sales bill updated');
-                  refreshData();
-                } catch {
-                  toast.error('Failed to update sales bill');
-                }
-              }}
-            >
-              Save Changes
-            </Button>
-          </div>
-        }
-      >
-        {editingSale ? (
-          <div className="p-5 space-y-4">
-            <Field label="Customer Name">
-              <Input
-                type="text"
-                value={editingSale.customerName || ''}
-                onChange={(e) => setEditingSale({ ...editingSale, customerName: e.target.value })}
-              />
-            </Field>
-            <Field label="Customer Phone">
-              <Input
-                type="tel"
-                maxLength={10}
-                value={editingSale.customerPhone || ''}
-                onChange={(e) => setEditingSale({ ...editingSale, customerPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Doctor Name">
-              <Input
-                type="text"
-                value={editingSale.doctorName || ''}
-                onChange={(e) => setEditingSale({ ...editingSale, doctorName: e.target.value })}
-              />
-            </Field>
-            <Field label="Payment Method">
-              <Select
-                value={editingSale.paymentMethod || 'CASH'}
-                onChange={(e) => setEditingSale({ ...editingSale, paymentMethod: e.target.value })}
-              >
-                <option value="CASH">Cash</option>
-                <option value="UPI">UPI Digital</option>
-                <option value="CARD">Card</option>
-                <option value="SPLIT">Split (Cash + UPI)</option>
-                <option value="CREDIT">Credit (Unpaid)</option>
-              </Select>
-            </Field>
-            <Field label="Grand Total (₹)">
-              <Input
-                type="number"
-                value={editingSale.grandTotal || 0}
-                onChange={(e) => setEditingSale({ ...editingSale, grandTotal: parseFloat(e.target.value) || 0 })}
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Notes / Remarks">
-              <Textarea
-                rows={2}
-                value={editingSale.notes || ''}
-                onChange={(e) => setEditingSale({ ...editingSale, notes: e.target.value })}
-              />
-            </Field>
-          </div>
-        ) : null}
-      </Modal>
 
       {selectedInvoiceForPrint && (
         <InvoicePrintModal invoice={selectedInvoiceForPrint} onClose={() => setSelectedInvoiceForPrint(null)} />

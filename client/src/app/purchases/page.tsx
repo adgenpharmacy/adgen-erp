@@ -67,7 +67,20 @@ function PurchasesPageContent() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [inspectBill, setInspectBill] = useState<Purchase | null>(null);
-  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+
+  /**
+   * The list arrives without its lines, so the detail view loads them on demand. The summary
+   * shows at once and the items fill in when they arrive.
+   */
+  const openInspect = async (bill: Purchase) => {
+    setInspectBill(bill);
+    try {
+      const res = await api.get(`/purchases/${bill.id}`);
+      setInspectBill((current) => (current && current.id === bill.id ? res.data : current));
+    } catch {
+      /* keep the summary view */
+    }
+  };
   const [selectedPurchaseForPrint, setSelectedPurchaseForPrint] = useState<Purchase | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -81,7 +94,7 @@ function PurchasesPageContent() {
   useEffect(() => {
     if (!billIdFromUrl || purchases.length === 0) return;
     const target = purchases.find((p) => p.id === billIdFromUrl);
-    if (target) setInspectBill(target);
+    if (target) openInspect(target);
   }, [billIdFromUrl, purchases]);
 
   // Helper for Title Case
@@ -280,7 +293,7 @@ function PurchasesPageContent() {
                 {filteredPurchases.map((p) => (
                   <TR
                     key={p.id}
-                    onClick={() => setInspectBill(p)}
+                    onClick={() => openInspect(p)}
                     className={cn(p.isPaid ? 'stripe-emerald' : 'stripe-amber', 'group cursor-pointer')}
                   >
                     <TD className="font-mono text-xs text-fg-muted">
@@ -325,7 +338,7 @@ function PurchasesPageContent() {
                           <Edit3 className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => setInspectBill(p)}
+                          onClick={() => openInspect(p)}
                           className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
                           title="Inspect bill items"
                           aria-label="Inspect bill"
@@ -383,17 +396,7 @@ function PurchasesPageContent() {
                   }}
                 >
                   <Edit3 className="h-4 w-4" aria-hidden />
-                  Edit Items
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setEditingPurchase(inspectBill);
-                    setInspectBill(null);
-                  }}
-                >
-                  <Pencil className="h-4 w-4" aria-hidden />
-                  Edit Details
+                  Edit Bill
                 </Button>
                 <Button variant="outline" onClick={() => setSelectedPurchaseForPrint(inspectBill)}>
                   <Printer className="h-4 w-4" aria-hidden />
@@ -508,83 +511,6 @@ function PurchasesPageContent() {
         ) : null}
       </Modal>
 
-      {/* EDIT PURCHASE DETAILS MODAL — quick header edit.
-          Item-level changes go through /purchases/new?id=…, which re-syncs inventory batches. */}
-      <Modal
-        open={!!editingPurchase}
-        onClose={() => setEditingPurchase(null)}
-        title="Edit Purchase Bill"
-        subtitle={editingPurchase ? editingPurchase.party?.name : undefined}
-        size="md"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEditingPurchase(null)}>
-              Cancel
-            </Button>
-            <Button
-              loading={isSavingEdit}
-              onClick={async () => {
-                if (!editingPurchase) return;
-                try {
-                  setIsSavingEdit(true);
-                  await api.put(`/purchases/${editingPurchase.id}`, {
-                    invoiceNumber: editingPurchase.invoiceNumber,
-                    grandTotal: editingPurchase.grandTotal,
-                    isPaid: editingPurchase.isPaid,
-                    notes: editingPurchase.notes,
-                  });
-                  setEditingPurchase(null);
-                  toast.success('Purchase bill updated');
-                  refreshData();
-                } catch {
-                  toast.error('Failed to update purchase bill');
-                } finally {
-                  setIsSavingEdit(false);
-                }
-              }}
-            >
-              Save Changes
-            </Button>
-          </div>
-        }
-      >
-        {editingPurchase ? (
-          <div className="p-5 space-y-4">
-            <Field label="Invoice Number">
-              <Input
-                type="text"
-                value={editingPurchase.invoiceNumber || ''}
-                onChange={(e) => setEditingPurchase({ ...editingPurchase, invoiceNumber: e.target.value })}
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Grand Total (₹)">
-              <Input
-                type="number"
-                value={editingPurchase.grandTotal || 0}
-                onChange={(e) => setEditingPurchase({ ...editingPurchase, grandTotal: parseFloat(e.target.value) || 0 })}
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Payment Status">
-              <Select
-                value={editingPurchase.isPaid ? 'PAID' : 'CREDIT'}
-                onChange={(e) => setEditingPurchase({ ...editingPurchase, isPaid: e.target.value === 'PAID' })}
-              >
-                <option value="PAID">Paid (Cash / Bank)</option>
-                <option value="CREDIT">Credit (Unpaid)</option>
-              </Select>
-            </Field>
-            <Field label="Notes / Remarks">
-              <Textarea
-                rows={2}
-                value={editingPurchase.notes || ''}
-                onChange={(e) => setEditingPurchase({ ...editingPurchase, notes: e.target.value })}
-              />
-            </Field>
-          </div>
-        ) : null}
-      </Modal>
 
       {selectedPurchaseForPrint && (
         <PurchasePrintModal purchase={selectedPurchaseForPrint} onClose={() => setSelectedPurchaseForPrint(null)} />
