@@ -71,8 +71,21 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
   try {
     const { 
       customerId, customerName, customerPhone, doctorName, notes, 
-      paymentMethod, discount, items, isRoundOff, roundOffAmount 
+      paymentMethod, discount, items, isRoundOff, roundOffAmount, billDate 
     } = req.body;
+
+    /*
+     * Bills are dated by createdAt. A pharmacy routinely enters a sale a day or two late, or
+     * catches up after a power cut, so the counter can override the date. Anything unparseable
+     * or in the future falls back to now rather than being written blindly.
+     */
+    let saleTimestamp: Date | undefined;
+    if (billDate) {
+      const parsed = new Date(String(billDate));
+      if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now() + 86400000) {
+        saleTimestamp = parsed;
+      }
+    }
     const userId = req.user!.id;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -241,6 +254,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const bill = await tx.salesBill.create({
         data: {
           invoiceNumber: finalInvoiceNum,
+          ...(saleTimestamp ? { createdAt: saleTimestamp } : {}),
           customerId: customerId || null,
           customerName: cleanCustName,
           customerPhone: customerPhone || null,

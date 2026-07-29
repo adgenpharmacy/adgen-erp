@@ -92,7 +92,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
     <Portal>
     <div 
       onClick={onClose}
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
+      className="print-root fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
     >
       <div 
         onClick={(e) => e.stopPropagation()}

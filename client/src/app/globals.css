@@ -207,6 +207,14 @@
     height: auto !important;
   }
 
+  /* When a print modal is opened from inside another modal — sale detail, then "Print Tax
+     Memo" — both backdrops sit in the DOM at once. Every `div.fixed.inset-0` below gets
+     flattened to `position: static`, so the detail dialog printed too and the invoice came out
+     wrapped in app chrome. Only the print modal carries `.print-root`; hide the rest. */
+  div.fixed.inset-0:not(.print-root) {
+    display: none !important;
+  }
+
   /* Reset modal backdrop wrappers so they don't force extra page height.
      `align-items: center` on the backdrop was pushing the document down the page — which is
      what produced a completely blank first sheet and left the letterhead stranded at the

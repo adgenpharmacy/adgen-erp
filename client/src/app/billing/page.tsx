@@ -93,6 +93,9 @@ function NewSalePageContent() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [doctorName, setDoctorName] = useState('');
+  // Bills are occasionally entered a day or two after the sale, so the date is editable.
+  // Defaults to today; the server ignores anything in the future.
+  const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [address, setAddress] = useState('');
 
   // Payment Method State
@@ -422,6 +425,7 @@ function NewSalePageContent() {
         customerPhone: customerPhone.trim() || null,
         doctorName: doctorName.trim() || null,
         notes: address.trim() || null,
+        billDate,
         paymentMethod,
         cashAmount: paymentMethod === 'SPLIT' ? cashAmount : (paymentMethod === 'CASH' ? grandTotal : 0),
         upiAmount: paymentMethod === 'SPLIT' ? upiAmount : (paymentMethod === 'UPI' ? grandTotal : 0),
@@ -458,6 +462,7 @@ function NewSalePageContent() {
         setCustomerPhone('');
         setDoctorName('');
         setAddress('');
+        setBillDate(new Date().toISOString().slice(0, 10));
         setCreatedBillForPrint(res.data);
       }
     } catch (err) {
@@ -560,6 +565,18 @@ function NewSalePageContent() {
                   value={doctorName}
                   onChange={(e) => setDoctorName(e.target.value)}
                   placeholder="e.g. Dr. Sharma"
+                />
+              </Field>
+
+              {/* Editable so a sale from an earlier day can be entered after the fact — during a
+                  power cut, or when catching up the next morning. Defaults to today and cannot
+                  be set in the future. */}
+              <Field label="Bill Date" hint="Change only when entering a sale from an earlier day">
+                <Input
+                  type="date"
+                  value={billDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setBillDate(e.target.value)}
                 />
               </Field>
 

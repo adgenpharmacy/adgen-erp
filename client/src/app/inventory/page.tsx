@@ -44,7 +44,6 @@ import {
   useToast,
   Pagination,
 } from '@/components/ui';
-import { compactINR } from '@/lib/chart';
 
 const FILTER_TABS = [
   { id: 'IN_STOCK', label: 'In Stock' },
@@ -219,14 +218,14 @@ export default function InventoryPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="MRP Value"
-          value={compactINR(stats.totalMrpValue)}
+          value={formatCurrency(stats.totalMrpValue)}
           sublabel="Gross value if sold at MRP"
           icon={IndianRupee}
           tone="brand"
         />
         <StatCard
           label="Cost Value"
-          value={compactINR(stats.totalCostValue)}
+          value={formatCurrency(stats.totalCostValue)}
           sublabel="Capital invested at purchase rate"
           icon={Boxes}
           tone="info"

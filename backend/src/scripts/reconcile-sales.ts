@@ -291,20 +291,42 @@ async function main() {
   }
   console.log(`Inserted ${inserted} sales`);
 
-  // ---- Renumber the whole series ---------------------------------------------------------
-  const all = await prisma.salesBill.findMany({
+  /*
+   * Number the newly inserted bills only — never touch one that already has a number.
+   *
+   * The first run renumbered the whole series, which was right when every bill came from the
+   * import and none had been issued. It is wrong now: the pharmacy is billing in this app, so
+   * INV-000052 and INV-000053 exist on paper in a customer's hand. Backdated legacy sales sort
+   * before them, so renumbering by date would silently reassign numbers already printed.
+   */
+  const unnumbered = await prisma.salesBill.findMany({
+    where: { OR: [{ invoiceNumber: null }, { invoiceNumber: '' }, { NOT: { invoiceNumber: { startsWith: INVOICE_PREFIX } } }] },
     select: { id: true, invoiceNumber: true },
     orderBy: { createdAt: 'asc' },
   });
-  let seq = 0;
-  for (const bill of all) {
-    seq++;
-    const next = `${INVOICE_PREFIX}${String(seq).padStart(6, '0')}`;
-    if (bill.invoiceNumber !== next) {
-      await prisma.salesBill.update({ where: { id: bill.id }, data: { invoiceNumber: next } });
-    }
+
+  const numbered = await prisma.salesBill.findMany({
+    where: { invoiceNumber: { startsWith: INVOICE_PREFIX } },
+    select: { invoiceNumber: true },
+  });
+  let highest = 0;
+  for (const b of numbered) {
+    const m = b.invoiceNumber?.match(/(\d+)\s*$/);
+    if (m) highest = Math.max(highest, parseInt(m[1], 10) || 0);
   }
-  console.log(`Renumbered ${all.length} sales: ${INVOICE_PREFIX}000001 .. ${INVOICE_PREFIX}${String(seq).padStart(6, '0')}`);
+
+  for (const bill of unnumbered) {
+    highest++;
+    await prisma.salesBill.update({
+      where: { id: bill.id },
+      data: { invoiceNumber: `${INVOICE_PREFIX}${String(highest).padStart(6, '0')}` },
+    });
+  }
+  console.log(
+    `Numbered ${unnumbered.length} new sales; ${numbered.length} existing invoice numbers left untouched. ` +
+      `Highest is now ${INVOICE_PREFIX}${String(highest).padStart(6, '0')}`
+  );
+  const seq = highest;
 
   const after = await prisma.salesBill.aggregate({ _sum: { grandTotal: true }, _count: { _all: true } });
   const dupes = await prisma.salesBill.groupBy({
