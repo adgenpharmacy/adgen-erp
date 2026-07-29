@@ -46,7 +46,6 @@ import {
   useToast,
   useConfirm,
 } from '@/components/ui';
-import { compactINR } from '@/lib/chart';
 import type { Purchase } from '@/types';
 import { getApiErrorMessage } from '@/types';
 
@@ -191,21 +190,21 @@ function PurchasesPageContent() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="Procurement"
-          value={compactINR(stats.totalProcurement)}
+          value={formatCurrency(stats.totalProcurement)}
           sublabel={`${stats.totalBills} bills received`}
           icon={IndianRupee}
           tone="info"
         />
         <StatCard
           label="Paid"
-          value={compactINR(stats.paidTotal)}
+          value={formatCurrency(stats.paidTotal)}
           sublabel={`${stats.paidCount} settled bills`}
           icon={CheckCircle2}
           tone="brand"
         />
         <StatCard
           label="Pending Credit"
-          value={compactINR(stats.pendingCredit)}
+          value={formatCurrency(stats.pendingCredit)}
           sublabel={`${stats.creditCount} unpaid bills`}
           icon={Clock}
           tone="warn"

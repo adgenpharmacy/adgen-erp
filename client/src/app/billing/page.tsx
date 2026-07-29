@@ -174,6 +174,8 @@ function NewSalePageContent() {
         setCustomerPhone(bill.customerPhone || bill.customer?.phone || '');
         setDoctorName(bill.doctorName || bill.customer?.doctorName || '');
         setAddress(bill.notes || bill.customer?.address || '');
+        // Show the bill's own date, not today's, so editing does not silently re-date it.
+        if (bill.createdAt) setBillDate(new Date(bill.createdAt).toISOString().slice(0, 10));
         setPaymentMethod((bill.paymentMethod as typeof paymentMethod) || 'CASH');
 
         setCashAmount(bill.cashAmount || 0);

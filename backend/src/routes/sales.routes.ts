@@ -543,10 +543,24 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         cleanCustName = 'Walk-in Retail Customer';
       }
 
+      /*
+       * Allow the bill date to be corrected on edit. Bills are dated by createdAt, and the
+       * edit form previously showed today rather than the bill's own date and discarded any
+       * change — so correcting a mis-dated sale appeared to work and did nothing.
+       */
+      let editTimestamp: Date | undefined;
+      if (req.body.billDate) {
+        const parsed = new Date(String(req.body.billDate));
+        if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now() + 86400000) {
+          editTimestamp = parsed;
+        }
+      }
+
       // Update SalesBill header
       const updatedBill = await tx.salesBill.update({
         where: { id },
         data: {
+          ...(editTimestamp ? { createdAt: editTimestamp } : {}),
           customerId: customerId !== undefined ? (customerId || null) : existingBill.customerId,
           customerName: cleanCustName,
           customerPhone: customerPhone !== undefined ? (customerPhone || null) : existingBill.customerPhone,

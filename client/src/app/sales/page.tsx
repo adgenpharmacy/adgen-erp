@@ -42,7 +42,6 @@ import {
   useToast,
   useConfirm,
 } from '@/components/ui';
-import { compactINR } from '@/lib/chart';
 import type { Sale } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import { IndianRupee, Banknote, Smartphone, Clock } from 'lucide-react';
@@ -186,10 +185,10 @@ export default function SalesPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Gross Sales" value={compactINR(stats.totalRevenue)} sublabel={`${stats.totalInvoices} invoices`} icon={IndianRupee} tone="brand" />
-        <StatCard label="Cash" value={compactINR(stats.cashTotal)} sublabel="Collected in cash" icon={Banknote} tone="teal" />
-        <StatCard label="UPI" value={compactINR(stats.upiTotal)} sublabel="Digital payments" icon={Smartphone} tone="accent" />
-        <StatCard label="Credit Unpaid" value={compactINR(stats.creditTotal)} sublabel="Outstanding from customers" icon={Clock} tone="warn" emphasizeValue />
+        <StatCard label="Gross Sales" value={formatCurrency(stats.totalRevenue)} sublabel={`${stats.totalInvoices} invoices`} icon={IndianRupee} tone="brand" />
+        <StatCard label="Cash" value={formatCurrency(stats.cashTotal)} sublabel="Collected in cash" icon={Banknote} tone="teal" />
+        <StatCard label="UPI" value={formatCurrency(stats.upiTotal)} sublabel="Digital payments" icon={Smartphone} tone="accent" />
+        <StatCard label="Credit Unpaid" value={formatCurrency(stats.creditTotal)} sublabel="Outstanding from customers" icon={Clock} tone="warn" emphasizeValue />
       </div>
 
       <Card className="mt-4 p-3">
