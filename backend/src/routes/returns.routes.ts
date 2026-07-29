@@ -106,23 +106,52 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
         include: { items: true },
       });
 
-      // If item condition is RESTOCK, restore quantity back to InventoryBatch
+      /*
+       * Put RESTOCK items back on the shelf.
+       *
+       * This used to be wrapped in `if (batch)`: when the batch number did not match anything
+       * the credit note was still issued and the goods simply never returned to stock. The
+       * customer got their refund and the medicine vanished from inventory. A batch is created
+       * when none matches, so a restock can never be silently dropped.
+       */
       for (const item of items) {
-        if (item.condition === 'RESTOCK' && item.productId && item.batchNumber) {
-          const batch = await tx.inventoryBatch.findFirst({
-            where: {
-              productId: item.productId,
-              batchNumber: item.batchNumber,
-            },
-          });
+        if (item.condition !== 'RESTOCK' || !item.productId) continue;
+        const qty = parseFloat(item.quantity) || 0;
+        if (qty <= 0) continue;
 
-          if (batch) {
-            await tx.inventoryBatch.update({
-              where: { id: batch.id },
-              data: { quantity: batch.quantity + parseFloat(item.quantity) },
-            });
-          }
+        const batchNumber = (item.batchNumber || '').trim() || 'DEFAULT';
+
+        const batch = await tx.inventoryBatch.findFirst({
+          where: { productId: item.productId, batchNumber },
+        });
+
+        if (batch) {
+          // Atomic increment rather than read-then-write, so two returns of the same batch
+          // landing together cannot overwrite each other's result.
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantity: { increment: qty } },
+          });
+          continue;
         }
+
+        // Model the new batch on the product's existing stock so its expiry and rates are
+        // realistic rather than invented.
+        const template = await tx.inventoryBatch.findFirst({
+          where: { productId: item.productId },
+          orderBy: { expiryDate: 'desc' },
+        });
+
+        await tx.inventoryBatch.create({
+          data: {
+            productId: item.productId,
+            batchNumber,
+            expiryDate: template?.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            quantity: qty,
+            mrp: template?.mrp ?? (parseFloat(item.unitPrice) || 0),
+            purchaseRate: template?.purchaseRate ?? 0,
+          },
+        });
       }
 
       // Create Ledger entry for Credit Note (Reduces Customer Debt)
@@ -267,6 +296,41 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
               where: { id: batch.id },
               data: { quantity: newQty },
             });
+            continue;
+          }
+
+          /*
+           * No batch carries that number. Previously the debit note was still issued and
+           * nothing left stock, so goods sent back to the supplier stayed on the books and
+           * inventory drifted upward. Take the quantity from the product's other batches,
+           * shortest-dated first, and refuse the return outright if the stock is not there.
+           */
+          let outstanding = parseFloat(item.quantity) || 0;
+          const fallback = await tx.inventoryBatch.findMany({
+            where: { productId: item.productId, quantity: { gt: 0 } },
+            orderBy: { expiryDate: 'asc' },
+          });
+          const onHand = fallback.reduce((s, b) => s + b.quantity, 0);
+
+          if (onHand < outstanding) {
+            const prod = await tx.product.findUnique({
+              where: { id: item.productId },
+              select: { name: true },
+            });
+            throw new Error(
+              `Cannot return ${outstanding} of ${prod?.name ?? item.productId} to the supplier: ` +
+                `only ${onHand} in stock, and no batch numbered "${item.batchNumber}" exists.`
+            );
+          }
+
+          for (const b of fallback) {
+            if (outstanding <= 0) break;
+            const take = Math.min(outstanding, b.quantity);
+            await tx.inventoryBatch.update({
+              where: { id: b.id },
+              data: { quantity: { decrement: take } },
+            });
+            outstanding -= take;
           }
         }
       }

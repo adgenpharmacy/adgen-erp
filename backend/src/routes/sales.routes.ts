@@ -93,11 +93,24 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
         if (qtyNeeded <= 0) continue;
 
-        // Fetch candidate batches ordered by expiryDate (FEFO)
+        /*
+         * Candidate batches, earliest expiry first (FEFO) — but never an expired one.
+         *
+         * Without the date filter this did the opposite of what it should: FEFO sorts by
+         * expiry ascending, so an expired batch sorted to the front and was dispensed first.
+         * Selling expired medicine is a regulatory problem, not just a data one.
+         *
+         * Compared against the start of today so a batch expiring this month is still sellable
+         * for the whole of it, which is how a pharmacist reads an MM/YY stamp.
+         */
+        const today = new Date();
+        const startOfToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
         const availableBatches = await tx.inventoryBatch.findMany({
           where: {
             productId,
             quantity: { gt: 0 },
+            expiryDate: { gte: startOfToday },
           },
           orderBy: { expiryDate: 'asc' },
         });
@@ -117,8 +130,19 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         }, 0);
 
         if (availableBatches.length === 0 || totalAvailableStock < qtyNeeded) {
+          // Name the medicine and say when stock exists but is expired, otherwise the counter
+          // sees quantity on the inventory screen and an "available 0" refusal on the till.
+          const prod = await tx.product.findUnique({ where: { id: productId }, select: { name: true } });
+          const expiredUnits = await tx.inventoryBatch.aggregate({
+            where: { productId, quantity: { gt: 0 }, expiryDate: { lt: startOfToday } },
+            _sum: { quantity: true },
+          });
+          const expired = expiredUnits._sum.quantity || 0;
+
           throw new Error(
-            `Insufficient stock for product ID ${productId}. Requested: ${qtyNeeded}, Available: ${totalAvailableStock}`
+            `Not enough sellable stock for ${prod?.name ?? productId}. ` +
+              `Needed ${qtyNeeded}, available ${totalAvailableStock}.` +
+              (expired > 0 ? ` A further ${expired} unit(s) are in stock but past their expiry and cannot be sold.` : '')
           );
         }
 
