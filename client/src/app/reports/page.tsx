@@ -106,7 +106,7 @@ function MetricCard({
 
 export default function ReportsPage() {
   const toast = useToast();
-  const { sales: cachedSales, purchases: cachedPurchases, inventory: cachedInventory, refreshData } = useErpData();
+  const { inventory: cachedInventory, refreshData } = useErpData();
 
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST' | 'EXPIRY_RISK'>('OVERVIEW');
   const [timePreset, setTimePreset] = useState<TimeRangePreset>('ALL_TIME');

@@ -16,7 +16,6 @@ import {
   Building2,
   ShoppingBag,
   Edit3,
-  Pencil,
   IndianRupee,
   CheckCircle2,
   Clock,
@@ -28,10 +27,7 @@ import {
   Button,
   Card,
   EmptyState,
-  Field,
   Input,
-  Select,
-  Textarea,
   Modal,
   PageHeader,
   StatCard,
@@ -82,7 +78,6 @@ function PurchasesPageContent() {
     }
   };
   const [selectedPurchaseForPrint, setSelectedPurchaseForPrint] = useState<Purchase | null>(null);
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
