@@ -298,6 +298,17 @@ function NewPurchasePageContent() {
     return Math.max(0, gross - disc);
   };
 
+  /*
+   * The summary used to print grossSubtotal — which is already net of the per-item discounts —
+   * under the label "Gross Subtotal" and then list "(−) Item Discounts" beneath it, so reading
+   * the column down gave a figure well below the grand total. The rate before any discount is
+   * kept separately so each row can genuinely be subtracted from the one above.
+   */
+  const grossBeforeDiscounts = items.reduce((sum, item) => {
+    if (!item.productId) return sum;
+    return sum + (item.quantity || 0) * (item.purchaseRate || 0);
+  }, 0);
+
   const grossSubtotal = items.reduce((sum, item) => sum + getItemLineTotal(item), 0);
   const totalItemDiscount = items.reduce((sum, item) => {
     const gross = (item.quantity || 0) * (item.purchaseRate || 0);
@@ -308,14 +319,21 @@ function NewPurchasePageContent() {
     ? (grossSubtotal * (schemeDiscountValue / 100))
     : schemeDiscountValue;
 
-  const netTaxable = Math.max(0, grossSubtotal - schemeDiscountAmount);
+  /*
+   * The supplier's own order: rate, less the line discount, GST added on that, and only then the
+   * scheme discount off the whole bill. Taking the scheme discount off before the tax gives the
+   * identical grand total — (G−Gd)(1+t) and G(1+t)(1−d) are the same number — but it reports a
+   * different taxable value and a different GST, and it was reporting one while showing the
+   * other: "Net Taxable" was printed after the scheme discount while GST was charged before it.
+   */
+  const netTaxable = grossSubtotal;
   const gstTotal = items.reduce((sum, item) => {
     const lineTotal = getItemLineTotal(item);
     const itemGst = item.gstPercent !== undefined && item.gstPercent !== null ? item.gstPercent : 12;
     return sum + (lineTotal * (itemGst / 100));
   }, 0);
 
-  const rawGrandTotal = netTaxable + gstTotal;
+  const rawGrandTotal = Math.max(0, netTaxable + gstTotal - schemeDiscountAmount);
   const grandTotal = isRoundOff ? Math.round(rawGrandTotal) : rawGrandTotal;
 
   const totalContentUnits = items.reduce((sum, item) => {
@@ -524,10 +542,11 @@ function NewPurchasePageContent() {
           <Card>
             <CardHeader title="Purchase Summary" />
             <CardBody className="space-y-3">
+              {/* Each row is subtracted from the one above, down to the grand total. */}
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-fg-muted">Gross Subtotal</dt>
-                  <dd className="font-mono font-bold">{formatCurrency(grossSubtotal)}</dd>
+                  <dt className="text-fg-muted">Rate Value (before discount)</dt>
+                  <dd className="font-mono font-bold">{formatCurrency(grossBeforeDiscounts)}</dd>
                 </div>
                 {totalItemDiscount > 0 ? (
                   <div className="flex justify-between text-brand">
@@ -571,13 +590,23 @@ function NewPurchasePageContent() {
 
               <dl className="space-y-2 border-t border-line pt-3 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-fg-muted">Net Taxable</dt>
+                  <dt className="text-fg-muted">Taxable Value</dt>
                   <dd className="font-mono font-bold">{formatCurrency(netTaxable)}</dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt className="text-fg-muted">(+) Input GST</dt>
+                  <dt className="text-fg-muted">(+) GST on that</dt>
                   <dd className="font-mono font-bold text-accent">{formatCurrency(gstTotal)}</dd>
                 </div>
+                <div className="flex justify-between border-t border-line pt-2">
+                  <dt className="font-semibold text-fg">Value with GST</dt>
+                  <dd className="font-mono font-bold">{formatCurrency(netTaxable + gstTotal)}</dd>
+                </div>
+                {schemeDiscountAmount > 0 ? (
+                  <div className="flex justify-between text-brand">
+                    <dt>(−) Bill Discount</dt>
+                    <dd className="font-mono font-bold">−{formatCurrency(schemeDiscountAmount)}</dd>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between">
                   <dt className="text-fg-muted">Round Off</dt>
                   <dd>
