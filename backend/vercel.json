@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "//regions": "Run the API in Mumbai, next to the database. Without this Vercel defaults to US East, so every query would cross the Pacific and back — the database's own region would count for nothing.",
+  "regions": ["bom1"],
   "builds": [
     {
       "src": "api/index.ts",
