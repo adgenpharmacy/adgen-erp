@@ -1,4 +1,4 @@
-# AdGen Pharmacy ERP (v2.0 Enterprise Stack)
+# AdGen Pharmacy ERP
 
 A modern, full-stack pharmacy management system built with **Next.js 16 (React 19)**, **Node.js (Express TypeScript)**, and **PostgreSQL (Prisma ORM)**.
 
