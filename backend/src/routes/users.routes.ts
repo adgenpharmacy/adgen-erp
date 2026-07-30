@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma';
-import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner, invalidateUserCache } from '../middlewares/auth.middleware';
 import { signToken } from '../utils/jwt';
 
 const router = Router();
@@ -143,6 +143,9 @@ router.put('/:id/approve', authenticate, requireOwner, async (req: Authenticated
         isApproved: true,
       },
     });
+    // The authenticate middleware caches accounts briefly; drop this one so the approval is
+    // effective on the staff member's very next request rather than up to 30s later.
+    invalidateUserCache(id);
     res.json(updated);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -156,6 +159,8 @@ router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedReque
     await prisma.user.delete({
       where: { id },
     });
+    // Revoke immediately rather than letting a cached account survive its own deletion.
+    invalidateUserCache(id);
     res.json({ message: 'User registration deleted successfully' });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

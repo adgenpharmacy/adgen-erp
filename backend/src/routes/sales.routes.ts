@@ -8,6 +8,22 @@ const router = Router();
 
 const INVOICE_PREFIX = 'INV-';
 
+const WALK_IN_NAME = 'Walk-in Retail Customer';
+
+/**
+ * Normalise a typed customer name.
+ *
+ * Only an empty value or a bare "?" falls back to the walk-in placeholder. The previous rule
+ * also rejected anything shorter than two characters, so a bill saved for "J" came back as
+ * "Walk-in Retail Customer" — the edit screen looked like it had ignored the change.
+ */
+function resolveCustomerName(raw: unknown, fallback?: string | null): string {
+  if (typeof raw !== 'string') return (fallback || '').trim() || WALK_IN_NAME;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '?') return WALK_IN_NAME;
+  return trimmed;
+}
+
 /**
  * Derive the next sales invoice number from the highest number already issued.
  *
@@ -100,6 +116,40 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const billItemsToCreate = [];
       const batchStockTracker: Record<string, number> = {};
 
+      /*
+       * Candidate batches, earliest expiry first (FEFO) — but never an expired one.
+       *
+       * Without the date filter this did the opposite of what it should: FEFO sorts by
+       * expiry ascending, so an expired batch sorted to the front and was dispensed first.
+       * Selling expired medicine is a regulatory problem, not just a data one.
+       *
+       * Compared against the start of today so a batch expiring this month is still sellable
+       * for the whole of it, which is how a pharmacist reads an MM/YY stamp.
+       *
+       * Read once for every medicine on the bill rather than once per line: each query is a
+       * network round trip to the database, and a ten-line bill spent ten of them here before
+       * writing anything.
+       */
+      const today = new Date();
+      const startOfToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+      const productIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))] as string[];
+      const allBatches = await tx.inventoryBatch.findMany({
+        where: {
+          productId: { in: productIds },
+          quantity: { gt: 0 },
+          expiryDate: { gte: startOfToday },
+        },
+        orderBy: { expiryDate: 'asc' },
+      });
+
+      const batchesByProduct = new Map<string, typeof allBatches>();
+      for (const b of allBatches) {
+        const list = batchesByProduct.get(b.productId);
+        if (list) list.push(b);
+        else batchesByProduct.set(b.productId, [b]);
+      }
+
       for (const item of items) {
         let { productId, batchId, quantity, unitPrice, taxPercent, discountPercent } = item;
         let qtyNeeded = parseFloat(quantity) || 0;
@@ -107,27 +157,8 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
         if (qtyNeeded <= 0) continue;
 
-        /*
-         * Candidate batches, earliest expiry first (FEFO) — but never an expired one.
-         *
-         * Without the date filter this did the opposite of what it should: FEFO sorts by
-         * expiry ascending, so an expired batch sorted to the front and was dispensed first.
-         * Selling expired medicine is a regulatory problem, not just a data one.
-         *
-         * Compared against the start of today so a batch expiring this month is still sellable
-         * for the whole of it, which is how a pharmacist reads an MM/YY stamp.
-         */
-        const today = new Date();
-        const startOfToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-
-        const availableBatches = await tx.inventoryBatch.findMany({
-          where: {
-            productId,
-            quantity: { gt: 0 },
-            expiryDate: { gte: startOfToday },
-          },
-          orderBy: { expiryDate: 'asc' },
-        });
+        // Copied per line: the reordering below is local to this line's FEFO pick.
+        const availableBatches = [...(batchesByProduct.get(productId) || [])];
 
         // If explicit batchId provided, put it first in candidate list
         if (batchId) {
@@ -232,10 +263,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const debtAmount = paymentMethod === 'SPLIT' ? credAmt : (isCredit ? grandTotal : 0);
       const amountPaid = paymentMethod === 'SPLIT' ? (cAmt + uAmt + cardAmt) : (isCredit ? 0 : grandTotal);
 
-      let cleanCustName = (customerName || '').trim();
-      if (!cleanCustName || cleanCustName === '?' || cleanCustName.length < 2) {
-        cleanCustName = 'Walk-in Retail Customer';
-      }
+      const cleanCustName = resolveCustomerName(customerName);
 
       let finalInvoiceNum = (req.body.invoiceNumber || '').trim();
       if (!finalInvoiceNum) {
@@ -289,7 +317,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       if (isCredit && debtAmount > 0) {
         let targetCustomerId = customerId || null;
         if (!targetCustomerId) {
-          const searchName = (cleanCustName && cleanCustName.length >= 2 && cleanCustName !== 'Walk-in Retail Customer')
+          const searchName = (cleanCustName && cleanCustName !== WALK_IN_NAME)
             ? cleanCustName
             : 'Walk-in Credit Customer';
           const existingCust = await tx.customer.findFirst({
@@ -456,13 +484,47 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
       // 2. If items provided, restore stock for old items first & recreate line items
       if (items && Array.isArray(items) && items.length > 0) {
-        for (const item of existingBill.items) {
-          if (item.batchId) {
-            await tx.inventoryBatch.update({
-              where: { id: item.batchId },
-              data: { quantity: { increment: item.quantity } },
-            });
+        /*
+         * Stock movement is settled per batch rather than per line.
+         *
+         * Editing a bill undoes the old lines and applies the new ones; done line by line that
+         * was two database round trips per line plus one read each, so a ten-line bill spent
+         * ~30 of them. Netting the movement per batch means one read for all of them and one
+         * write per batch actually touched.
+         */
+        const restoreByBatch = new Map<string, number>();
+        for (const old of existingBill.items) {
+          if (!old.batchId) continue;
+          restoreByBatch.set(old.batchId, (restoreByBatch.get(old.batchId) || 0) + old.quantity);
+        }
+
+        const deductByBatch = new Map<string, number>();
+        for (const item of items) {
+          if (!item.batchId) throw new Error('Every line must name the batch it is sold from');
+          deductByBatch.set(item.batchId, (deductByBatch.get(item.batchId) || 0) + (parseFloat(item.quantity) || 0));
+        }
+
+        const involvedBatchIds = [...new Set([...restoreByBatch.keys(), ...deductByBatch.keys()])];
+        const batchRows = await tx.inventoryBatch.findMany({ where: { id: { in: involvedBatchIds } } });
+        const batchById = new Map(batchRows.map((b) => [b.id, b]));
+
+        for (const [batchId, needed] of deductByBatch) {
+          const batch = batchById.get(batchId);
+          if (!batch) throw new Error(`Batch ${batchId} not found`);
+          // What this bill previously took from the batch is available to it again.
+          const available = batch.quantity + (restoreByBatch.get(batchId) || 0);
+          if (available < needed) {
+            throw new Error(`Insufficient stock for batch ${batch.batchNumber}. Available: ${available}, Requested: ${needed}`);
           }
+        }
+
+        for (const batchId of involvedBatchIds) {
+          const delta = (restoreByBatch.get(batchId) || 0) - (deductByBatch.get(batchId) || 0);
+          if (delta === 0) continue;
+          await tx.inventoryBatch.update({
+            where: { id: batchId },
+            data: { quantity: { increment: delta } },
+          });
         }
 
         await tx.salesBillItem.deleteMany({ where: { salesBillId: id } });
@@ -473,18 +535,6 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
         for (const item of items) {
           const { productId, batchId, quantity, unitPrice, discountPercent, taxPercent } = item;
-
-          const batch = await tx.inventoryBatch.findUnique({ where: { id: batchId } });
-          if (!batch) throw new Error(`Batch ${batchId} not found`);
-          if (batch.quantity < quantity) {
-            throw new Error(`Insufficient stock for batch ${batch.batchNumber}. Available: ${batch.quantity}, Requested: ${quantity}`);
-          }
-
-          // Deduct stock
-          await tx.inventoryBatch.update({
-            where: { id: batchId },
-            data: { quantity: { decrement: parseFloat(quantity) } },
-          });
 
           // Mirror POST: the per-item discount reduces the line before tax is extracted.
           // It was stored on the row but never applied, so editing a bill restored the
@@ -539,10 +589,9 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       const debtAmount = finalMethod === 'SPLIT' ? credAmt : (isCredit ? grandTotal : 0);
       const amountPaid = finalMethod === 'SPLIT' ? (cAmt + uAmt + cardAmt) : (isCredit ? 0 : grandTotal);
 
-      let cleanCustName = customerName !== undefined ? (customerName || '').trim() : existingBill.customerName;
-      if (!cleanCustName || cleanCustName === '?' || cleanCustName.length < 2) {
-        cleanCustName = 'Walk-in Retail Customer';
-      }
+      const cleanCustName = customerName !== undefined
+        ? resolveCustomerName(customerName)
+        : resolveCustomerName(existingBill.customerName);
 
       /*
        * Allow the bill date to be corrected on edit. Bills are dated by createdAt, and the
@@ -552,12 +601,23 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       // Moves only the calendar date, keeping the bill's own time of day.
       const editTimestamp = resolveBillTimestamp(req.body.billDate, existingBill.createdAt);
 
+      /*
+       * The counter edits the name as free text and sends no customerId. Keeping the old link
+       * left the bill pointing at the previous customer, so the printed memo and the customer's
+       * ledger disagreed with the name on the invoice. Renaming to someone else drops the stale
+       * link; a credit bill re-resolves its customer by name a few lines below.
+       */
+      const renamed = cleanCustName !== existingBill.customerName;
+      const finalCustomerId = customerId !== undefined
+        ? (customerId || null)
+        : (renamed ? null : existingBill.customerId);
+
       // Update SalesBill header
       const updatedBill = await tx.salesBill.update({
         where: { id },
         data: {
           ...(editTimestamp ? { createdAt: editTimestamp } : {}),
-          customerId: customerId !== undefined ? (customerId || null) : existingBill.customerId,
+          customerId: finalCustomerId,
           customerName: cleanCustName,
           customerPhone: customerPhone !== undefined ? (customerPhone || null) : existingBill.customerPhone,
           doctorName: doctorName !== undefined ? (doctorName || null) : existingBill.doctorName,
@@ -585,7 +645,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
       if (isCredit && debtAmount > 0) {
         let targetCustomerId = updatedBill.customerId;
         if (!targetCustomerId) {
-          const searchName = (cleanCustName && cleanCustName.length >= 2 && cleanCustName !== 'Walk-in Retail Customer')
+          const searchName = (cleanCustName && cleanCustName !== WALK_IN_NAME)
             ? cleanCustName
             : 'Walk-in Credit Customer';
           const existingCust = await tx.customer.findFirst({

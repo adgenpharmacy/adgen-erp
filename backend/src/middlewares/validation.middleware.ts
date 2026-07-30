@@ -24,11 +24,15 @@ export const validateCreateSale = (req: Request, res: Response, next: NextFuncti
     }
   }
 
-  // Sanitize customer name
+  // Sanitize customer name. Only a blank or a bare "?" becomes the walk-in placeholder —
+  // a one-character name is a real name here (initials, "J", Devanagari single glyph), and
+  // rejecting it silently replaced what the counter typed with "Walk-in Retail Customer".
   if (customerName && typeof customerName === 'string') {
     const trimmed = customerName.trim();
-    if (trimmed === '?' || trimmed.length < 2) {
+    if (!trimmed || trimmed === '?') {
       req.body.customerName = 'Walk-in Retail Customer';
+    } else {
+      req.body.customerName = trimmed;
     }
   }
 

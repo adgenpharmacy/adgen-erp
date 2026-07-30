@@ -78,7 +78,7 @@ const EMPTY_ITEM: SaleLineDraft = {
 
 function NewSalePageContent() {
   const toast = useToast();
-  const { refreshData, customers } = useErpData();
+  const { refreshData, refreshSales, customers } = useErpData();
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('id');
@@ -449,8 +449,11 @@ function NewSalePageContent() {
       if (editId) {
         await api.put(`/sales/${editId}`, payload);
         invalidateCatalogCache();
-        // Refresh in the background: awaiting a 7-endpoint refetch here made every save
-        // feel sluggish even though the write itself had already committed.
+        // The sales list is the next thing on screen, so wait for that one request and let the
+        // rest of the refresh run behind it. Firing the whole 8-endpoint refetch and navigating
+        // immediately landed the operator on a list still showing the pre-edit bill, which
+        // reads as "the update did nothing".
+        await refreshSales();
         void refreshData();
         toast.success('Sales invoice updated');
         setItems([]);
@@ -458,6 +461,7 @@ function NewSalePageContent() {
       } else {
         const res = await api.post('/sales', payload);
         invalidateCatalogCache();
+        void refreshSales();
         void refreshData();
         setItems([]);
         setCustomerName('');

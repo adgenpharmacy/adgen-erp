@@ -11,6 +11,54 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+interface AccountRecord {
+  id: string;
+  email: string;
+  name: string;
+  role: 'OWNER' | 'EMPLOYEE';
+  isActive: boolean;
+  isApproved: boolean;
+}
+
+/**
+ * Short-lived account cache.
+ *
+ * Every authenticated request used to spend a full database round trip re-reading the same
+ * user row before doing any work. Against a remote Postgres that round trip is ~700ms, so it
+ * was the single largest fixed cost on every screen — a dashboard load fans out to eight
+ * endpoints and paid it eight times.
+ *
+ * The trade-off is that a deactivation, deletion or role change takes up to TTL to be felt by
+ * an already-issued token, so the routes that change those call `invalidateUserCache`.
+ */
+const USER_CACHE_TTL_MS = 30_000;
+const userCache = new Map<string, { account: AccountRecord | null; expiresAt: number }>();
+
+export const invalidateUserCache = (userId?: string) => {
+  if (userId) userCache.delete(userId);
+  else userCache.clear();
+};
+
+const loadAccount = async (userId: string): Promise<AccountRecord | null> => {
+  const cached = userCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.account;
+
+  const account = (await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      isApproved: true,
+    },
+  })) as AccountRecord | null;
+
+  userCache.set(userId, { account, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+  return account;
+};
+
 export const authenticate = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -36,17 +84,7 @@ export const authenticate = async (
       return res.status(401).json({ error: 'Session expired or invalid token. Please log in again.' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        isApproved: true,
-      },
-    });
+    const user = await loadAccount(decoded.userId);
 
     if (!user) {
       return res.status(401).json({ error: 'User account not found.' });

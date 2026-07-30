@@ -26,6 +26,8 @@ interface ErpDataContextType {
   profile: PharmacyProfile | null;
   loading: boolean;
   refreshData: () => Promise<void>;
+  /** Refetch only the sales list — one request instead of the eight-endpoint fan-out. */
+  refreshSales: () => Promise<void>;
 }
 
 /** Shape persisted to localStorage between sessions. */
@@ -51,6 +53,7 @@ const ErpDataContext = createContext<ErpDataContextType>({
   profile: null,
   loading: true,
   refreshData: async () => {},
+  refreshSales: async () => {},
 });
 
 const GLOBAL_CACHE_KEY = 'adgen_global_erp_cache_v1';
@@ -170,6 +173,37 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
     }
   }, [user]);
 
+  /**
+   * Refetch the sales list alone.
+   *
+   * Saving a bill used to trigger the whole eight-endpoint refresh, and the sales screen was
+   * reached before any of it came back — so an edit looked like it had not been saved until
+   * seconds later. One 47KB request settles the screen the operator is actually looking at;
+   * the full refresh still runs behind it for the stock and ledger figures.
+   */
+  const refreshSales = React.useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await api.get<Sale[]>('/sales?summary=1');
+      const rows = res.data || [];
+      setSales(rows);
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem(GLOBAL_CACHE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as ErpCache;
+            localStorage.setItem(
+              GLOBAL_CACHE_KEY,
+              JSON.stringify({ ...parsed, sales: rows, timestamp: Date.now() })
+            );
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.error('refreshSales failed:', e);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user) {
       fetchAllData();
@@ -198,6 +232,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         profile,
         loading,
         refreshData: fetchAllData,
+        refreshSales,
       }}
     >
       {children}

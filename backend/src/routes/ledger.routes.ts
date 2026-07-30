@@ -7,15 +7,37 @@ const router = Router();
 // GET /api/ledger — Fetch all ledger entries (amountPaid synced)
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const entries = await prisma.ledgerEntry.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        party: { select: { id: true, name: true } },
-        salesBill: { select: { id: true, invoiceNumber: true, customerName: true, grandTotal: true, amountPaid: true, isSettled: true } },
-        purchaseBill: { select: { id: true, invoiceNumber: true, grandTotal: true, isPaid: true } },
-      },
-    });
+    /*
+     * The three reads are independent — the cross-referencing below happens in memory — so they
+     * go out together. Run one after another they cost three separate database round trips,
+     * which made this the slowest endpoint on the dashboard's opening fan-out.
+     */
+    const [entries, creditSalesBills, unpaidPurchaseBills] = await Promise.all([
+      prisma.ledgerEntry.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          party: { select: { id: true, name: true } },
+          salesBill: { select: { id: true, invoiceNumber: true, customerName: true, grandTotal: true, amountPaid: true, isSettled: true } },
+          purchaseBill: { select: { id: true, invoiceNumber: true, grandTotal: true, isPaid: true } },
+        },
+      }),
+      // Credit sales bills that may need a stand-in ledger row.
+      prisma.salesBill.findMany({
+        where: {
+          OR: [
+            { paymentMethod: 'CREDIT' },
+            { isSettled: false },
+          ],
+        },
+        include: { customer: { select: { id: true, name: true, phone: true } } },
+      }),
+      // Unpaid purchase bills that may need a stand-in ledger row.
+      prisma.purchaseBill.findMany({
+        where: { isPaid: false },
+        include: { party: { select: { id: true, name: true } } },
+      }),
+    ]);
 
     // A ledger row keeps the amount that was originally owed. Once a payment is recorded against
     // the linked bill that row no longer reflects reality, so expose the live outstanding balance
@@ -36,17 +58,6 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 
     const existingSalesBillIds = new Set(entries.map(e => e.salesBillId).filter(Boolean));
     const existingPurchaseBillIds = new Set(entries.map(e => e.purchaseBillId).filter(Boolean));
-
-    // Fetch any credit sales bills not in ledger
-    const creditSalesBills = await prisma.salesBill.findMany({
-      where: {
-        OR: [
-          { paymentMethod: 'CREDIT' },
-          { isSettled: false },
-        ],
-      },
-      include: { customer: { select: { id: true, name: true, phone: true } } },
-    });
 
     const syntheticSalesEntries = creditSalesBills
       // Only stand in for bills that still owe something. A fully-paid credit sale was previously
@@ -69,12 +80,6 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         customer: b.customer || (b.customerName ? { id: 'anon', name: b.customerName, phone: b.customerPhone || '' } : null),
         party: null,
       }));
-
-    // Fetch any unpaid purchase bills not in ledger
-    const unpaidPurchaseBills = await prisma.purchaseBill.findMany({
-      where: { isPaid: false },
-      include: { party: { select: { id: true, name: true } } },
-    });
 
     const syntheticPurchaseEntries = unpaidPurchaseBills
       .filter(b => !existingPurchaseBillIds.has(b.id))
