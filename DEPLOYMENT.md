@@ -65,3 +65,38 @@ npx prisma db push
 - Open your frontend Vercel URL.
 - Test login, medicine search, counter billing, and purchase ingestion.
 - Enjoy 0ms instant UI billing and 100% cloud uptime!
+
+---
+
+## 🌏 Database region — the single biggest performance factor
+
+The database currently lives in **`ap-northeast-1` (Tokyo)**. Measured from a machine in India, one
+round trip to it is **~700–850ms** (`SELECT 1`). Every API request pays that at least once, and a
+sale writes several times, which is why saving a bill takes ~3 seconds however tight the code is.
+
+Moving the project to **`ap-south-1` (Mumbai)** cuts that to roughly 20–40ms — the same code then
+answers in a fraction of the time. Supabase cannot change a project's region in place, so it means
+creating a new project and copying the data across:
+
+```bash
+# 1. Create a new Supabase project in ap-south-1. Note its connection strings.
+
+# 2. Dump the current database (use the DIRECT_URL, port 5432 — not the pooler).
+pg_dump "$OLD_DIRECT_URL" --no-owner --no-acl -Fc -f pharmacy-erp.dump
+
+# 3. Restore into the new project.
+pg_restore -d "$NEW_DIRECT_URL" --no-owner --no-acl pharmacy-erp.dump
+
+# 4. Point the app at it: update DATABASE_URL and DIRECT_URL in backend/.env
+#    (and in the Vercel project's environment variables), then redeploy.
+
+# 5. Confirm the data arrived before decommissioning the old project.
+cd backend && npx ts-node src/scripts/verify-db-counts.ts
+```
+
+Do the copy when the counter is closed: bills written to the old database after the dump will not
+be in the new one.
+
+**Until that move happens**, the code-side levers that matter are the ones already applied — fewer
+round trips per request (batched queries, cached auth lookups), gzip on every response, and
+serving the browser's cached copy first while the refresh runs behind it.

@@ -104,9 +104,25 @@ function MetricCard({
   );
 }
 
+/**
+ * Last complete set of report data, kept for the browsing session.
+ *
+ * Module scope rather than state: it has to outlive the component so that leaving Reports and
+ * coming back does not repeat five full-detail reads. Cleared by a page reload, which is the
+ * point at which everything else is refetched anyway.
+ */
+let reportsCache: {
+  sales: Sale[];
+  purchases: Purchase[];
+  inventory: InventoryItem[];
+  salesReturns: ReturnRecord[];
+  purchaseReturns: ReturnRecord[];
+  at: number;
+} | null = null;
+
 export default function ReportsPage() {
   const toast = useToast();
-  const { inventory: cachedInventory, refreshData } = useErpData();
+  const { inventory: cachedInventory } = useErpData();
 
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'SALES' | 'PURCHASES' | 'PL' | 'GST' | 'EXPIRY_RISK'>('OVERVIEW');
   const [timePreset, setTimePreset] = useState<TimeRangePreset>('ALL_TIME');
@@ -139,16 +155,47 @@ export default function ReportsPage() {
     if (cachedInventory?.length > 0) setInventory(cachedInventory);
   }, [cachedInventory]);
 
+  /*
+   * Reports needs five full-detail lists, which are the heaviest reads in the app. They are held
+   * for the rest of the browsing session so coming back to this screen — or flipping between its
+   * tabs and date presets — is instant instead of paying for all five again. The copy on screen
+   * is refreshed in the background every visit, so it is never more than one visit out of date.
+   *
+   * It also used to call refreshData() afterwards, adding the shared context's eight requests on
+   * top of its own five. Nothing here reads that data; the call is gone.
+   */
   useEffect(() => {
-    Promise.all([
-      api.get('/sales').then((r) => setSales(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Sales']); return null; }),
-      api.get('/purchases').then((r) => setPurchases(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Purchases']); return null; }),
-      api.get('/inventory').then((r) => setInventory(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Inventory']); return null; }),
-      api.get('/returns/sales').then((r) => setSalesReturns(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Sales returns']); return null; }),
-      api.get('/returns/purchases').then((r) => setPurchaseReturns(r.data)).catch(() => { setLoadFailed((f) => [...f, 'Purchase returns']); return null; }),
-    ]).finally(() => {
+    const cached = reportsCache;
+    if (cached) {
+      setSales(cached.sales);
+      setPurchases(cached.purchases);
+      setInventory(cached.inventory);
+      setSalesReturns(cached.salesReturns);
+      setPurchaseReturns(cached.purchaseReturns);
       setLoading(false);
-      refreshData();
+    }
+
+    const failures: string[] = [];
+    Promise.all([
+      api.get<Sale[]>('/sales').then((r) => r.data).catch(() => { failures.push('Sales'); return null; }),
+      api.get<Purchase[]>('/purchases').then((r) => r.data).catch(() => { failures.push('Purchases'); return null; }),
+      api.get<InventoryItem[]>('/inventory').then((r) => r.data).catch(() => { failures.push('Inventory'); return null; }),
+      api.get<ReturnRecord[]>('/returns/sales').then((r) => r.data).catch(() => { failures.push('Sales returns'); return null; }),
+      api.get<ReturnRecord[]>('/returns/purchases').then((r) => r.data).catch(() => { failures.push('Purchase returns'); return null; }),
+    ]).then(([s, p, inv, sr, pr]) => {
+      if (s) setSales(s);
+      if (p) setPurchases(p);
+      if (inv) setInventory(inv);
+      if (sr) setSalesReturns(sr);
+      if (pr) setPurchaseReturns(pr);
+      setLoadFailed(failures);
+
+      // Only cache a complete set — a half-loaded one would be served as fact on the next visit.
+      if (s && p && inv && sr && pr) {
+        reportsCache = { sales: s, purchases: p, inventory: inv, salesReturns: sr, purchaseReturns: pr, at: Date.now() };
+      }
+    }).finally(() => {
+      setLoading(false);
     });
   }, []);
 
@@ -244,10 +291,44 @@ export default function ReportsPage() {
         return sum + (gross - gross / (1 + rate));
       }, 0);
 
-    const totalOutputGst = filteredSales.reduce((sum, s) => {
+    // A bill-level discount is money never collected, so no GST is due on it — the fallback
+    // scales the lines down by the same ratio the bill's own total was reduced by.
+    const grossOutputGst = filteredSales.reduce((sum, s) => {
       if ((s.taxTotal || 0) > 0) return sum + s.taxTotal;
-      return sum + gstFromItems(s.items, (i) => i.totalAmount || (i.quantity || 0) * (i.unitPrice || 0));
+      const lineSum = (s.items || []).reduce(
+        (t: number, i: SaleItem) => t + (i.totalAmount || (i.quantity || 0) * (i.unitPrice || 0)),
+        0
+      );
+      const discountRatio = lineSum > 0 ? Math.max(0, lineSum - (s.discount || 0)) / lineSum : 1;
+      return sum + gstFromItems(s.items, (i) => i.totalAmount || (i.quantity || 0) * (i.unitPrice || 0)) * discountRatio;
     }, 0);
+
+    /*
+     * A credit note reverses the sale, including the tax charged on it. Revenue was already
+     * reported net of returns while output GST was not, so the tax inside a returned item was
+     * counted as a liability the shop no longer owes — and net revenue lost it twice.
+     *
+     * The rate comes from the line the goods were originally sold on, falling back to the
+     * product's configured rate for a return with no matching sale line.
+     */
+    const saleRateByProduct = new Map<string, number>();
+    filteredSales.forEach((s) => {
+      (s.items || []).forEach((i: SaleItem) => {
+        const rate = i.taxPercent ?? i.product?.gstPercent ?? 0;
+        if (rate > 0) saleRateByProduct.set(i.productId, rate);
+      });
+    });
+
+    const returnedGst = filteredSalesReturns.reduce((sum, r) => {
+      return sum + (r.items || []).reduce((s2: number, i: ReturnItem) => {
+        const rate = (saleRateByProduct.get(i.productId) || 0) / 100;
+        if (rate <= 0) return s2;
+        const gross = i.totalAmount || (i.quantity || 0) * (i.unitPrice || 0);
+        return s2 + (gross - gross / (1 + rate));
+      }, 0);
+    }, 0);
+
+    const totalOutputGst = Math.max(0, grossOutputGst - returnedGst);
 
     // Purchase rates are GST-exclusive, so input tax is added on top of the net line value.
     const totalInputGst = filteredPurchases.reduce((sum, p) => {
@@ -341,7 +422,12 @@ export default function ReportsPage() {
     const netCogs = Math.max(0, totalCogs - restockedCogs);
     const netSalesExclGst = Math.max(0, totalSalesRevenue - totalOutputGst);
     const netGrossProfit = netSalesExclGst - netCogs;
-    const profitMarginPercent = totalSalesRevenue > 0 ? (netGrossProfit / totalSalesRevenue) * 100 : 0;
+    /*
+     * Margin is profit over the revenue the shop keeps, not over the amount that passed through
+     * the till. Dividing by the GST-inclusive total mixed the government's money into the
+     * denominator and printed a margin several points below the real trading margin.
+     */
+    const profitMarginPercent = netSalesExclGst > 0 ? (netGrossProfit / netSalesExclGst) * 100 : 0;
 
     // Inventory Valuation
     let inventoryMrpValue = 0;
@@ -395,6 +481,7 @@ export default function ReportsPage() {
   const presets = [
     { id: 'ALL_TIME', label: 'All Time' },
     { id: 'TODAY', label: 'Today' },
+    { id: 'YESTERDAY', label: 'Yesterday' },
     { id: 'LAST_7_DAYS', label: '7 Days' },
     { id: 'LAST_30_DAYS', label: '30 Days' },
     { id: 'LAST_MONTH', label: 'Last Month' },
@@ -567,12 +654,15 @@ export default function ReportsPage() {
                     sublabel={`${metrics.netGrossProfit >= 0 ? '+' : ''}${metrics.profitMarginPercent.toFixed(1)}% margin`}
                     tooltip={{
                       title: 'Estimated Net Profit (Gross Profit)',
-                      formula: '(Total Sales - Output GST) - COGS',
-                      note: 'Net revenue (excluding Output GST collected) minus exact Cost of Goods Sold (COGS) for medicines sold.',
+                      formula: '(Sales − Returns − Output GST) − COGS',
+                      note:
+                        'Revenue the shop keeps — net of credit notes and of the GST it collects on the ' +
+                        "government's behalf — minus the exact Cost of Goods Sold for medicines sold.",
                     }}
                     sublabelTooltip={{
                       title: 'Profit Margin Percentage',
-                      formula: '(Net Profit ÷ Total Sales Revenue) × 100',
+                      formula: '(Net Profit ÷ Net Sales excl. GST) × 100',
+                      note: 'Measured against revenue kept, not against the GST-inclusive amount taken at the till.',
                     }}
                   />
 
@@ -847,7 +937,7 @@ export default function ReportsPage() {
                     </div>
                     <FormulaTooltip
                       title="Net Profit & Loss Formula"
-                      formula="Net Profit = (Gross Sales - Output GST) - COGS"
+                      formula="Net Profit = (Gross Sales − Returns − Output GST) − COGS"
                       note="COGS is computed strictly from actual batch purchase rates assigned during inward entry."
                     />
                   </div>
@@ -856,8 +946,12 @@ export default function ReportsPage() {
                     <tbody className="divide-y divide-slate-200 font-medium">
                       <tr>
                         <td className="py-3 text-fg-muted font-bold flex items-center">
-                          <span>Gross Sales Revenue</span>
-                          <FormulaTooltip title="Gross Revenue" formula="∑ (SalesBill.grandTotal)" note="All customer sales bills within range, before credit notes." />
+                          <span>Gross Sales Revenue (incl. GST)</span>
+                          <FormulaTooltip
+                            title="Gross Revenue"
+                            formula="∑ (SalesBill.grandTotal)"
+                            note="Total billed to customers in range, before credit notes. Retail MRP is GST-inclusive, so this is cash through the till — the GST inside it is removed two rows down, not added on top."
+                          />
                         </td>
                         <td className="py-3 text-right font-mono font-extrabold text-fg">{formatCurrency(metrics.grossSalesRevenue)}</td>
                       </tr>
@@ -873,7 +967,11 @@ export default function ReportsPage() {
                       <tr>
                         <td className="py-3 text-fg-muted flex items-center">
                           <span>(-) Output GST Tax Collected</span>
-                          <FormulaTooltip title="Output GST Liability" formula="∑ (SalesBill.taxTotal)" note="Output tax collected on behalf of govt." />
+                          <FormulaTooltip
+                            title="Output GST Liability"
+                            formula="∑ (SalesBill.taxTotal) − GST inside returns"
+                            note="Tax carved out of the GST-inclusive MRP at each line's own rate — the rate its stock was purchased at. Credit notes reverse the tax they carried."
+                          />
                         </td>
                         <td className="py-3 text-right font-mono font-bold text-danger">-{formatCurrency(metrics.totalOutputGst)}</td>
                       </tr>
@@ -918,7 +1016,7 @@ export default function ReportsPage() {
                       <tr>
                         <td className="py-3 text-fg-muted font-bold flex items-center">
                           <span>Net Gross Margin Percentage</span>
-                          <FormulaTooltip title="Margin %" formula="(Gross Profit ÷ Gross Sales) × 100" />
+                          <FormulaTooltip title="Margin %" formula="(Gross Profit ÷ Net Sales excl. GST) × 100" />
                         </td>
                         <td className="py-3 text-right font-mono font-black text-brand-hover">+{metrics.profitMarginPercent.toFixed(1)}%</td>
                       </tr>

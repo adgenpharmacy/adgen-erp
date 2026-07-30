@@ -57,20 +57,28 @@ const ErpDataContext = createContext<ErpDataContextType>({
 });
 
 const GLOBAL_CACHE_KEY = 'adgen_global_erp_cache_v1';
-const CACHE_TTL_MS = 2 * 60 * 1000; // 2 mins cache TTL
+/** Beyond this the cached copy is shown but no longer trusted enough to hide the loading state. */
+const CACHE_FRESH_MS = 2 * 60 * 1000;
 
 export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
 
-  const getInitialCache = (): ErpCache | null => {
+  /*
+   * Read whatever is cached, however old.
+   *
+   * The cache used to be discarded after two minutes, so any reload past that point sat on
+   * skeletons until eight requests came back — several seconds against a distant database, on
+   * every single load. Yesterday's list is a far better first paint than no list: it is shown
+   * immediately and replaced the moment the refresh lands. Anything older than CACHE_FRESH_MS
+   * still shows, but the spinner keeps running so nobody mistakes it for live data.
+   */
+  const getInitialCache = (): { data: ErpCache; isFresh: boolean } | null => {
     if (typeof window !== 'undefined') {
       try {
         const raw = localStorage.getItem(GLOBAL_CACHE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as ErpCache;
-          if (Date.now() - parsed.timestamp < CACHE_TTL_MS) {
-            return parsed;
-          }
+          return { data: parsed, isFresh: Date.now() - parsed.timestamp < CACHE_FRESH_MS };
         }
       } catch {}
     }
@@ -89,8 +97,9 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const cache = getInitialCache();
-      if (cache) {
+      const cached = getInitialCache();
+      if (cached) {
+        const { data: cache, isFresh } = cached;
         if (cache.products) setProducts(cache.products);
         if (cache.inventory) setInventory(cache.inventory);
         if (cache.sales) setSales(cache.sales);
@@ -98,7 +107,7 @@ export const ErpDataProvider = ({ children }: { children: React.ReactNode }) => 
         if (cache.customers) setCustomers(cache.customers);
         if (cache.parties) setParties(cache.parties);
         if (cache.ledgers) setLedgers(cache.ledgers);
-        setLoading(false);
+        if (isFresh) setLoading(false);
       }
     }
   }, []);

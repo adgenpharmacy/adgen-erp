@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 import { validateCreateSale } from '../middlewares/validation.middleware';
-import { resolveBillTimestamp, nextSeriesNumber } from '../lib/billing-math';
+import { resolveBillTimestamp, nextSeriesNumber, splitInclusiveTax } from '../lib/billing-math';
 
 const router = Router();
 
@@ -22,6 +22,26 @@ function resolveCustomerName(raw: unknown, fallback?: string | null): string {
   const trimmed = raw.trim();
   if (!trimmed || trimmed === '?') return WALK_IN_NAME;
   return trimmed;
+}
+
+/**
+ * The GST rate a sale line is taxed at.
+ *
+ * The rate belongs to the stock, not to the counter: it is whatever was entered on the supplier
+ * bill that brought the batch in, so output tax on a medicine matches the input tax claimed for
+ * the same goods. The counter used to send a flat 12% for every line regardless of the product,
+ * which mis-stated the liability on everything sold at 5% or 18%.
+ *
+ * The product's configured rate is only a fallback, for stock that predates the batch-level rate
+ * (legacy imports and openings with no purchase bill behind them).
+ */
+function batchTaxRate(
+  batch: { taxPercent?: number | null } | undefined,
+  product?: { gstPercent?: number | null }
+): number {
+  const fromPurchase = Number(batch?.taxPercent) || 0;
+  if (fromPurchase > 0) return fromPurchase;
+  return Number(product?.gstPercent) || 0;
 }
 
 /**
@@ -54,7 +74,29 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
      */
     const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
 
+    /*
+     * `?q=` searches the bill and what is on it.
+     *
+     * The list is fetched without its lines, so the counter could not find "every bill that has
+     * Dolo on it" from the browser — the medicine names simply were not there. Matching the
+     * line items server-side is the only place that question can be answered.
+     */
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const where = q
+      ? {
+          OR: [
+            { invoiceNumber: { contains: q, mode: 'insensitive' as const } },
+            { customerName: { contains: q, mode: 'insensitive' as const } },
+            { customerPhone: { contains: q } },
+            { customer: { name: { contains: q, mode: 'insensitive' as const } } },
+            { items: { some: { product: { name: { contains: q, mode: 'insensitive' as const } } } } },
+            { items: { some: { product: { genericName: { contains: q, mode: 'insensitive' as const } } } } },
+          ],
+        }
+      : {};
+
     const bills = await prisma.salesBill.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         customer: true,
@@ -111,8 +153,6 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
 
     // Execute within a single PostgreSQL ACID Transaction
     const saleResult = await prisma.$transaction(async (tx) => {
-      let subtotal = 0;
-      let taxTotal = 0;
       const billItemsToCreate = [];
       const batchStockTracker: Record<string, number> = {};
 
@@ -134,14 +174,21 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
       const startOfToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
 
       const productIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))] as string[];
-      const allBatches = await tx.inventoryBatch.findMany({
-        where: {
-          productId: { in: productIds },
-          quantity: { gt: 0 },
-          expiryDate: { gte: startOfToday },
-        },
-        orderBy: { expiryDate: 'asc' },
-      });
+      const [allBatches, productRows] = await Promise.all([
+        tx.inventoryBatch.findMany({
+          where: {
+            productId: { in: productIds },
+            quantity: { gt: 0 },
+            expiryDate: { gte: startOfToday },
+          },
+          orderBy: { expiryDate: 'asc' },
+        }),
+        tx.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, name: true, gstPercent: true },
+        }),
+      ]);
+      const productById = new Map(productRows.map((p) => [p.id, p]));
 
       const batchesByProduct = new Map<string, typeof allBatches>();
       for (const b of allBatches) {
@@ -177,7 +224,7 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         if (availableBatches.length === 0 || totalAvailableStock < qtyNeeded) {
           // Name the medicine and say when stock exists but is expired, otherwise the counter
           // sees quantity on the inventory screen and an "available 0" refusal on the till.
-          const prod = await tx.product.findUnique({ where: { id: productId }, select: { name: true } });
+          const prod = productById.get(productId);
           const expiredUnits = await tx.inventoryBatch.aggregate({
             where: { productId, quantity: { gt: 0 }, expiryDate: { lt: startOfToday } },
             _sum: { quantity: true },
@@ -211,22 +258,13 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
           const lineDiscount = lineGross * (lineDiscountPercent / 100);
           const itemTotal = Math.max(0, lineGross - lineDiscount);
 
-          // MRP is tax-inclusive under Indian retail GST, so tax is extracted from the
-          // discounted amount actually charged.
-          const taxRate = (taxPercent || 0) / 100;
-          const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
-          const itemSubtotal = itemTotal - itemTax;
-
-          subtotal += itemSubtotal;
-          taxTotal += itemTax;
-
           billItemsToCreate.push({
             productId: batch.productId || productId,
             batchId: batch.id,
             quantity: qtyToTake,
             unitPrice: parseFloat(unitPrice),
             discountPercent: lineDiscountPercent,
-            taxPercent: parseFloat(taxPercent || 0),
+            taxPercent: batchTaxRate(batch, productById.get(batch.productId || productId)),
             totalAmount: itemTotal,
           });
 
@@ -239,9 +277,20 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
         }
       }
 
+      /*
+       * GST is extracted from what the customer actually pays, so the bill-level discount comes
+       * off before the split. See splitInclusiveTax in lib/billing-math.
+       */
       const discountAmount = parseFloat(discount || 0);
-      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
-      
+      const split = splitInclusiveTax(
+        billItemsToCreate.map((i) => ({ total: i.totalAmount, taxPercent: i.taxPercent })),
+        discountAmount
+      );
+      const subtotal = split.subtotal;
+      const taxTotal = split.taxTotal;
+      const rawGrandTotal = Math.max(0, subtotal + taxTotal);
+
+
       const applyRoundOff = isRoundOff ?? true;
       let grandTotal = rawGrandTotal;
       let computedRoundOff = 0;
@@ -478,9 +527,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
       if (!existingBill) throw new Error('Sales bill not found');
 
-      let subtotal = existingBill.subtotal;
-      let taxTotal = existingBill.taxTotal;
-      let discountAmount = discount !== undefined ? parseFloat(discount) : existingBill.discount;
+      const discountAmount = discount !== undefined ? parseFloat(discount) : existingBill.discount;
+      /*
+       * Lines the totals are derived from: the ones being saved, or the bill's current ones when
+       * the edit only touches the header. Either way the split below is the single place the
+       * money is divided into net revenue and GST.
+       */
+      let taxableLines: { total: number; taxPercent: number }[] = existingBill.items.map((i) => ({
+        total: i.totalAmount,
+        taxPercent: i.taxPercent,
+      }));
 
       // 2. If items provided, restore stock for old items first & recreate line items
       if (items && Array.isArray(items) && items.length > 0) {
@@ -505,8 +561,13 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         }
 
         const involvedBatchIds = [...new Set([...restoreByBatch.keys(), ...deductByBatch.keys()])];
-        const batchRows = await tx.inventoryBatch.findMany({ where: { id: { in: involvedBatchIds } } });
+        const editProductIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))] as string[];
+        const [batchRows, editProducts] = await Promise.all([
+          tx.inventoryBatch.findMany({ where: { id: { in: involvedBatchIds } } }),
+          tx.product.findMany({ where: { id: { in: editProductIds } }, select: { id: true, gstPercent: true } }),
+        ]);
         const batchById = new Map(batchRows.map((b) => [b.id, b]));
+        const productById = new Map(editProducts.map((p) => [p.id, p]));
 
         for (const [batchId, needed] of deductByBatch) {
           const batch = batchById.get(batchId);
@@ -529,12 +590,10 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
         await tx.salesBillItem.deleteMany({ where: { salesBillId: id } });
 
-        subtotal = 0;
-        taxTotal = 0;
         const billItemsToCreate = [];
 
         for (const item of items) {
-          const { productId, batchId, quantity, unitPrice, discountPercent, taxPercent } = item;
+          const { productId, batchId, quantity, unitPrice, discountPercent } = item;
 
           // Mirror POST: the per-item discount reduces the line before tax is extracted.
           // It was stored on the row but never applied, so editing a bill restored the
@@ -544,13 +603,6 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           const lineDiscount = lineGross * (lineDiscountPercent / 100);
           const itemTotal = Math.max(0, lineGross - lineDiscount);
 
-          const taxRate = (taxPercent || 0) / 100;
-          const itemTax = taxRate > 0 ? itemTotal - (itemTotal / (1 + taxRate)) : 0;
-          const itemSubtotal = itemTotal - itemTax;
-
-          subtotal += itemSubtotal;
-          taxTotal += itemTax;
-
           billItemsToCreate.push({
             salesBillId: id,
             productId,
@@ -558,15 +610,20 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
             quantity: parseFloat(quantity) || 1,
             unitPrice: parseFloat(unitPrice) || 0,
             discountPercent: lineDiscountPercent,
-            taxPercent: parseFloat(taxPercent) || 0,
+            // Same rule as POST: the rate comes off the batch, not off the request.
+            taxPercent: batchTaxRate(batchById.get(batchId), productById.get(productId)),
             totalAmount: itemTotal,
           });
         }
 
         await tx.salesBillItem.createMany({ data: billItemsToCreate });
+        taxableLines = billItemsToCreate.map((i) => ({ total: i.totalAmount, taxPercent: i.taxPercent }));
       }
 
-      const rawGrandTotal = Math.max(0, (subtotal + taxTotal) - discountAmount);
+      const split = splitInclusiveTax(taxableLines, discountAmount);
+      const subtotal = split.subtotal;
+      const taxTotal = split.taxTotal;
+      const rawGrandTotal = Math.max(0, subtotal + taxTotal);
       const applyRoundOff = isRoundOff !== undefined ? Boolean(isRoundOff) : existingBill.isRoundOff;
       let grandTotal = rawGrandTotal;
       let computedRoundOff = 0;

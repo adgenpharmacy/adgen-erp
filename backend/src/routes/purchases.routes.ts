@@ -25,7 +25,22 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
     // screen only shows an item count, but Reports needs the lines for its GST breakdown.
     const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
 
+    // `?q=` matches the bill, its supplier, or any medicine on it — see the sales list route.
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const where = q
+      ? {
+          OR: [
+            { invoiceNumber: { contains: q, mode: 'insensitive' as const } },
+            { party: { name: { contains: q, mode: 'insensitive' as const } } },
+            { items: { some: { product: { name: { contains: q, mode: 'insensitive' as const } } } } },
+            { items: { some: { product: { genericName: { contains: q, mode: 'insensitive' as const } } } } },
+            { items: { some: { batchNumber: { contains: q, mode: 'insensitive' as const } } } },
+          ],
+        }
+      : {};
+
     const bills = await prisma.purchaseBill.findMany({
+      where,
       orderBy: [{ purchaseDate: 'desc' }, { createdAt: 'desc' }],
       include: {
         party: true,
@@ -192,6 +207,11 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
       for (const item of items) {
         const { productId, batchNumber, expiryDate, quantity, freeQuantity, mrp, purchaseRate } = item;
         const prod = productMap.get(productId);
+        // The rate this stock was taxed at on the way in. Sales read it back off the batch so
+        // output tax is the same rate as the input tax claimed for the same goods.
+        const batchTaxPercent = billItemsToCreate.find(
+          (bi) => bi.productId === productId && bi.batchNumber === batchNumber
+        )?.taxPercent ?? (prod?.gstPercent ?? 0);
         const packSize = prod?.packSize || 1;
         const totalPacks = parseFloat(quantity) + parseFloat(freeQuantity || 0);
         const totalContentUnits = totalPacks * packSize;
@@ -228,6 +248,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
               quantity: { increment: totalContentUnits },
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
+              taxPercent: batchTaxPercent,
             },
           });
         } else {
@@ -239,6 +260,7 @@ router.post('/', authenticate, validateCreatePurchase, async (req: Authenticated
               quantity: totalContentUnits,
               mrp: parseFloat(mrp),
               purchaseRate: parseFloat(purchaseRate),
+              taxPercent: batchTaxPercent,
               purchaseDate: billTimestamp,
               purchaseBillId: bill.id,
             },
@@ -391,6 +413,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
                 quantity: updatedBatchQty,
                 mrp: parseFloat(mrp) || matchBatch.mrp,
                 purchaseRate: parseFloat(purchaseRate) || matchBatch.purchaseRate,
+                // Correcting the tax rate on the supplier bill corrects the stock it brought in.
+                taxPercent: parsedTax,
                 expiryDate: expiryDate ? parseExpiry(expiryDate, prod?.name ?? batchNumber) : matchBatch.expiryDate,
               },
             });
@@ -403,6 +427,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
                 quantity: newQty,
                 mrp: parseFloat(mrp) || 0,
                 purchaseRate: parseFloat(purchaseRate) || 0,
+                taxPercent: parsedTax,
                 purchaseDate:
                   resolveBillTimestamp(purchaseDate, existingBill.purchaseDate) ?? existingBill.purchaseDate,
                 purchaseBillId: id,

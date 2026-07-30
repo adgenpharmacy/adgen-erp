@@ -101,6 +101,8 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         contentUnit: prod.contentUnit || 'Tablet',
         mrp,
         purchaseRate,
+        // Fallback GST rate for stock whose batches carry none (no purchase bill behind them).
+        gstPercent: prod.gstPercent,
         lowStockThreshold: prod.lowStockThreshold,
         systemStock: totalStock,
         totalMrpValue: Math.round(totalMrpValue * 100) / 100,

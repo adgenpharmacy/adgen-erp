@@ -44,6 +44,7 @@ import {
 } from '@/components/ui';
 import type { Purchase } from '@/types';
 import { getApiErrorMessage } from '@/types';
+import DayNavigator, { isOnDay, todayKey } from '@/components/common/DayNavigator';
 
 const STATUS_TABS = [
   { id: 'ALL', label: 'All Purchases' },
@@ -62,6 +63,10 @@ function PurchasesPageContent() {
   const [isMounted, setIsMounted] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  // Opens on today's inward, steps a day at a time from there.
+  const [day, setDay] = useState<string | null>(() => todayKey());
+  const [productMatches, setProductMatches] = useState<Purchase[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [inspectBill, setInspectBill] = useState<Purchase | null>(null);
 
   /**
@@ -83,6 +88,35 @@ function PurchasesPageContent() {
     setIsMounted(true);
     setPurchases(cachedPurchases);
   }, [cachedPurchases]);
+
+  // Debounced medicine-name search; the cached list has no line items to match against.
+  useEffect(() => {
+    const term = search.trim();
+    if (term.length < 2) {
+      setProductMatches(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .get<Purchase[]>(`/purchases?summary=1&q=${encodeURIComponent(term)}`)
+        .then((res) => {
+          if (!cancelled) setProductMatches(res.data || []);
+        })
+        .catch(() => {
+          if (!cancelled) setProductMatches(null);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search]);
 
   // Deep link from an inventory batch: /purchases?bill=<id> opens that bill's details
   // directly, so the operator lands on the supplier invoice the stock came from.
@@ -115,7 +149,42 @@ function PurchasesPageContent() {
     }
   };
 
-  // Header KPI Statistics
+  const isSearching = search.trim().length > 0;
+
+  /*
+   * Browsing is a day at a time; searching looks across every date. Same rule as the sales list.
+   * Medicine-name matches come from the server because the cached list carries no line items.
+   */
+  const filteredPurchases = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const source = isSearching ? (productMatches ?? purchases) : purchases;
+
+    return source
+      .filter((p) => {
+        const partyName = p.party?.name || '';
+        const matchesSearch =
+          !isSearching ||
+          productMatches !== null ||
+          (p.invoiceNumber || '').toLowerCase().includes(q) ||
+          partyName.toLowerCase().includes(q);
+
+        if (!matchesSearch) return false;
+
+        if (!isSearching && day !== null && !isOnDay(p.purchaseDate || p.createdAt, day)) return false;
+
+        if (statusFilter === 'PAID') return p.isPaid;
+        if (statusFilter === 'CREDIT') return !p.isPaid;
+
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.purchaseDate || a.createdAt).getTime();
+        const dateB = new Date(b.purchaseDate || b.createdAt).getTime();
+        return dateB - dateA;
+      });
+  }, [purchases, search, statusFilter, day, isSearching, productMatches]);
+
+  // The cards describe the rows on screen, not the whole ledger.
   const stats = useMemo(() => {
     let totalProcurement = 0;
     let paidTotal = 0;
@@ -123,7 +192,7 @@ function PurchasesPageContent() {
     let paidCount = 0;
     let creditCount = 0;
 
-    purchases.forEach((p) => {
+    filteredPurchases.forEach((p) => {
       const amt = p.grandTotal || 0;
       totalProcurement += amt;
       if (p.isPaid) {
@@ -136,43 +205,24 @@ function PurchasesPageContent() {
     });
 
     return {
-      totalBills: purchases.length,
+      totalBills: filteredPurchases.length,
       totalProcurement,
       paidTotal,
       pendingCredit,
       paidCount,
       creditCount,
     };
-  }, [purchases]);
-
-  const filteredPurchases = useMemo(() => {
-    return purchases
-      .filter((p) => {
-        const q = search.toLowerCase();
-        const partyName = p.party?.name || '';
-        const matchesSearch =
-          (p.invoiceNumber || '').toLowerCase().includes(q) ||
-          partyName.toLowerCase().includes(q);
-
-        if (!matchesSearch) return false;
-
-        if (statusFilter === 'PAID') return p.isPaid;
-        if (statusFilter === 'CREDIT') return !p.isPaid;
-
-        return true;
-      })
-      .sort((a, b) => {
-        const dateA = new Date(a.purchaseDate || a.createdAt).getTime();
-        const dateB = new Date(b.purchaseDate || b.createdAt).getTime();
-        return dateB - dateA;
-      });
-  }, [purchases, search, statusFilter]);
+  }, [filteredPurchases]);
 
   return (
     <PageMain>
       <PageHeader
         title="Supplier Purchase Bills"
-        subtitle={`${stats.totalBills.toLocaleString('en-IN')} bills received`}
+        subtitle={
+          isSearching
+            ? `${stats.totalBills.toLocaleString('en-IN')} bills match “${search.trim()}” · all dates`
+            : `${stats.totalBills.toLocaleString('en-IN')} bills · ${day === null ? 'all dates' : 'selected day'}`
+        }
         action={
           <>
             <Button
@@ -221,16 +271,33 @@ function PurchasesPageContent() {
       </div>
 
       <Card className="mt-4 p-3">
+        <DayNavigator
+          value={day}
+          onChange={setDay}
+          summary={isSearching ? 'Search ignores the date — showing every match' : undefined}
+          className="mb-3"
+        />
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <Input
-            icon={Search}
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by invoice # or supplier name…"
-            className="flex-1"
-            aria-label="Search purchases"
-          />
+          <div className="flex-1">
+            <Input
+              icon={Search}
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search invoice #, supplier, batch, or medicine name…"
+              className="w-full"
+              aria-label="Search purchases"
+            />
+            {isSearching ? (
+              <p className="mt-1 pl-1 text-[11px] font-semibold text-fg-subtle">
+                {searching
+                  ? 'Searching medicines on every bill…'
+                  : productMatches !== null
+                    ? `Includes bills containing a medicine named like “${search.trim()}”.`
+                    : 'Matching invoice number and supplier.'}
+              </p>
+            ) : null}
+          </div>
           <div className="flex items-center gap-1 rounded-md bg-sunken p-1 overflow-x-auto">
             {STATUS_TABS.map((tab) => (
               <button
@@ -256,10 +323,18 @@ function PurchasesPageContent() {
           <EmptyState
             icon={ShoppingBag}
             title="No purchase bills found"
-            message={search ? `Nothing matches “${search}” in this filter.` : 'Record a supplier bill to build up stock.'}
+            message={
+              search
+                ? `Nothing matches “${search}” in this filter.`
+                : day !== null
+                  ? 'No bills received on this day. Step back a day, or switch to All dates.'
+                  : 'Record a supplier bill to build up stock.'
+            }
             action={
               search ? (
                 <Button variant="outline" onClick={() => setSearch('')}>Clear search</Button>
+              ) : day !== null ? (
+                <Button variant="outline" onClick={() => setDay(null)}>Show all dates</Button>
               ) : (
                 <Link
                   href="/purchases/new"

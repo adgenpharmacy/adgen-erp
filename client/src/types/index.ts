@@ -72,6 +72,8 @@ export interface InventoryBatch {
   quantity: number;
   mrp: number;
   purchaseRate: number;
+  /** GST rate from the supplier bill that brought this batch in; sales are taxed at this rate. */
+  taxPercent?: number;
   purchaseDate?: IsoDate;
   purchaseBillId?: string | null;
   createdAt?: IsoDate;
@@ -97,6 +99,8 @@ export interface InventoryItem {
   contentUnit: string;
   mrp: number;
   purchaseRate: number;
+  /** The product's configured GST rate — only a fallback when a batch carries none. */
+  gstPercent?: number;
   lowStockThreshold: number;
   /** Total quantity in content units (tablets), summed across every batch. */
   systemStock: number;

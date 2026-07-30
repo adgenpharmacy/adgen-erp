@@ -132,6 +132,46 @@ export function saleLineTotals(input: {
 }
 
 /**
+ * Splits a sale's tax-inclusive line totals into net revenue and GST, after the bill-level
+ * (scheme) discount.
+ *
+ * A discount given on the whole bill is money never collected, so no GST is due on it. Charging
+ * tax on the pre-discount lines and subtracting the discount afterwards left `taxTotal` higher
+ * than the tax actually contained in `grandTotal` — the shop over-declared output GST on every
+ * discounted bill, and the P&L, which derives net revenue as grandTotal − taxTotal, under-read
+ * profit by the same amount.
+ *
+ * The discount is spread across the lines in proportion to their value, so each line is taxed
+ * at its own rate on the amount the customer really paid for it.
+ */
+export function splitInclusiveTax(
+  lines: { total: number; taxPercent?: number }[],
+  billDiscount = 0
+): { subtotal: number; taxTotal: number; netTotal: number; discountApplied: number } {
+  const gross = lines.reduce((sum, l) => sum + (Number(l.total) || 0), 0);
+  const discount = Math.min(Math.max(0, Number(billDiscount) || 0), gross);
+  const factor = gross > 0 ? (gross - discount) / gross : 1;
+
+  let subtotal = 0;
+  let taxTotal = 0;
+
+  for (const line of lines) {
+    const net = (Number(line.total) || 0) * factor;
+    const rate = (Number(line.taxPercent) || 0) / 100;
+    const tax = rate > 0 ? net - net / (1 + rate) : 0;
+    taxTotal += tax;
+    subtotal += net - tax;
+  }
+
+  return {
+    subtotal: money(subtotal),
+    taxTotal: money(taxTotal),
+    netTotal: money(gross - discount),
+    discountApplied: money(discount),
+  };
+}
+
+/**
  * Bill total from its line sums, applying the scheme discount then rounding to the rupee.
  * `roundOffAmount` is what was added or removed by rounding, so the stored columns always
  * reproduce the printed figure.

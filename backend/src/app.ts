@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
@@ -27,6 +28,16 @@ const PORT = process.env.PORT || 5000;
 
 // Security & Middleware
 app.use(helmet());
+
+/*
+ * Gzip every response.
+ *
+ * The catalogue and inventory lists are ~1.8MB of JSON each and are fetched on every app load;
+ * uncompressed that is the largest single cost of opening the software over a shop's broadband.
+ * The same payload compresses to a fraction of that, and the shape of the data (repeated keys,
+ * repeated medicine names) is close to the best case for gzip.
+ */
+app.use(compression());
 
 // Restrict browser access to known origins. Set CORS_ORIGINS (comma-separated) in production.
 const configuredOrigins = (process.env.CORS_ORIGINS || '')

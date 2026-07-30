@@ -109,7 +109,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   const discountRatio = grossSubtotal > 0 ? (netBilledVal / grossSubtotal) : 1;
   const totalGstIncluded = items.reduce((acc: number, i) => {
     const itemTotal = (Number(i.quantity) || 0) * (Number(i.unitPrice || 0));
-    const gstRate = Number(i.taxPercent ?? i.product?.gstPercent ?? 12);
+    const gstRate = Number(i.taxPercent ?? i.product?.gstPercent ?? 0);
     const itemTax = itemTotal * (gstRate / (100 + gstRate));
     return acc + itemTax;
   }, 0) * discountRatio;
@@ -242,7 +242,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
               {items.map((item, idx) => {
-                const itemGst = Number(item.taxPercent ?? item.product?.gstPercent ?? 12);
+                const itemGst = Number(item.taxPercent ?? item.product?.gstPercent ?? 0);
                 const unitPrice = Number(item.unitPrice || 0);
                 const qty = Number(item.quantity) || 0;
                 

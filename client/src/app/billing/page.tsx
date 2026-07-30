@@ -204,6 +204,8 @@ function NewSalePageContent() {
                 expiryDate: i.batch?.expiryDate ? new Date(i.batch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
                 mrp: i.batch?.mrp || (i.unitPrice ? i.unitPrice * packSize : 0),
                 discountPercent: i.discountPercent || 0,
+                // The rate the bill was actually taxed at, so an edit re-saves it unchanged.
+                taxPercent: i.taxPercent ?? i.batch?.taxPercent ?? i.product?.gstPercent ?? 0,
                 quantityStrips: strips,
                 quantityLoose: loose,
                 packSize: packSize,
@@ -292,6 +294,9 @@ function NewSalePageContent() {
       batchNumber: firstBatch?.batchNumber || 'DEF-001',
       expiryDate: firstBatch?.expiryDate ? new Date(firstBatch.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
       mrp: firstBatch?.mrp || invItem.mrp || 0,
+      // The rate this stock was bought at. The server derives it from the batch too, so what the
+      // counter shows and what the invoice stores cannot drift apart.
+      taxPercent: firstBatch?.taxPercent || invItem.gstPercent || 0,
       discountPercent: 0,
       quantityStrips: 1,
       quantityLoose: 0,
@@ -371,14 +376,23 @@ function NewSalePageContent() {
     ? (grossSubtotal * (schemeDiscountValue / 100))
     : schemeDiscountValue;
 
-  // MRP is tax-inclusive by Indian GST law for Retail Pharmacy POS:
-  // Grand Total = Total MRP - Discounts
-  // Taxable Subtotal = Grand Total / (1 + TaxRate)
-  // GST Tax Amount = Grand Total - Taxable Subtotal
+  /*
+   * MRP is tax-inclusive under Indian retail GST, so tax is carved out of the price rather than
+   * added to it. Each line is extracted at its own rate — the one its batch was purchased at —
+   * instead of a flat 12% average, which mis-stated every 5% and 18% medicine.
+   *
+   * The bill-level discount is money never collected, so it comes off before the split, spread
+   * across the lines in proportion to their value. Same rule as splitInclusiveTax on the server.
+   */
   const rawGrandTotal = Math.max(0, grossSubtotal - schemeDiscountAmount);
-  const gstRate = 0.12; // 12% default average GST
-  const netTaxable = rawGrandTotal / (1 + gstRate);
-  const gstTotal = rawGrandTotal - netTaxable;
+  const discountFactor = grossSubtotal > 0 ? rawGrandTotal / grossSubtotal : 1;
+  const gstTotal = items.reduce((sum, item) => {
+    const rate = (item.taxPercent ?? item.gstPercent ?? 0) / 100;
+    if (rate <= 0) return sum;
+    const net = getItemLineTotal(item) * discountFactor;
+    return sum + (net - net / (1 + rate));
+  }, 0);
+  const netTaxable = rawGrandTotal - gstTotal;
 
   const grandTotal = isRoundOff ? Math.round(rawGrandTotal) : rawGrandTotal;
 
@@ -441,7 +455,8 @@ function NewSalePageContent() {
           batchId: i.batchId,
           quantity: ((i.quantityStrips || 0) * (i.packSize || 1)) + (i.quantityLoose || 0),
           unitPrice: (i.mrp || 0) / (i.packSize || 1),
-          taxPercent: i.taxPercent !== undefined ? i.taxPercent : (i.gstPercent !== undefined ? i.gstPercent : 12),
+          // Advisory only: the server re-reads the rate from the batch being sold.
+          taxPercent: i.taxPercent ?? i.gstPercent ?? 0,
           discountPercent: i.discountPercent || 0,
         })),
       };
@@ -863,6 +878,7 @@ function NewSalePageContent() {
                             batchId: b.id,
                             batchNumber: b.batchNumber,
                             mrp: b.mrp,
+                            taxPercent: b.taxPercent || updated[idx].taxPercent || 0,
                             expiryDate: b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-GB', { month: '2-digit', year: '2-digit' }) : '07/27',
                           };
                           setItems(updated);

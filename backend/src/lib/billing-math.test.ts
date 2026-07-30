@@ -13,6 +13,7 @@ import {
   purchaseLineTotals,
   saleLineTotals,
   billTotals,
+  splitInclusiveTax,
   nextSeriesNumber,
   unitsReceived,
   batchKey,
@@ -125,6 +126,56 @@ describe('saleLineTotals — MRP is tax-inclusive, so GST comes out of the price
 
   it('handles a zero tax rate without dividing by zero', () => {
     expect(saleLineTotals({ quantity: 2, unitPrice: 50, taxPercent: 0 }).tax).toBe(0);
+  });
+});
+
+describe('splitInclusiveTax — no GST is due on a discount never collected', () => {
+  it('taxes each line at its own rate', () => {
+    // Was: the counter sent a flat 12% for every line, so a 5% medicine was declared at 12%.
+    const r = splitInclusiveTax([
+      { total: 105, taxPercent: 5 },
+      { total: 112, taxPercent: 12 },
+    ]);
+    expect(r.taxTotal).toBe(17);
+    expect(r.subtotal).toBe(200);
+  });
+
+  it('takes the bill-level discount off before extracting tax', () => {
+    // Rs 210 of 5% goods with Rs 10 off: tax is on the 200 charged, not on the 210 listed.
+    const r = splitInclusiveTax([{ total: 210, taxPercent: 5 }], 10);
+    expect(r.netTotal).toBe(200);
+    expect(r.taxTotal).toBe(money(200 - 200 / 1.05));
+    expect(money(r.subtotal + r.taxTotal)).toBe(200);
+  });
+
+  it('spreads the discount across lines in proportion to their value', () => {
+    const r = splitInclusiveTax(
+      [
+        { total: 300, taxPercent: 12 },
+        { total: 100, taxPercent: 5 },
+      ],
+      40
+    );
+    // 10% off the bill: 270 at 12% and 90 at 5%.
+    expect(r.netTotal).toBe(360);
+    expect(r.taxTotal).toBe(money(270 - 270 / 1.12 + (90 - 90 / 1.05)));
+  });
+
+  it('always reproduces the total actually charged', () => {
+    const r = splitInclusiveTax([{ total: 99.99, taxPercent: 18 }, { total: 0.01, taxPercent: 0 }], 7.5);
+    expect(money(r.subtotal + r.taxTotal)).toBe(r.netTotal);
+  });
+
+  it('never returns a negative total when the discount exceeds the bill', () => {
+    const r = splitInclusiveTax([{ total: 100, taxPercent: 12 }], 500);
+    expect(r.netTotal).toBe(0);
+    expect(r.taxTotal).toBe(0);
+  });
+
+  it('leaves untaxed lines untaxed', () => {
+    const r = splitInclusiveTax([{ total: 250 }], 0);
+    expect(r.taxTotal).toBe(0);
+    expect(r.subtotal).toBe(250);
   });
 });
 

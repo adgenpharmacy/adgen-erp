@@ -188,6 +188,10 @@ model InventoryBatch {
   quantity       Float           @default(0)
   mrp            Float
   purchaseRate   Float
+  /// GST rate as it was entered on the supplier bill that brought this batch in. Sales read the
+  /// rate from here so output tax matches the input tax actually recorded for the same stock,
+  /// instead of a flat assumption made at the counter. 0 means the purchase carried no rate.
+  taxPercent     Float           @default(0)
   purchaseDate   DateTime        @default(now())
   purchaseBillId String?
   createdAt      DateTime        @default(now())

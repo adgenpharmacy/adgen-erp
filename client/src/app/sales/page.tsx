@@ -19,6 +19,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PageMain from '@/components/layout/PageMain';
+import DayNavigator, { isOnDay, todayKey } from '@/components/common/DayNavigator';
 import {
   Button,
   Card,
@@ -60,6 +61,17 @@ export default function SalesPage() {
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [inspectBill, setInspectBill] = useState<Sale | null>(null);
+  // The counter opens this screen to see the day it is working on, not the whole history.
+  const [day, setDay] = useState<string | null>(() => todayKey());
+  /**
+   * Bills whose *line items* match the search term.
+   *
+   * The cached list carries no lines, so "which bills had Dolo on them" cannot be answered in
+   * the browser. The term is sent to the server, which matches medicine names as well, and the
+   * result replaces the local matches once it lands.
+   */
+  const [productMatches, setProductMatches] = useState<Sale[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   /**
    * The list is fetched without its lines, so the detail view loads them on demand. Shows the
@@ -80,6 +92,36 @@ export default function SalesPage() {
     setIsMounted(true);
     setSales(cachedSales);
   }, [cachedSales]);
+
+  // Debounced so typing a medicine name is one request, not one per keystroke.
+  useEffect(() => {
+    const term = search.trim();
+    if (term.length < 2) {
+      setProductMatches(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .get<Sale[]>(`/sales?summary=1&q=${encodeURIComponent(term)}`)
+        .then((res) => {
+          if (!cancelled) setProductMatches(res.data || []);
+        })
+        .catch(() => {
+          // Leave the local matches on screen rather than emptying the list on a failed search.
+          if (!cancelled) setProductMatches(null);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search]);
 
   // Helper for Title Case
   const toTitleCase = (str: string) => {
@@ -106,14 +148,51 @@ export default function SalesPage() {
     }
   };
 
-  // Header KPI Statistics
+  const isSearching = search.trim().length > 0;
+
+  /*
+   * A search looks across every date — asking "when did we sell this" and being shown only
+   * today's bills is worse than useless. The day filter applies to browsing, not to searching.
+   */
+  const filteredSales = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const source = isSearching ? (productMatches ?? sales) : sales;
+
+    return source
+      .filter((s) => {
+        // Server-matched rows already satisfy the term (including by medicine name).
+        const matchesSearch =
+          !isSearching ||
+          productMatches !== null ||
+          (s.invoiceNumber || '').toLowerCase().includes(q) ||
+          (s.customerName || s.customer?.name || '').toLowerCase().includes(q) ||
+          (s.customerPhone || s.customer?.phone || '').includes(q);
+
+        const matchesDay = isSearching || day === null || isOnDay(s.createdAt, day);
+
+        const m = (s.paymentMethod || 'CASH').toUpperCase();
+        const matchesMethod = methodFilter === 'ALL' || m === methodFilter;
+
+        return matchesSearch && matchesDay && matchesMethod;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+  }, [sales, search, methodFilter, day, isSearching, productMatches]);
+
+  /*
+   * The figures describe what is on screen. Totalling every bill ever while the table showed a
+   * single day meant the cards and the rows below them never agreed.
+   */
   const stats = useMemo(() => {
     let totalRevenue = 0;
     let cashTotal = 0;
     let upiTotal = 0;
     let creditTotal = 0;
 
-    sales.forEach((s) => {
+    filteredSales.forEach((s) => {
       const total = s.grandTotal || 0;
       totalRevenue += total;
       const m = (s.paymentMethod || 'CASH').toUpperCase();
@@ -128,34 +207,13 @@ export default function SalesPage() {
     });
 
     return {
-      totalInvoices: sales.length,
+      totalInvoices: filteredSales.length,
       totalRevenue,
       cashTotal,
       upiTotal,
       creditTotal,
     };
-  }, [sales]);
-
-  const filteredSales = useMemo(() => {
-    return sales
-      .filter((s) => {
-        const q = search.toLowerCase();
-        const matchesSearch =
-          (s.invoiceNumber || '').toLowerCase().includes(q) ||
-          (s.customerName || s.customer?.name || '').toLowerCase().includes(q) ||
-          (s.customerPhone || s.customer?.phone || '').includes(q);
-
-        const m = (s.paymentMethod || 'CASH').toUpperCase();
-        const matchesMethod = methodFilter === 'ALL' || m === methodFilter;
-
-        return matchesSearch && matchesMethod;
-      })
-      .sort((a, b) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
-  }, [sales, search, methodFilter]);
+  }, [filteredSales]);
 
   const getPaymentTone = (method?: string): { label: string; tone: 'success' | 'accent' | 'warning' | 'info' } => {
     const m = (method || 'CASH').toUpperCase();
@@ -170,7 +228,11 @@ export default function SalesPage() {
     <PageMain>
       <PageHeader
         title="Sales Invoices"
-        subtitle={`${stats.totalInvoices.toLocaleString('en-IN')} bills issued · counter POS memos`}
+        subtitle={
+          isSearching
+            ? `${stats.totalInvoices.toLocaleString('en-IN')} bills match “${search.trim()}” · all dates`
+            : `${stats.totalInvoices.toLocaleString('en-IN')} bills · ${day === null ? 'all dates' : 'selected day'}`
+        }
         action={
           <>
             <Button
@@ -201,16 +263,33 @@ export default function SalesPage() {
       </div>
 
       <Card className="mt-4 p-3">
+        <DayNavigator
+          value={day}
+          onChange={setDay}
+          summary={isSearching ? 'Search ignores the date — showing every match' : undefined}
+          className="mb-3"
+        />
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <Input
-            icon={Search}
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by invoice #, customer name, or phone…"
-            className="flex-1"
-            aria-label="Search sales"
-          />
+          <div className="flex-1">
+            <Input
+              icon={Search}
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search invoice #, customer, phone, or medicine name…"
+              className="w-full"
+              aria-label="Search sales"
+            />
+            {isSearching ? (
+              <p className="mt-1 pl-1 text-[11px] font-semibold text-fg-subtle">
+                {searching
+                  ? 'Searching medicines on every bill…'
+                  : productMatches !== null
+                    ? `Includes bills containing a medicine named like “${search.trim()}”.`
+                    : 'Matching invoice number, customer and phone.'}
+              </p>
+            ) : null}
+          </div>
           <div className="flex items-center gap-1 rounded-md bg-sunken p-1 overflow-x-auto">
             {METHOD_TABS.map((tab) => (
               <button
@@ -236,10 +315,18 @@ export default function SalesPage() {
           <EmptyState
             icon={Receipt}
             title="No sales bills found"
-            message={search ? `Nothing matches “${search}” in this filter.` : 'Raise a bill at the counter to see it here.'}
+            message={
+              search
+                ? `Nothing matches “${search}” in this filter.`
+                : day !== null
+                  ? 'No bills on this day. Step back a day, or switch to All dates.'
+                  : 'Raise a bill at the counter to see it here.'
+            }
             action={
               search ? (
                 <Button variant="outline" onClick={() => setSearch('')}>Clear search</Button>
+              ) : day !== null ? (
+                <Button variant="outline" onClick={() => setDay(null)}>Show all dates</Button>
               ) : (
                 <Link
                   href="/billing"
