@@ -174,7 +174,9 @@ function NewPurchasePageContent() {
               freeQuantity: i.freeQuantity || 0,
               mrp: i.mrp || 0,
               purchaseRate: i.purchaseRate || 0,
-              gstPercent: i.taxPercent || 12,
+              // `|| 12` turned a genuine 0% line into 12% the moment the bill was opened for
+              // editing, and re-saved it that way. Only a missing rate falls back.
+              gstPercent: i.taxPercent ?? 12,
               isCustomGst: false,
               discountPercent: i.discountPercent || 0,
               packSize: i.product?.packSize || 1,

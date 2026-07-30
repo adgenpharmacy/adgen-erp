@@ -136,7 +136,8 @@ export default function ProductsPage() {
       genericName: p.genericName || '',
       companyName: p.companyName || '',
       hsnCode: p.hsnCode || '3004',
-      gstPercent: p.gstPercent || 12,
+      // A 0% (exempt) product opened for editing came back as 12% and saved that way.
+      gstPercent: p.gstPercent ?? 12,
       mrp: p.mrp || 0,
       purchaseRate: p.purchaseRate || 0,
       productType: p.productType || 'TABLET',

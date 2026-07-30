@@ -167,7 +167,11 @@ export default function NewProductPage() {
               <Field label="GST Tax %">
                 <Select
                   value={formData.gstPercent}
-                  onChange={(e) => setFormData({ ...formData, gstPercent: parseFloat(e.target.value) || 12 })}
+                  onChange={(e) => {
+                    // Not `|| 12`: that silently turned the "0% (Exempt)" option into 12%.
+                    const chosen = parseFloat(e.target.value);
+                    setFormData({ ...formData, gstPercent: Number.isFinite(chosen) ? chosen : 12 });
+                  }}
                 >
                   <option value={0}>0% (Exempt)</option>
                   <option value={5}>5%</option>
