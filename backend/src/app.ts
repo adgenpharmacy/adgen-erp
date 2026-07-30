@@ -22,6 +22,7 @@ import settingsRoutes from './routes/settings.routes';
 import stockAdjustmentRoutes from './routes/stock-adjustments.routes';
 
 import { requestLogger } from './middlewares/logger.middleware';
+import { maintenanceMode } from './middlewares/maintenance.middleware';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -97,6 +98,10 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
 });
+
+// Ahead of the rate limiter and every route: when MAINTENANCE_MODE is set nothing gets through
+// to the database at all. /health is deliberately outside this so the platform can still probe.
+app.use('/api', maintenanceMode);
 
 app.use('/api', apiLimiter);
 // Credential endpoints get the strict limiter — without it passwords were brute-forceable.

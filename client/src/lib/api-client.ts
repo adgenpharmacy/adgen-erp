@@ -40,6 +40,29 @@ export const api = axios.create({
   },
 });
 
+/** Event the maintenance overlay listens for. */
+export const MAINTENANCE_EVENT = 'adgen:maintenance';
+
+/*
+ * The server answers 503 with `maintenance: true` while the database is being worked on. Without
+ * this every screen would just show its own "failed to load" toast, which reads as a bug and
+ * invites staff to retry — or worse, to keep writing bills on paper and enter them later into a
+ * database that is about to be replaced. Announce it once, loudly, app-wide.
+ */
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 503 && error.response.data?.maintenance) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(MAINTENANCE_EVENT, { detail: { message: error.response.data.error } })
+        );
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('adgen_token');

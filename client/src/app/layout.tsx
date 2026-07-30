@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { ErpDataProvider } from "@/context/ErpDataContext";
 import AuthGuard from "@/components/layout/AuthGuard";
 import AppShell from "@/components/layout/AppShell";
+import MaintenanceOverlay from "@/components/layout/MaintenanceOverlay";
 import { ToastProvider, ConfirmProvider } from "@/components/ui";
 import "./globals.css";
 
@@ -59,6 +60,8 @@ export default function RootLayout({
                 <AuthGuard>
                   <AppShell>{children}</AppShell>
                 </AuthGuard>
+                {/* Outside AuthGuard: it must show on the login screen too. */}
+                <MaintenanceOverlay />
               </ErpDataProvider>
             </AuthProvider>
           </ConfirmProvider>
