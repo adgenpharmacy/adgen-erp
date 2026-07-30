@@ -363,6 +363,21 @@ function NewSalePageContent() {
     return Math.max(0, lineGross - disc);
   };
 
+  /*
+   * Three different "subtotals", kept apart on purpose.
+   *
+   * The summary used to print grossSubtotal — which is already net of the per-item discounts —
+   * under the label "Gross Subtotal", and then show "(−) Item Discounts" beneath it. The column
+   * therefore did not add up to the grand total, and read as though the discount had been taken
+   * twice. The arithmetic was right all along; only the statement was wrong.
+   */
+  const grossBeforeDiscounts = items.reduce((sum, item) => {
+    if (!item.productId) return sum;
+    const packSize = item.packSize || 1;
+    const totalContentUnits = ((item.quantityStrips || 0) * packSize) + (item.quantityLoose || 0);
+    return sum + totalContentUnits * ((item.mrp || 0) / packSize);
+  }, 0);
+
   const grossSubtotal = items.reduce((sum, item) => sum + getItemLineTotal(item), 0);
   const totalItemDiscount = items.reduce((sum, item) => {
     const packSize = item.packSize || 1;
@@ -685,15 +700,28 @@ function NewSalePageContent() {
           <Card>
             <CardHeader title="Invoice Summary" />
             <CardBody className="space-y-3">
+              {/* Every row below subtracts from the one above it, down to the grand total. */}
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-fg-muted">Gross Subtotal</dt>
-                  <dd className="font-mono font-bold">{formatCurrency(grossSubtotal)}</dd>
+                  <dt className="text-fg-muted">Gross Value (MRP)</dt>
+                  <dd className="font-mono font-bold">{formatCurrency(grossBeforeDiscounts)}</dd>
                 </div>
                 {totalItemDiscount > 0 ? (
+                  <>
+                    <div className="flex justify-between text-brand">
+                      <dt>(−) Item Discounts</dt>
+                      <dd className="font-mono font-bold">−{formatCurrency(totalItemDiscount)}</dd>
+                    </div>
+                    <div className="flex justify-between border-t border-line pt-2">
+                      <dt className="font-semibold text-fg">Subtotal after item discounts</dt>
+                      <dd className="font-mono font-bold">{formatCurrency(grossSubtotal)}</dd>
+                    </div>
+                  </>
+                ) : null}
+                {schemeDiscountAmount > 0 ? (
                   <div className="flex justify-between text-brand">
-                    <dt>(−) Item Discounts</dt>
-                    <dd className="font-mono font-bold">−{formatCurrency(totalItemDiscount)}</dd>
+                    <dt>(−) Bill Discount</dt>
+                    <dd className="font-mono font-bold">−{formatCurrency(schemeDiscountAmount)}</dd>
                   </div>
                 ) : null}
               </dl>

@@ -116,6 +116,18 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
 
   const taxableSubtotalVal = Math.max(0, netBilledVal - totalGstIncluded);
 
+  /*
+   * A shop with no GSTIN is not registered, and an unregistered dealer may not issue a tax
+   * invoice or show GST as a separate charge — it collects none. Printing a tax breakup it does
+   * not remit is a compliance problem, and it is also what made the owner believe tax was being
+   * deducted somewhere it should not be.
+   *
+   * Driven by the GSTIN on the profile, the same fact the reports switch on, so the printed bill
+   * and the P&L can never tell different stories. Entering a GSTIN in Admin restores the full
+   * tax invoice everywhere at once.
+   */
+  const gstRegistered = Boolean((profile?.gstNumber || '').trim());
+
   return (
     <Portal>
     <div 
@@ -134,7 +146,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             <Printer className="w-4 h-4 text-emerald-600" />
             {/* No "INV-" literal here: the stored number already carries its own series
                 prefix, so prepending one printed "INV-INV-000008" on the tax invoice. */}
-            <span>Retail Tax Invoice {activeInvoice.invoiceNumber || activeInvoice.id}</span>
+            <span>{gstRegistered ? 'Retail Tax Invoice' : 'Retail Bill'} {activeInvoice.invoiceNumber || activeInvoice.id}</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -181,7 +193,8 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 </p>
                 <div className="text-[10px] text-slate-600 font-medium mt-1 leading-tight">
                   {formatPharmacyAddress(profile) || '—'}<br />
-                  <strong>DL No:</strong> {profile?.dlNumber || '—'} | <strong>GSTIN:</strong> {profile?.gstNumber || '—'}<br />
+                  <strong>DL No:</strong> {profile?.dlNumber || '—'}
+                  {gstRegistered ? <> | <strong>GSTIN:</strong> {profile?.gstNumber}</> : null}<br />
                   <strong>Phone:</strong> {profile?.phone || '—'} | <strong>Email:</strong> {profile?.email || '—'}
                 </div>
               </div>
@@ -236,7 +249,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <th className="py-2 px-2">Exp</th>
                 <th className="py-2 px-2 text-center">Qty</th>
                 <th className="py-2 px-2 text-right">MRP (₹)</th>
-                <th className="py-2 px-2 text-right">GST %</th>
+                {gstRegistered ? <th className="py-2 px-2 text-right">GST %</th> : null}
                 <th className="py-2 px-2 text-right">Total (₹)</th>
               </tr>
             </thead>
@@ -273,7 +286,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                     </td>
                     <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">{formatQuantity(qty)}</td>
                     <td className="py-2 px-2 text-right font-mono">₹{unitPrice.toFixed(2)}</td>
-                    <td className="py-2 px-2 text-right font-mono">{itemGst}%</td>
+                    {gstRegistered ? <td className="py-2 px-2 text-right font-mono">{itemGst}%</td> : null}
                     <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-900">₹{lineTotal.toFixed(2)}</td>
                   </tr>
                 );
@@ -327,7 +340,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <p className="font-bold text-slate-700 uppercase">Notes & Statutory Declarations:</p>
                 <p>1. Rates are GST-Inclusive as per Drugs (Prices Control) Order.</p>
                 <p>2. Goods once sold cannot be returned without original cash memo.</p>
-                <p>3. Schedule H & H1 medicines sold against Doctor's prescription only.</p>
+                <p>3. Schedule H &amp; H1 medicines sold against Doctor&apos;s prescription only.</p>
               </div>
             </div>
 
@@ -357,18 +370,22 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <span className="font-mono">₹{netBilledVal.toFixed(2)}</span>
               </div>
 
-              <div className="flex justify-between text-slate-500 text-[11px] pt-1 border-t border-dashed border-slate-200">
-                <span>Taxable Value (Excl. Tax):</span>
-                <span className="font-mono">₹{taxableSubtotalVal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>(+) CGST (Central Tax Included):</span>
-                <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>(+) SGST (State Tax Included):</span>
-                <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
-              </div>
+              {gstRegistered ? (
+                <>
+                  <div className="flex justify-between text-slate-500 text-[11px] pt-1 border-t border-dashed border-slate-200">
+                    <span>Taxable Value (Excl. Tax):</span>
+                    <span className="font-mono">₹{taxableSubtotalVal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>(+) CGST (Central Tax Included):</span>
+                    <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 text-[11px]">
+                    <span>(+) SGST (State Tax Included):</span>
+                    <span className="font-mono">₹{(totalGstIncluded / 2).toFixed(2)}</span>
+                  </div>
+                </>
+              ) : null}
 
               {roundOffVal !== 0 && (
                 <div className="flex justify-between text-slate-500 text-[11px]">

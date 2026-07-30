@@ -107,7 +107,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
               items: {
                 include: {
                   product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
-                  batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true } },
+                  // taxPercent: the rate this stock was bought at. Reports need it to value COGS
+                  // inclusive of tax when the shop is not GST-registered and cannot reclaim it.
+                  batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true, taxPercent: true } },
                 },
               },
             }),

@@ -169,6 +169,8 @@ export interface SaleItemBatch {
   expiryDate: IsoDate;
   purchaseRate: number;
   mrp: number;
+  /** GST rate this stock was purchased at. Part of the cost when it cannot be reclaimed. */
+  taxPercent?: number;
 }
 
 export interface SaleItem {
