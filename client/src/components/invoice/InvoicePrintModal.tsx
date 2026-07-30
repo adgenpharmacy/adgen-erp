@@ -54,8 +54,9 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   const handlePrint = () => {
     const originalTitle = document.title;
     const invNum = activeInvoice.invoiceNumber || activeInvoice.id || 'Draft';
-    const custName = (activeInvoice.customerName || activeInvoice.customer?.name || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-    document.title = `Tax_Invoice_${invNum}_${custName}_AdGen_Pharma`;
+    const patientName = (activeInvoice.customerName || activeInvoice.customer?.name || 'Patient').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const shopSlug = (profile?.name || 'AdGen Pharma').replace(/[^a-zA-Z0-9_-]/g, '_');
+    document.title = `${gstRegistered ? 'Tax_Invoice' : 'Bill'}_${invNum}_${patientName}_${shopSlug}`;
     window.print();
     setTimeout(() => {
       document.title = originalTitle;
@@ -63,8 +64,11 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
   };
 
   const handleShare = async () => {
-    const customer = activeInvoice.customerName || activeInvoice.customer?.name || 'Customer';
-    const text = `*ADGEN PHARMACY - RETAIL CASH MEMO*\n----------------------------\nInvoice #: ${activeInvoice.invoiceNumber}\nDate: ${formatDate(activeInvoice.createdAt)}\nCustomer: ${customer}\nDoctor: ${activeInvoice.doctorName || 'N/A'}\n----------------------------\n*Grand Total: ₹${activeInvoice.grandTotal?.toFixed(2)}*\nPayment: ${activeInvoice.paymentMethod || 'CASH'}\n----------------------------\nThank you for choosing AdGen Pharmacy!`;
+    // Shop name comes from the profile rather than a literal, so a rename in Admin reaches the
+    // shared message too instead of leaving "ADGEN PHARMACY" behind on every WhatsApp bill.
+    const patient = activeInvoice.customerName || activeInvoice.customer?.name || 'Patient';
+    const shopName = (profile?.name || 'AdGen Pharma') + (profile?.tagline ? ` - ${profile.tagline}` : '');
+    const text = `*${shopName.toUpperCase()}*\n----------------------------\nBill #: ${activeInvoice.invoiceNumber}\nDate: ${formatDate(activeInvoice.createdAt)}\nPatient: ${patient}\nContact: ${activeInvoice.customerPhone || activeInvoice.customer?.phone || '-'}\nDr. Name: ${activeInvoice.doctorName || '-'}\n----------------------------\n*Net Amount: ₹${activeInvoice.grandTotal?.toFixed(2)}*\nPayment: ${activeInvoice.paymentMethod || 'CASH'}\n----------------------------\nWell wishing, ${shopName}`;
     
     if (navigator.share) {
       try {
@@ -202,7 +206,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
 
             <div className="text-right">
               <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-900 font-extrabold text-[11px] rounded-lg uppercase tracking-wider mb-2 print:bg-slate-200 print:text-black">
-                RETAIL TAX INVOICE
+                {gstRegistered ? 'RETAIL TAX INVOICE' : 'RETAIL BILL'}
               </span>
               <div className="text-xs font-mono font-extrabold text-slate-900">
                 {activeInvoice.invoiceNumber || activeInvoice.id}
@@ -216,26 +220,41 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
             </div>
           </div>
 
-          {/* Customer & Doctor Info */}
-          <div className="bg-slate-50 border border-slate-200/90 p-3 rounded-xl mb-4 flex justify-between items-center text-xs print:bg-transparent print:border-slate-300">
-            <div>
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Customer / Patient:</span>
+          {/*
+            Patient details.
+
+            Every field is printed whether or not it was filled in — a pharmacy bill is a record
+            someone may have to complete by hand afterwards, and a row that disappears when empty
+            leaves no space to write in. Blank fields print a rule instead of vanishing.
+          */}
+          <div className="bg-slate-50 border border-slate-200/90 p-3 rounded-xl mb-4 grid grid-cols-2 gap-x-6 gap-y-2 text-xs print:bg-transparent print:border-slate-300">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider shrink-0">Patient:</span>
               <span className="font-extrabold text-slate-900 text-sm">
-                {activeInvoice.customerName || activeInvoice.customer?.name || 'Walk-in Customer'}
+                {activeInvoice.customerName || activeInvoice.customer?.name || 'Walk-in Patient'}
               </span>
-              {(activeInvoice.customerPhone || activeInvoice.customer?.phone) && (
-                <span className="text-slate-600 font-medium ml-2 font-mono">
-                  (📞 {activeInvoice.customerPhone || activeInvoice.customer?.phone})
-                </span>
-              )}
             </div>
 
-            {activeInvoice.doctorName && (
-              <div className="text-right">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Prescribed By:</span>
-                <span className="font-bold text-slate-900">Dr. {activeInvoice.doctorName}</span>
-              </div>
-            )}
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider shrink-0">Contact:</span>
+              <span className="font-semibold text-slate-900 font-mono">
+                {activeInvoice.customerPhone || activeInvoice.customer?.phone || <span className="inline-block w-32 border-b border-slate-300" />}
+              </span>
+            </div>
+
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider shrink-0">Dr. Name:</span>
+              <span className="font-semibold text-slate-900">
+                {activeInvoice.doctorName || <span className="inline-block w-32 border-b border-slate-300" />}
+              </span>
+            </div>
+
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider shrink-0">Address:</span>
+              <span className="font-semibold text-slate-900">
+                {activeInvoice.notes || activeInvoice.customer?.address || <span className="inline-block w-40 border-b border-slate-300" />}
+              </span>
+            </div>
           </div>
 
           {/* Itemized Table */}
@@ -247,10 +266,11 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <th className="py-2 px-2">HSN</th>
                 <th className="py-2 px-2">Batch</th>
                 <th className="py-2 px-2">Exp</th>
-                <th className="py-2 px-2 text-center">Qty</th>
+                <th className="py-2 px-2 text-center">Pack / Strip</th>
+                <th className="py-2 px-2 text-center">Loose / Tab</th>
                 <th className="py-2 px-2 text-right">MRP (₹)</th>
                 {gstRegistered ? <th className="py-2 px-2 text-right">GST %</th> : null}
-                <th className="py-2 px-2 text-right">Total (₹)</th>
+                <th className="py-2 px-2 text-right">Amount (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
@@ -270,6 +290,20 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                     ? stored
                     : qty * unitPrice * (1 - discountPercent / 100);
 
+                /*
+                 * Quantity is stored in content units (tablets). The counter dispenses in whole
+                 * packs plus loose units, so the bill shows it the way it was handed over.
+                 *
+                 * MRP stays the price of a full pack — that is the figure printed on the box and
+                 * the one a patient checks against. The amount is what varies with how much was
+                 * actually dispensed, so a customer buying 4 loose tablets from a strip of 10
+                 * sees the strip's MRP and pays four tenths of it.
+                 */
+                const packSize = Number(item.product?.packSize) || 1;
+                const packs = Math.floor(qty / packSize);
+                const loose = qty - packs * packSize;
+                const packMrp = Number(item.batch?.mrp) || unitPrice * packSize;
+
                 return (
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="py-2 px-2 font-mono text-slate-500">{idx + 1}</td>
@@ -284,8 +318,13 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                     <td className="py-2 px-2 text-slate-600 font-mono">
                       {item.batch?.expiryDate ? formatDate(item.batch.expiryDate) : '-'}
                     </td>
-                    <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">{formatQuantity(qty)}</td>
-                    <td className="py-2 px-2 text-right font-mono">₹{unitPrice.toFixed(2)}</td>
+                    <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">
+                      {packs > 0 ? formatQuantity(packs) : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-center font-extrabold text-slate-900 font-mono">
+                      {loose > 0 ? formatQuantity(loose) : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono">₹{packMrp.toFixed(2)}</td>
                     {gstRegistered ? <td className="py-2 px-2 text-right font-mono">{itemGst}%</td> : null}
                     <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-900">₹{lineTotal.toFixed(2)}</td>
                   </tr>
@@ -299,8 +338,9 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                 <td colSpan={5} className="py-2 px-2 text-left uppercase">
                   Total Items: {items.length} Medicines
                 </td>
-                <td className="py-2 px-2 text-center font-mono">{formatQuantity(totalQtyCount)}</td>
-                <td colSpan={2} className="py-2 px-2 text-right uppercase text-[11px]">
+                {/* Spans the pack and loose columns; the total is in dispensed units either way. */}
+                <td colSpan={2} className="py-2 px-2 text-center font-mono">{formatQuantity(totalQtyCount)}</td>
+                <td colSpan={gstRegistered ? 2 : 1} className="py-2 px-2 text-right uppercase text-[11px]">
                   Subtotal MRP:
                 </td>
                 <td className="py-2 px-2 text-right font-mono text-sm text-slate-900">
@@ -406,18 +446,15 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                   ₹{netPayableVal.toFixed(2)}
                 </span>
               </div>
-            </div>
-          </div>
 
-          {/* Authorized Signature Line */}
-          <div className="mt-8 pt-4 flex justify-between items-end border-t border-slate-200">
-            <div className="text-[10px] text-slate-500">
-              Thank you for trusting <strong>ADGEN PHARMA</strong>! Wish you good health.
-            </div>
-            <div className="text-center font-bold text-xs text-slate-800">
-              <div className="h-8"></div>
-              <div className="border-t border-slate-400 px-4 pt-1 text-[11px]">
-                For ADGEN PHARMA (Authorised Signatory)
+              {/*
+                Sign-off sits directly under the net amount, where the eye already is. The
+                authorised-signatory rule that used to close the bill has been dropped: nobody
+                signs a counter memo, so it printed an empty line on every bill.
+              */}
+              <div className="pt-2 text-center text-[11px] font-bold text-slate-700">
+                Well wishing, {profile?.name || 'AdGen Pharma'}
+                {profile?.tagline ? ` - ${profile.tagline}` : ''}
               </div>
             </div>
           </div>
