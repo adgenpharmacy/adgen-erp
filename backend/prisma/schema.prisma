@@ -26,6 +26,16 @@ enum ProductType {
   OTHERS
 }
 
+/// How a work session ended.
+enum AttendanceCloseReason {
+  /// The person pressed clock-out.
+  MANUAL
+  /// Closed automatically after the tab went quiet — someone shut the browser and went home.
+  TIMEOUT
+  /// An owner closed it by hand.
+  ADMIN
+}
+
 enum PartyType {
   SUPPLIER
   CUSTOMER
@@ -74,6 +84,7 @@ model User {
   updatedAt    DateTime      @updatedAt
   salesBills   SalesBill[]
   adjustments  StockAdjustment[]
+  attendance   AttendanceSession[]
 
   @@map("users")
 }
@@ -144,6 +155,30 @@ model Product {
 
   @@index([name])
   @@map("products")
+}
+
+/// One stretch of time a member of staff was on shift.
+///
+/// A row is opened at clock-in and closed at clock-out. `lastSeenAt` is refreshed while the tab
+/// is in use, so a session abandoned without clocking out can be closed at the last moment the
+/// person was actually there rather than left running overnight and counted as a 14-hour shift.
+model AttendanceSession {
+  id         String                 @id @default(uuid())
+  userId     String
+  clockInAt  DateTime               @default(now())
+  clockOutAt DateTime?
+  /// Refreshed by the app while the session is open; the fallback clock-out time.
+  lastSeenAt DateTime               @default(now())
+  closedBy   AttendanceCloseReason?
+  notes      String?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, clockInAt])
+  @@index([clockInAt])
+  @@map("attendance_sessions")
 }
 
 model Party {
@@ -338,6 +373,9 @@ model SalesReturn {
   returnNumber      String
   salesBillId       String?
   customerId        String?
+  /// Deduction withheld from the refund — restocking fee, damaged packaging, part credit.
+  /// totalReturnAmount is already net of it, so it is what the customer actually receives.
+  discount          Float             @default(0)
   totalReturnAmount Float
   refundMethod      String            @default("CASH")
   notes             String?
@@ -372,6 +410,8 @@ model PurchaseReturn {
   returnNumber      String
   purchaseBillId    String?
   partyId           String?
+  /// Deduction the supplier applies to the debit note. totalReturnAmount is net of it.
+  discount          Float                @default(0)
   totalReturnAmount Float
   refundMethod      String               @default("DEBIT_NOTE")
   notes             String?
@@ -388,6 +428,7 @@ model PurchaseReturnItem {
   purchaseReturnId String
   productId        String
   batchNumber      String?
+  expiryDate       DateTime?
   quantity         Float
   purchaseRate     Float
   totalAmount      Float

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { AuthProvider } from "@/context/AuthContext";
 import { ErpDataProvider } from "@/context/ErpDataContext";
+import { AttendanceProvider } from "@/context/AttendanceContext";
 import AuthGuard from "@/components/layout/AuthGuard";
 import AppShell from "@/components/layout/AppShell";
 import MaintenanceOverlay from "@/components/layout/MaintenanceOverlay";
@@ -57,9 +58,11 @@ export default function RootLayout({
           <ConfirmProvider>
             <AuthProvider>
               <ErpDataProvider>
+                <AttendanceProvider>
                 <AuthGuard>
                   <AppShell>{children}</AppShell>
                 </AuthGuard>
+                </AttendanceProvider>
                 {/* Outside AuthGuard: it must show on the login screen too. */}
                 <MaintenanceOverlay />
               </ErpDataProvider>

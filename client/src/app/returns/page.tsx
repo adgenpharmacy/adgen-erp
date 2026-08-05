@@ -1,290 +1,453 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
-import {
-  RotateCcw,
-  Plus,
-  RefreshCw,
-  Trash2,
-  ArrowLeftRight,
-} from 'lucide-react';
+import { RotateCcw, Plus, RefreshCw, Search, PackageX } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
 import { useErpData } from '@/context/ErpDataContext';
 import { invalidateCatalogCache } from '@/lib/catalog-cache';
-import type { ReturnRecord, Product } from '@/types';
+import type { ReturnRecord, Product, Sale, Purchase } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import {
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  Select,
-  Modal,
-  PageHeader,
-  StatusChip,
-  TableWrap,
-  Table,
-  THead,
-  TH,
-  TR,
-  TD,
-  TableSkeleton,
-  useToast,
+  Button, Card, EmptyState, Field, Input, Select, Modal, PageHeader, StatusChip,
+  TableWrap, Table, THead, TH, TR, TD, TableSkeleton, useToast,
 } from '@/components/ui';
 
-interface SalesReturnLineDraft {
+/**
+ * A return is now raised against the document that created the stock movement — the sales bill
+ * for a patient return, the supplier bill (or the expiring batch) for a return to a distributor.
+ *
+ * It used to be free text: the operator retyped the medicine, guessed the batch, and typed a
+ * price. That let goods be credited that were never sold, batches be invented, and refunds be
+ * given at the wrong price — and the over-return check only spoke up after the save failed.
+ * Everything below is chosen from what actually happened.
+ */
+
+interface ReturnableSaleLine {
   productId: string;
   productName: string;
-  batchNumber: string;
-  quantity: number;
+  packSize: number;
+  packUnit: string;
+  contentUnit: string;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  soldQuantity: number;
+  alreadyReturned: number;
+  returnableQuantity: number;
   unitPrice: number;
-  condition: 'RESTOCK' | 'DAMAGED' | string;
-  reason: string;
+  discountPercent: number;
+  taxPercent: number;
 }
 
-interface PurchaseReturnLineDraft {
+interface ReturnableSaleBill {
+  salesBillId: string;
+  invoiceNumber: string | null;
+  createdAt: string;
+  customerId: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  grandTotal: number;
+  lines: ReturnableSaleLine[];
+}
+
+interface ReturnablePurchaseLine {
   productId: string;
   productName: string;
+  packSize: number;
+  packUnit: string;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  daysToExpiry: number | null;
+  isExpired: boolean;
+  purchaseRate: number;
+  taxPercent: number;
+  receivedUnits: number;
+  alreadyReturned: number;
+  onHandUnits: number;
+  returnableUnits: number;
+}
+
+interface ReturnablePurchaseBill {
+  purchaseBillId: string;
+  invoiceNumber: string;
+  purchaseDate: string;
+  partyId: string | null;
+  partyName: string | null;
+  grandTotal: number;
+  lines: ReturnablePurchaseLine[];
+}
+
+interface ExpiredBatch {
+  batchId: string;
+  productId: string;
+  productName: string;
+  packSize: number;
   batchNumber: string;
+  expiryDate: string;
+  daysToExpiry: number;
   quantity: number;
   purchaseRate: number;
-  reason: string;
+  purchaseBillId: string | null;
+  invoiceNumber: string | null;
+  partyId: string | null;
+  partyName: string | null;
 }
 
-const EMPTY_SR_ITEM: SalesReturnLineDraft = {
-  productId: '', productName: '', batchNumber: '', quantity: 1, unitPrice: 0,
-  condition: 'RESTOCK', reason: 'Customer Changed Mind',
-};
-
-const EMPTY_PR_ITEM: PurchaseReturnLineDraft = {
-  productId: '', productName: '', batchNumber: '', quantity: 1, purchaseRate: 0,
-  reason: 'Damaged Packaging',
-};
+/** What the operator has decided to send back, keyed by line. */
+type Picked = Record<string, { quantity: number; condition?: string; reason?: string }>;
 
 export default function ReturnsPage() {
   const toast = useToast();
-  const { refreshData, parties } = useErpData();
+  const { refreshData } = useErpData();
+
   const [activeTab, setActiveTab] = useState<'SALES' | 'PURCHASE'>('SALES');
   const [salesReturns, setSalesReturns] = useState<ReturnRecord[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<ReturnRecord[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Modals state
-  const [showSalesReturnModal, setShowSalesReturnModal] = useState(false);
-  const [showPurchaseReturnModal, setShowPurchaseReturnModal] = useState(false);
-  const [inspectReturn, setInspectReturn] = useState<(ReturnRecord & { returnType: 'SALES' | 'PURCHASE' }) | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [inspect, setInspect] = useState<(ReturnRecord & { returnType: 'SALES' | 'PURCHASE' }) | null>(null);
 
-  // Sales Return Form State
-  const [srCustomerName, setSrCustomerName] = useState('');
-  const [srRefundMethod, setSrRefundMethod] = useState<'CASH' | 'UPI' | 'CREDIT_NOTE'>('CASH');
+  const productName = (productId: string) => products.find((p) => p.id === productId)?.name || 'Medicine';
+
+  // ── Patient return composer ───────────────────────────────────────────────
+  const [srOpen, setSrOpen] = useState(false);
+  const [srSearch, setSrSearch] = useState('');
+  const [srBills, setSrBills] = useState<Sale[]>([]);
+  const [srBill, setSrBill] = useState<ReturnableSaleBill | null>(null);
+  const [srPicked, setSrPicked] = useState<Picked>({});
+  const [srDeduction, setSrDeduction] = useState(0);
+  const [srRefundMethod, setSrRefundMethod] = useState('CASH');
   const [srNotes, setSrNotes] = useState('');
-  const [srItems, setSrItems] = useState<SalesReturnLineDraft[]>([{ ...EMPTY_SR_ITEM }]);
 
-  // Purchase Return Form State
-  const [prPartyName, setPrPartyName] = useState('');
-  const [prRefundMethod, setPrRefundMethod] = useState<'CASH' | 'UPI' | 'DEBIT_NOTE'>('DEBIT_NOTE');
+  // ── Supplier return composer ──────────────────────────────────────────────
+  const [prOpen, setPrOpen] = useState(false);
+  const [prMode, setPrMode] = useState<'BILL' | 'EXPIRED'>('EXPIRED');
+  const [prSearch, setPrSearch] = useState('');
+  const [prBills, setPrBills] = useState<Purchase[]>([]);
+  const [prBill, setPrBill] = useState<ReturnablePurchaseBill | null>(null);
+  const [prPicked, setPrPicked] = useState<Picked>({});
+  const [expiring, setExpiring] = useState<ExpiredBatch[]>([]);
+  const [expiredPicked, setExpiredPicked] = useState<Picked>({});
+  const [expiredSupplier, setExpiredSupplier] = useState<string | null>(null);
+  const [prDeduction, setPrDeduction] = useState(0);
+  const [prRefundMethod, setPrRefundMethod] = useState('DEBIT_NOTE');
   const [prNotes, setPrNotes] = useState('');
-  const [prItems, setPrItems] = useState<PurchaseReturnLineDraft[]>([{ ...EMPTY_PR_ITEM }]);
 
-  const [productsList, setProductsList] = useState<Product[]>([]);
-
-  const fetchReturnsData = async () => {
+  /**
+   * `showSpinner` is false on the initial load: `loading` already starts true, so flipping it
+   * again synchronously inside the mount effect only adds a redundant render.
+   */
+  const loadReturns = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
-      setLoading(true);
-      const [srRes, prRes, prodRes] = await Promise.all([
-        api.get('/returns/sales').catch(() => ({ data: [] })),
-        api.get('/returns/purchases').catch(() => ({ data: [] })),
-        api.get('/products').catch(() => ({ data: [] })),
+      const [sr, pr, prod] = await Promise.all([
+        api.get<ReturnRecord[]>('/returns/sales').then((r) => r.data).catch(() => []),
+        api.get<ReturnRecord[]>('/returns/purchases').then((r) => r.data).catch(() => []),
+        api.get<Product[]>('/products').then((r) => r.data).catch(() => []),
       ]);
-      setSalesReturns(srRes.data || []);
-      setPurchaseReturns(prRes.data || []);
-      setProductsList(prodRes.data || []);
-    } catch (err) {
-      console.error('Error loading returns data:', err);
+      setSalesReturns(sr || []);
+      setPurchaseReturns(pr || []);
+      setProducts(prod || []);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchReturnsData();
   }, []);
 
-  const handleCreateSalesReturn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const validItems = srItems.filter(i => i.productName && i.quantity > 0);
-    const itemsToSubmit = [];
-    for (const item of validItems) {
-      let matchedId = item.productId;
-      if (!matchedId && item.productName) {
-        const found = productsList.find(p => p.name.toLowerCase().trim() === item.productName.toLowerCase().trim());
-        if (found) matchedId = found.id;
-      }
-      if (!matchedId) {
-        toast.error('Medicine not in catalogue', `"${item.productName}" could not be matched. Pick one from the suggestions.`);
-        return;
-      }
-      itemsToSubmit.push({
-        productId: matchedId,
-        batchNumber: item.batchNumber || 'DEFAULT',
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        condition: item.condition,
-        reason: item.reason,
-      });
+  /*
+   * The initial fetch is written as a promise chain rather than `await`-ing loadReturns: every
+   * setState then sits inside a callback, which is what the effect lint rule asks for — it
+   * cannot tell that the awaited version only sets state after the request resolves.
+   */
+  useEffect(() => {
+    Promise.all([
+      api.get<ReturnRecord[]>('/returns/sales').then((r) => r.data).catch(() => [] as ReturnRecord[]),
+      api.get<ReturnRecord[]>('/returns/purchases').then((r) => r.data).catch(() => [] as ReturnRecord[]),
+      api.get<Product[]>('/products').then((r) => r.data).catch(() => [] as Product[]),
+    ])
+      .then(([sr, pr, prod]) => {
+        setSalesReturns(sr || []);
+        setPurchaseReturns(pr || []);
+        setProducts(prod || []);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const openSalesComposer = async () => {
+    setSrOpen(true);
+    setSrBill(null);
+    setSrPicked({});
+    setSrDeduction(0);
+    setSrNotes('');
+    try {
+      const res = await api.get<Sale[]>('/sales?summary=1');
+      setSrBills(res.data || []);
+    } catch {
+      toast.error('Could not load bills', 'Try again in a moment.');
+    }
+  };
+
+  const srMatches = useMemo(() => {
+    const q = srSearch.trim().toLowerCase();
+    const rows = q
+      ? srBills.filter(
+          (b) =>
+            (b.invoiceNumber || '').toLowerCase().includes(q) ||
+            (b.customerName || '').toLowerCase().includes(q) ||
+            (b.customerPhone || '').includes(q)
+        )
+      : srBills;
+    return rows.slice(0, 25);
+  }, [srBills, srSearch]);
+
+  const chooseSalesBill = async (billId: string) => {
+    try {
+      const res = await api.get<ReturnableSaleBill>(`/returns/sales/returnable/${billId}`);
+      setSrBill(res.data);
+      setSrPicked({});
+    } catch (err) {
+      toast.error('Could not open that bill', getApiErrorMessage(err));
+    }
+  };
+
+  const srGross = useMemo(() => {
+    if (!srBill) return 0;
+    return srBill.lines.reduce((sum, line) => sum + (srPicked[line.productId]?.quantity || 0) * line.unitPrice, 0);
+  }, [srBill, srPicked]);
+
+  const srRefund = Math.max(0, srGross - srDeduction);
+
+  const submitSalesReturn = async () => {
+    if (!srBill) return;
+    const items = srBill.lines
+      .filter((l) => (srPicked[l.productId]?.quantity || 0) > 0)
+      .map((l) => ({
+        productId: l.productId,
+        batchNumber: l.batchNumber,
+        quantity: srPicked[l.productId].quantity,
+        unitPrice: l.unitPrice,
+        condition: srPicked[l.productId].condition || 'RESTOCK',
+        reason: srPicked[l.productId].reason || null,
+      }));
+
+    if (items.length === 0) {
+      toast.error('Nothing selected', 'Enter a return quantity against at least one medicine.');
+      return;
     }
 
+    setSubmitting(true);
     try {
-      setSubmitting(true);
       await api.post('/returns/sales', {
+        salesBillId: srBill.salesBillId,
+        customerId: srBill.customerId,
         refundMethod: srRefundMethod,
-        notes: `${srCustomerName ? 'Customer: ' + srCustomerName + ' • ' : ''}${srNotes}`,
-        items: itemsToSubmit,
+        discount: srDeduction,
+        notes: srNotes || null,
+        items,
       });
-
       invalidateCatalogCache();
       void refreshData();
-      toast.success('Credit note created', 'Inventory has been updated.');
-      setShowSalesReturnModal(false);
-      setSrItems([{ ...EMPTY_SR_ITEM }]);
-      setSrCustomerName('');
-      setSrNotes('');
-      fetchReturnsData();
+      toast.success('Credit note raised', `${formatCurrency(srRefund)} refunded.`);
+      setSrOpen(false);
+      await loadReturns();
     } catch (err) {
-      toast.error('Failed to create sales return', getApiErrorMessage(err));
+      toast.error('Could not raise the credit note', getApiErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleCreatePurchaseReturn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const validItems = prItems.filter(i => i.productName && i.quantity > 0);
-    const itemsToSubmit = [];
-    for (const item of validItems) {
-      let matchedId = item.productId;
-      if (!matchedId && item.productName) {
-        const found = productsList.find(p => p.name.toLowerCase().trim() === item.productName.toLowerCase().trim());
-        if (found) matchedId = found.id;
-      }
-      if (!matchedId) {
-        toast.error('Medicine not in catalogue', `"${item.productName}" could not be matched. Pick one from the suggestions.`);
+  const openPurchaseComposer = async () => {
+    setPrOpen(true);
+    setPrBill(null);
+    setPrPicked({});
+    setExpiredPicked({});
+    setExpiredSupplier(null);
+    setPrDeduction(0);
+    setPrNotes('');
+    try {
+      const [bills, exp] = await Promise.all([
+        api.get<Purchase[]>('/purchases?summary=1').then((r) => r.data).catch(() => []),
+        api.get<ExpiredBatch[]>('/returns/purchases/expired?withinDays=60').then((r) => r.data).catch(() => []),
+      ]);
+      setPrBills(bills || []);
+      setExpiring(exp || []);
+    } catch {
+      toast.error('Could not load supplier bills', 'Try again in a moment.');
+    }
+  };
+
+  const prMatches = useMemo(() => {
+    const q = prSearch.trim().toLowerCase();
+    const rows = q
+      ? prBills.filter(
+          (b) => (b.invoiceNumber || '').toLowerCase().includes(q) || (b.party?.name || '').toLowerCase().includes(q)
+        )
+      : prBills;
+    return rows.slice(0, 25);
+  }, [prBills, prSearch]);
+
+  const choosePurchaseBill = async (billId: string) => {
+    try {
+      const res = await api.get<ReturnablePurchaseBill>(`/returns/purchases/returnable/${billId}`);
+      setPrBill(res.data);
+      setPrPicked({});
+    } catch (err) {
+      toast.error('Could not open that bill', getApiErrorMessage(err));
+    }
+  };
+
+  /** Expiring batches grouped by supplier — a debit note goes to one distributor. */
+  const expiringBySupplier = useMemo(() => {
+    const groups = new Map<string, { partyId: string | null; partyName: string; batches: ExpiredBatch[] }>();
+    for (const b of expiring) {
+      const key = b.partyId || 'unknown';
+      const group = groups.get(key) || { partyId: b.partyId, partyName: b.partyName || 'Unknown supplier', batches: [] };
+      group.batches.push(b);
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((a, b) => b.batches.length - a.batches.length);
+  }, [expiring]);
+
+  const prGross = useMemo(() => {
+    if (prMode === 'BILL') {
+      if (!prBill) return 0;
+      return prBill.lines.reduce((sum, l) => sum + (prPicked[l.productId]?.quantity || 0) * l.purchaseRate, 0);
+    }
+    // purchaseRate is per pack while the picked quantity is in content units.
+    return expiring.reduce(
+      (sum, b) => sum + (expiredPicked[b.batchId]?.quantity || 0) * (b.purchaseRate / (b.packSize || 1)),
+      0
+    );
+  }, [prMode, prBill, prPicked, expiring, expiredPicked]);
+
+  const prRefund = Math.max(0, prGross - prDeduction);
+
+  const submitPurchaseReturn = async () => {
+    let items: Record<string, unknown>[] = [];
+    let purchaseBillId: string | null = null;
+    let partyId: string | null = null;
+
+    if (prMode === 'BILL') {
+      if (!prBill) return;
+      purchaseBillId = prBill.purchaseBillId;
+      partyId = prBill.partyId;
+      items = prBill.lines
+        .filter((l) => (prPicked[l.productId]?.quantity || 0) > 0)
+        .map((l) => ({
+          productId: l.productId,
+          batchNumber: l.batchNumber,
+          expiryDate: l.expiryDate,
+          quantity: prPicked[l.productId].quantity,
+          purchaseRate: l.purchaseRate,
+          reason: prPicked[l.productId].reason || (l.isExpired ? 'Expired stock' : null),
+        }));
+    } else {
+      const chosen = expiring.filter((b) => (expiredPicked[b.batchId]?.quantity || 0) > 0);
+      const suppliers = new Set(chosen.map((b) => b.partyId || 'unknown'));
+      if (suppliers.size > 1) {
+        toast.error('Mixed suppliers', 'A debit note goes to one supplier. Raise a separate note for the rest.');
         return;
       }
-      itemsToSubmit.push({
-        productId: matchedId,
-        batchNumber: item.batchNumber || 'DEFAULT',
-        quantity: item.quantity,
-        purchaseRate: item.purchaseRate,
-        reason: item.reason,
-      });
+      const first = chosen[0];
+      purchaseBillId = first?.purchaseBillId ?? null;
+      partyId = first?.partyId ?? null;
+      items = chosen.map((b) => ({
+        productId: b.productId,
+        batchNumber: b.batchNumber,
+        expiryDate: b.expiryDate,
+        quantity: expiredPicked[b.batchId].quantity,
+        purchaseRate: b.purchaseRate / (b.packSize || 1),
+        reason: expiredPicked[b.batchId].reason || (b.daysToExpiry < 0 ? 'Expired' : 'Near expiry'),
+      }));
     }
 
-    try {
-      setSubmitting(true);
-      await api.post('/returns/purchases', {
-        refundMethod: prRefundMethod,
-        notes: `${prPartyName ? 'Supplier: ' + prPartyName + ' • ' : ''}${prNotes}`,
-        items: itemsToSubmit,
-      });
+    if (items.length === 0) {
+      toast.error('Nothing selected', 'Enter a return quantity against at least one medicine.');
+      return;
+    }
 
+    setSubmitting(true);
+    try {
+      await api.post('/returns/purchases', {
+        purchaseBillId,
+        partyId,
+        refundMethod: prRefundMethod,
+        discount: prDeduction,
+        notes: prNotes || null,
+        items,
+      });
       invalidateCatalogCache();
       void refreshData();
-      toast.success('Debit note created', 'Stock has been deducted.');
-      setShowPurchaseReturnModal(false);
-      setPrItems([{ ...EMPTY_PR_ITEM }]);
-      setPrPartyName('');
-      setPrNotes('');
-      fetchReturnsData();
+      toast.success('Debit note raised', `${formatCurrency(prRefund)} claimed from the supplier.`);
+      setPrOpen(false);
+      await loadReturns();
     } catch (err) {
-      toast.error('Failed to create purchase return', getApiErrorMessage(err));
+      toast.error('Could not raise the debit note', getApiErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
   const rows = activeTab === 'SALES' ? salesReturns : purchaseReturns;
-  const isSales = activeTab === 'SALES';
-
-  /** Shared datalist so both return forms get catalogue autocomplete. */
-  const productOptions = (
-    <datalist id="returns-product-list">
-      {productsList.slice(0, 500).map((p) => (
-        <option key={p.id} value={p.name} />
-      ))}
-    </datalist>
-  );
+  const withExtras = (r: ReturnRecord) =>
+    r as ReturnRecord & {
+      discount?: number;
+      customer?: { name?: string };
+      salesBill?: { invoiceNumber?: string; customerName?: string };
+      purchaseBill?: { invoiceNumber?: string; party?: { name?: string } };
+    };
 
   return (
     <PageMain>
-      {productOptions}
-
       <PageHeader
-        title="Sales & Purchase Returns"
-        subtitle="Issue credit notes (customer returns) and debit notes (supplier returns) with automated stock adjustments"
+        title="Returns"
+        subtitle={`${salesReturns.length} credit notes · ${purchaseReturns.length} debit notes`}
         action={
           <>
-            <Button
-              variant="outline"
-              iconOnly
-              onClick={() => fetchReturnsData()}
-              title="Refresh returns"
-              aria-label="Refresh returns"
-            >
+            <Button variant="outline" iconOnly onClick={() => void loadReturns()} title="Refresh" aria-label="Refresh returns">
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin text-brand')} />
             </Button>
-            <Button
-              onClick={() => (isSales ? setShowSalesReturnModal(true) : setShowPurchaseReturnModal(true))}
-            >
+            <Button onClick={activeTab === 'SALES' ? openSalesComposer : openPurchaseComposer}>
               <Plus className="h-4 w-4" aria-hidden />
-              {isSales ? 'Sales Return' : 'Purchase Return'}
+              {activeTab === 'SALES' ? 'Patient return' : 'Return to supplier'}
             </Button>
           </>
         }
-      >
-        <div className="flex items-center gap-1 rounded-md bg-sunken p-1 w-fit">
-          {(
-            [
-              ['SALES', 'Sales Returns (Credit Notes)', RotateCcw],
-              ['PURCHASE', 'Purchase Returns (Debit Notes)', ArrowLeftRight],
-            ] as const
-          ).map(([id, label, Icon]) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              aria-pressed={activeTab === id}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-sm text-xs font-bold whitespace-nowrap transition-colors',
-                activeTab === id ? 'bg-surface text-fg shadow-card' : 'text-fg-muted hover:text-fg'
-              )}
-            >
-              <Icon className="h-4 w-4" aria-hidden />
-              {label}
-            </button>
-          ))}
-        </div>
-      </PageHeader>
+      />
+
+      <div className="mb-4 flex items-center gap-1 rounded-md bg-sunken p-1">
+        {(['SALES', 'PURCHASE'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            aria-pressed={activeTab === tab}
+            className={cn(
+              'rounded-sm px-3 py-1.5 text-xs font-bold transition-colors',
+              activeTab === tab ? 'bg-surface text-fg shadow-card' : 'text-fg-muted hover:text-fg'
+            )}
+          >
+            {tab === 'SALES' ? 'Patient returns (credit notes)' : 'Supplier returns (debit notes)'}
+          </button>
+        ))}
+      </div>
 
       <Card className="overflow-hidden">
         {loading ? (
           <TableSkeleton rows={6} cols={6} />
         ) : rows.length === 0 ? (
           <EmptyState
-            icon={isSales ? RotateCcw : ArrowLeftRight}
-            title={isSales ? 'No credit notes yet' : 'No debit notes yet'}
+            icon={RotateCcw}
+            title={activeTab === 'SALES' ? 'No patient returns yet' : 'No supplier returns yet'}
             message={
-              isSales
-                ? 'Customer returns you accept will appear here, with stock restocked or written off.'
-                : 'Supplier returns you raise will appear here, with stock deducted automatically.'
+              activeTab === 'SALES'
+                ? 'Raise one against the original bill — stock and refund then follow automatically.'
+                : 'Start from expiring stock; the batch and expiry are filled in for you.'
             }
             action={
-              <Button onClick={() => (isSales ? setShowSalesReturnModal(true) : setShowPurchaseReturnModal(true))}>
-                <Plus className="h-4 w-4" aria-hidden />
-                {isSales ? 'Sales Return' : 'Purchase Return'}
+              <Button onClick={activeTab === 'SALES' ? openSalesComposer : openPurchaseComposer}>
+                <Plus className="h-4 w-4" aria-hidden /> New return
               </Button>
             }
           />
@@ -293,483 +456,524 @@ export default function ReturnsPage() {
             <Table>
               <THead>
                 <tr>
-                  <TH>{isSales ? 'Credit Note #' : 'Debit Note #'}</TH>
+                  <TH>Note #</TH>
                   <TH>Date</TH>
-                  <TH>Refund Mode</TH>
-                  <TH>Items Returned</TH>
-                  <TH align="right">Return Total</TH>
-                  <TH align="center">Actions</TH>
+                  <TH>{activeTab === 'SALES' ? 'Patient / Bill' : 'Supplier / Bill'}</TH>
+                  <TH align="right">Items</TH>
+                  <TH align="right">Deduction</TH>
+                  <TH align="right">Net</TH>
                 </tr>
               </THead>
               <tbody>
-                {rows.map((r) => (
-                  <TR
-                    key={r.id}
-                    onClick={() => setInspectReturn({ ...r, returnType: activeTab })}
-                    className="cursor-pointer"
-                  >
-                    <TD className="font-mono font-bold text-brand">{r.returnNumber}</TD>
-                    <TD className="text-fg-muted whitespace-nowrap">{formatDate(r.createdAt)}</TD>
-                    <TD>
-                      <StatusChip tone={isSales ? 'success' : 'accent'} small>
-                        {r.refundMethod || (isSales ? 'CASH' : 'DEBIT_NOTE')}
-                      </StatusChip>
-                    </TD>
-                    <TD className="text-fg-muted">
-                      {(r.items || []).length} medicine {(r.items || []).length === 1 ? 'item' : 'items'}
-                    </TD>
-                    <TD align="right" className="font-mono font-bold">
-                      {formatCurrency(r.totalReturnAmount || 0)}
-                    </TD>
-                    <TD align="center">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectReturn({ ...r, returnType: activeTab });
-                        }}
-                      >
-                        Inspect
-                      </Button>
-                    </TD>
-                  </TR>
-                ))}
+                {rows.map((r) => {
+                  const x = withExtras(r);
+                  return (
+                    <TR key={r.id} onClick={() => setInspect({ ...r, returnType: activeTab })} className="cursor-pointer">
+                      <TD className="font-mono text-xs font-bold">{r.returnNumber}</TD>
+                      <TD className="text-fg-muted">{formatDate(r.createdAt)}</TD>
+                      <TD>
+                        <span className="block font-semibold">
+                          {activeTab === 'SALES'
+                            ? x.customer?.name || x.salesBill?.customerName || 'Walk-in patient'
+                            : x.purchaseBill?.party?.name || 'Supplier'}
+                        </span>
+                        <span className="block font-mono text-[11px] text-fg-subtle">
+                          {activeTab === 'SALES' ? x.salesBill?.invoiceNumber || '—' : x.purchaseBill?.invoiceNumber || '—'}
+                        </span>
+                      </TD>
+                      <TD align="right" className="font-mono">{r.items?.length || 0}</TD>
+                      <TD align="right" className="font-mono text-danger">
+                        {x.discount ? `−${formatCurrency(x.discount)}` : '—'}
+                      </TD>
+                      <TD align="right" className="font-mono font-bold text-brand-hover">
+                        {formatCurrency(r.totalReturnAmount || 0)}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </tbody>
             </Table>
           </TableWrap>
         )}
       </Card>
 
-      {/* CREATE SALES RETURN MODAL */}
+      {/* ── PATIENT RETURN ─────────────────────────────────────────────────── */}
       <Modal
-        open={showSalesReturnModal}
-        onClose={() => setShowSalesReturnModal(false)}
-        title="Create Customer Sales Return (Credit Note)"
-        subtitle="Restocked items go back into inventory; damaged items are written off"
-        size="lg"
+        open={srOpen}
+        onClose={() => setSrOpen(false)}
+        title="Patient return"
+        subtitle={srBill ? `Against bill ${srBill.invoiceNumber}` : 'Find the bill the medicines were sold on'}
+        size="xl"
         footer={
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setShowSalesReturnModal(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" form="sales-return-form" loading={submitting}>
-              Issue Credit Note
-            </Button>
-          </div>
+          srBill ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <span className="text-fg-muted">Refund </span>
+                <span className="font-mono text-lg font-black text-brand">{formatCurrency(srRefund)}</span>
+                {srDeduction > 0 ? (
+                  <span className="ml-2 text-xs text-fg-subtle">
+                    ({formatCurrency(srGross)} less {formatCurrency(srDeduction)} deduction)
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setSrBill(null)}>Pick another bill</Button>
+                <Button onClick={submitSalesReturn} loading={submitting}>Raise credit note</Button>
+              </div>
+            </div>
+          ) : null
         }
       >
-        <form id="sales-return-form" onSubmit={handleCreateSalesReturn} className="p-5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Customer Name" hint="Optional">
+        <div className="space-y-4 p-5">
+          {!srBill ? (
+            <>
               <Input
-                type="text"
-                value={srCustomerName}
-                onChange={(e) => setSrCustomerName(e.target.value)}
-                placeholder="Walk-in Customer"
+                icon={Search}
+                autoFocus
+                value={srSearch}
+                onChange={(e) => setSrSearch(e.target.value)}
+                placeholder="Bill number, patient name or phone…"
+                aria-label="Find the original bill"
               />
-            </Field>
-            <Field label="Refund Method">
-              <Select value={srRefundMethod} onChange={(e) => setSrRefundMethod(e.target.value as typeof srRefundMethod)}>
-                <option value="CASH">Refund cash to customer</option>
-                <option value="UPI">Refund via UPI transfer</option>
-                <option value="CREDIT_NOTE">Store credit note balance</option>
-              </Select>
-            </Field>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-fg-muted">Returned Medicine Items</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setSrItems([...srItems, { ...EMPTY_SR_ITEM }])}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                Add Item
-              </Button>
-            </div>
-
-            {srItems.map((item, idx) => (
-              <div key={idx} className="rounded-md border border-line bg-raised p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-fg-subtle">
-                    Item {idx + 1}
-                  </span>
-                  {srItems.length > 1 ? (
+              <div className="max-h-96 overflow-y-auto rounded-md border border-line">
+                {srMatches.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-fg-muted">No bills match that.</p>
+                ) : (
+                  srMatches.map((b) => (
                     <button
-                      type="button"
-                      onClick={() => setSrItems(srItems.filter((_, i) => i !== idx))}
-                      aria-label={`Remove item ${idx + 1}`}
-                      className="p-1 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                      key={b.id}
+                      onClick={() => chooseSalesBill(b.id)}
+                      className="flex w-full items-center justify-between gap-3 border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-raised"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>
+                        <span className="block font-mono text-xs font-bold text-fg">{b.invoiceNumber}</span>
+                        <span className="block text-xs text-fg-muted">
+                          {b.customerName || 'Walk-in'} · {formatDate(b.createdAt)}
+                        </span>
+                      </span>
+                      <span className="font-mono text-sm font-bold text-brand-hover">{formatCurrency(b.grandTotal || 0)}</span>
                     </button>
-                  ) : null}
-                </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-md border border-line bg-raised px-4 py-2.5 text-xs">
+                <span className="font-bold text-fg">{srBill.customerName || 'Walk-in patient'}</span>
+                {srBill.customerPhone ? <span className="ml-2 font-mono text-fg-muted">{srBill.customerPhone}</span> : null}
+                <span className="ml-2 text-fg-subtle">
+                  · sold {formatDate(srBill.createdAt)} · bill {formatCurrency(srBill.grandTotal)}
+                </span>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Medicine Name">
-                    <Input
-                      type="text"
-                      list="returns-product-list"
-                      value={item.productName}
-                      onChange={(e) => {
-                        const copy = [...srItems];
-                        copy[idx].productName = e.target.value;
-                        const matched = productsList.find(p => p.name.toLowerCase() === e.target.value.toLowerCase());
-                        if (matched) {
-                          copy[idx].productId = matched.id;
-                          copy[idx].unitPrice = matched.mrp || 0;
-                        }
-                        setSrItems(copy);
-                      }}
-                      placeholder="e.g. Paracetamol 500"
-                    />
-                  </Field>
-                  <Field label="Batch Number">
-                    <Input
-                      type="text"
-                      value={item.batchNumber}
-                      onChange={(e) => {
-                        const copy = [...srItems];
-                        copy[idx].batchNumber = e.target.value;
-                        setSrItems(copy);
-                      }}
-                      placeholder="e.g. BATCH-123"
-                      className="font-mono"
-                    />
-                  </Field>
-                </div>
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>Medicine</TH>
+                      <TH>Batch</TH>
+                      <TH align="right">Sold</TH>
+                      <TH align="right">Already back</TH>
+                      <TH align="right">Can return</TH>
+                      <TH align="right">Returning</TH>
+                      <TH>Condition</TH>
+                      <TH align="right">Value</TH>
+                    </tr>
+                  </THead>
+                  <tbody>
+                    {srBill.lines.map((line) => {
+                      const picked = srPicked[line.productId]?.quantity || 0;
+                      return (
+                        <TR key={line.productId}>
+                          <TD className="font-semibold">{line.productName}</TD>
+                          <TD className="font-mono text-xs text-fg-muted">
+                            {line.batchNumber || '—'}
+                            {line.expiryDate ? (
+                              <span className="block text-[10px] text-fg-subtle">exp {formatDate(line.expiryDate)}</span>
+                            ) : null}
+                          </TD>
+                          <TD align="right" className="font-mono">{line.soldQuantity}</TD>
+                          <TD align="right" className="font-mono text-fg-subtle">{line.alreadyReturned || '—'}</TD>
+                          <TD align="right" className="font-mono font-bold">{line.returnableQuantity}</TD>
+                          <TD align="right">
+                            <input
+                              type="number"
+                              min={0}
+                              max={line.returnableQuantity}
+                              step="any"
+                              value={picked || ''}
+                              onChange={(e) => {
+                                // Clamped as you type, not at save time: the server enforces the
+                                // same ceiling, but discovering it on rejection is no use at a counter.
+                                const qty = Math.max(0, Math.min(parseFloat(e.target.value) || 0, line.returnableQuantity));
+                                setSrPicked((prev) => ({
+                                  ...prev,
+                                  [line.productId]: { ...prev[line.productId], quantity: qty },
+                                }));
+                              }}
+                              disabled={line.returnableQuantity <= 0}
+                              className="h-8 w-20 rounded-md border border-line bg-surface px-2 text-right font-mono text-sm disabled:opacity-40"
+                              aria-label={`Return quantity for ${line.productName}`}
+                            />
+                          </TD>
+                          <TD>
+                            <select
+                              value={srPicked[line.productId]?.condition || 'RESTOCK'}
+                              onChange={(e) =>
+                                setSrPicked((prev) => ({
+                                  ...prev,
+                                  [line.productId]: {
+                                    ...prev[line.productId],
+                                    quantity: prev[line.productId]?.quantity || 0,
+                                    condition: e.target.value,
+                                  },
+                                }))
+                              }
+                              className="h-8 rounded-md border border-line bg-surface px-2 text-xs font-semibold"
+                              aria-label={`Condition for ${line.productName}`}
+                            >
+                              <option value="RESTOCK">Back to shelf</option>
+                              <option value="DAMAGED">Damaged — write off</option>
+                            </select>
+                          </TD>
+                          <TD align="right" className="font-mono font-bold">{formatCurrency(picked * line.unitPrice)}</TD>
+                        </TR>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              </TableWrap>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Field label="Return Qty">
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => {
-                        const copy = [...srItems];
-                        copy[idx].quantity = parseFloat(e.target.value) || 1;
-                        setSrItems(copy);
-                      }}
-                      className="font-mono font-semibold"
-                    />
-                  </Field>
-                  <Field label="Unit Price (₹)">
-                    <Input
-                      type="number"
-                      step="any"
-                      value={item.unitPrice}
-                      onChange={(e) => {
-                        const copy = [...srItems];
-                        copy[idx].unitPrice = parseFloat(e.target.value) || 0;
-                        setSrItems(copy);
-                      }}
-                      className="font-mono font-semibold"
-                    />
-                  </Field>
-                  <Field label="Stock Action">
-                    <Select
-                      value={item.condition}
-                      onChange={(e) => {
-                        const copy = [...srItems];
-                        copy[idx].condition = e.target.value;
-                        setSrItems(copy);
-                      }}
-                    >
-                      <option value="RESTOCK">Restock into inventory</option>
-                      <option value="DAMAGED">Discard as damaged</option>
-                    </Select>
-                  </Field>
-                </div>
-
-                <Field label="Reason">
-                  <Select
-                    value={item.reason}
-                    onChange={(e) => {
-                      const copy = [...srItems];
-                      copy[idx].reason = e.target.value;
-                      setSrItems(copy);
-                    }}
-                  >
-                    <option value="Customer Changed Mind">Customer changed mind</option>
-                    <option value="Wrong Medicine Dispensed">Wrong medicine dispensed</option>
-                    <option value="Damaged Packaging">Damaged packaging</option>
-                    <option value="Near Expiry">Near expiry</option>
-                    <option value="Adverse Reaction">Adverse reaction</option>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field label="Deduction withheld" hint="Opened pack, restocking fee">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={srDeduction || ''}
+                    onChange={(e) => setSrDeduction(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="₹ 0.00"
+                    className="font-mono"
+                  />
+                </Field>
+                <Field label="Refund by">
+                  <Select value={srRefundMethod} onChange={(e) => setSrRefundMethod(e.target.value)}>
+                    <option value="CASH">Cash</option>
+                    <option value="UPI">UPI</option>
+                    <option value="CREDIT_NOTE">Adjust against the bill</option>
                   </Select>
                 </Field>
+                <Field label="Note">
+                  <Input value={srNotes} onChange={(e) => setSrNotes(e.target.value)} placeholder="Reason, optional" />
+                </Field>
               </div>
-            ))}
-          </div>
-
-          <Field label="Notes / Remarks">
-            <Input
-              type="text"
-              value={srNotes}
-              onChange={(e) => setSrNotes(e.target.value)}
-              placeholder="Optional remarks for this credit note"
-            />
-          </Field>
-        </form>
+            </>
+          )}
+        </div>
       </Modal>
 
-      {/* CREATE PURCHASE RETURN MODAL */}
+      {/* ── SUPPLIER RETURN ────────────────────────────────────────────────── */}
       <Modal
-        open={showPurchaseReturnModal}
-        onClose={() => setShowPurchaseReturnModal(false)}
-        title="Create Supplier Purchase Return (Debit Note)"
-        subtitle="Returned quantities are deducted from inventory stock"
-        size="lg"
+        open={prOpen}
+        onClose={() => setPrOpen(false)}
+        title="Return to supplier"
+        subtitle="Expired or damaged stock going back on a debit note"
+        size="xl"
         footer={
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setShowPurchaseReturnModal(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" form="purchase-return-form" loading={submitting}>
-              Issue Debit Note
-            </Button>
-          </div>
-        }
-      >
-        <form id="purchase-return-form" onSubmit={handleCreatePurchaseReturn} className="p-5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Suppliers are suggested from the directory. The field was free text with no
-                list at all, so the name had to be typed from memory and any typo produced a
-                debit note that could not be matched to the supplier's ledger. */}
-            <Field label="Supplier Party Name">
-              <Input
-                type="text"
-                list="purchase-return-parties"
-                value={prPartyName}
-                onChange={(e) => setPrPartyName(e.target.value)}
-                placeholder="Start typing a supplier name"
-              />
-              <datalist id="purchase-return-parties">
-                {parties.map((party) => (
-                  <option key={party.id} value={party.name} />
-                ))}
-              </datalist>
-            </Field>
-            <Field label="Refund Method">
-              <Select value={prRefundMethod} onChange={(e) => setPrRefundMethod(e.target.value as typeof prRefundMethod)}>
-                <option value="DEBIT_NOTE">Supplier debit note (adjust payables)</option>
-                <option value="CASH">Cash refund from supplier</option>
-                <option value="UPI">Bank refund</option>
-              </Select>
-            </Field>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-fg-muted">Returned Medicine Items</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setPrItems([...prItems, { ...EMPTY_PR_ITEM }])}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                Add Item
-              </Button>
-            </div>
-
-            {prItems.map((item, idx) => (
-              <div key={idx} className="rounded-md border border-line bg-raised p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-fg-subtle">
-                    Item {idx + 1}
-                  </span>
-                  {prItems.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() => setPrItems(prItems.filter((_, i) => i !== idx))}
-                      aria-label={`Remove item ${idx + 1}`}
-                      className="p-1 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Medicine Name">
-                    <Input
-                      type="text"
-                      list="returns-product-list"
-                      value={item.productName}
-                      onChange={(e) => {
-                        const copy = [...prItems];
-                        copy[idx].productName = e.target.value;
-                        const matched = productsList.find(p => p.name.toLowerCase() === e.target.value.toLowerCase());
-                        if (matched) {
-                          copy[idx].productId = matched.id;
-                          copy[idx].purchaseRate = matched.purchaseRate || 0;
-                        }
-                        setPrItems(copy);
-                      }}
-                      placeholder="e.g. Augmentin 625"
-                    />
-                  </Field>
-                  <Field label="Batch Number">
-                    <Input
-                      type="text"
-                      value={item.batchNumber}
-                      onChange={(e) => {
-                        const copy = [...prItems];
-                        copy[idx].batchNumber = e.target.value;
-                        setPrItems(copy);
-                      }}
-                      placeholder="e.g. BATCH-456"
-                      className="font-mono"
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Field label="Return Qty" hint="Deducted from stock">
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => {
-                        const copy = [...prItems];
-                        copy[idx].quantity = parseFloat(e.target.value) || 1;
-                        setPrItems(copy);
-                      }}
-                      className="font-mono font-semibold"
-                    />
-                  </Field>
-                  <Field label="Purchase Rate (₹)">
-                    <Input
-                      type="number"
-                      step="any"
-                      value={item.purchaseRate}
-                      onChange={(e) => {
-                        const copy = [...prItems];
-                        copy[idx].purchaseRate = parseFloat(e.target.value) || 0;
-                        setPrItems(copy);
-                      }}
-                      className="font-mono font-semibold"
-                    />
-                  </Field>
-                  <Field label="Reason">
-                    <Select
-                      value={item.reason}
-                      onChange={(e) => {
-                        const copy = [...prItems];
-                        copy[idx].reason = e.target.value;
-                        setPrItems(copy);
-                      }}
-                    >
-                      <option value="Damaged Packaging">Damaged packaging</option>
-                      <option value="Expired Stock">Expired stock</option>
-                      <option value="Wrong Item Supplied">Wrong item supplied</option>
-                      <option value="Excess Supply">Excess supply</option>
-                      <option value="Quality Issue">Quality issue</option>
-                    </Select>
-                  </Field>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <Field label="Notes / Remarks">
-            <Input
-              type="text"
-              value={prNotes}
-              onChange={(e) => setPrNotes(e.target.value)}
-              placeholder="Optional remarks for this debit note"
-            />
-          </Field>
-        </form>
-      </Modal>
-
-      {/* INSPECT RETURN DETAILS MODAL */}
-      <Modal
-        open={!!inspectReturn}
-        onClose={() => setInspectReturn(null)}
-        title={
-          inspectReturn
-            ? `${inspectReturn.returnType === 'SALES' ? 'Sales Credit Note' : 'Purchase Debit Note'} #${inspectReturn.returnNumber}`
-            : ''
-        }
-        subtitle={inspectReturn ? `Issued ${formatDate(inspectReturn.createdAt)}` : undefined}
-        size="lg"
-        footer={
-          <div className="flex justify-end">
-            <Button variant="outline" onClick={() => setInspectReturn(null)}>
-              Close
-            </Button>
-          </div>
-        }
-      >
-        {inspectReturn ? (
-          <div className="p-5 space-y-5">
-            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {(
-                [
-                  ['Date Issued', formatDate(inspectReturn.createdAt), 'font-mono'],
-                  ['Refund Method', inspectReturn.refundMethod || 'STANDARD', ''],
-                  ['Total Amount', formatCurrency(inspectReturn.totalReturnAmount || 0), 'font-mono text-brand'],
-                ] as const
-              ).map(([label, value, valueClass]) => (
-                <div key={label} className="rounded-md border border-line bg-raised px-3 py-2.5">
-                  <dt className="text-[11px] font-bold uppercase tracking-wide text-fg-subtle">{label}</dt>
-                  <dd className={cn('mt-1 text-sm font-bold text-fg truncate', valueClass)}>{value}</dd>
-                </div>
-              ))}
-            </dl>
-
-            {inspectReturn.notes ? (
-              <div className="rounded-md border border-line bg-raised px-3 py-2.5">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-fg-subtle">
-                  Notes / Remarks
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm">
+              <span className="text-fg-muted">Claim </span>
+              <span className="font-mono text-lg font-black text-brand">{formatCurrency(prRefund)}</span>
+              {prDeduction > 0 ? (
+                <span className="ml-2 text-xs text-fg-subtle">
+                  ({formatCurrency(prGross)} less {formatCurrency(prDeduction)})
                 </span>
-                <span className="mt-1 block text-sm text-fg">{inspectReturn.notes}</span>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
+            <Button onClick={submitPurchaseReturn} loading={submitting}>Raise debit note</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4 p-5">
+          <div className="flex items-center gap-1 rounded-md bg-sunken p-1">
+            {([['EXPIRED', 'From expiring stock'], ['BILL', 'From a supplier bill']] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setPrMode(mode)}
+                aria-pressed={prMode === mode}
+                className={cn(
+                  'rounded-sm px-3 py-1.5 text-xs font-bold transition-colors',
+                  prMode === mode ? 'bg-surface text-fg shadow-card' : 'text-fg-muted hover:text-fg'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wide text-fg-muted mb-2">
-                Itemized Returned Items
-              </h4>
-              <div className="rounded-md border border-line overflow-hidden">
+          {prMode === 'EXPIRED' ? (
+            expiring.length === 0 ? (
+              <EmptyState icon={PackageX} title="Nothing expiring within 60 days" message="No stock needs returning right now." />
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {expiringBySupplier.map((g) => (
+                    <button
+                      key={g.partyId || 'unknown'}
+                      onClick={() => setExpiredSupplier(expiredSupplier === (g.partyId || 'unknown') ? null : g.partyId || 'unknown')}
+                      aria-pressed={expiredSupplier === (g.partyId || 'unknown')}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1 text-xs font-bold transition-colors',
+                        expiredSupplier === (g.partyId || 'unknown')
+                          ? 'border-brand bg-brand-subtle text-brand-hover'
+                          : 'border-line text-fg-muted hover:text-fg'
+                      )}
+                    >
+                      {g.partyName} ({g.batches.length})
+                    </button>
+                  ))}
+                </div>
+
                 <TableWrap>
                   <Table>
                     <THead>
                       <tr>
                         <TH>Medicine</TH>
                         <TH>Batch</TH>
-                        <TH align="center">Qty</TH>
-                        <TH align="right">Rate</TH>
-                        <TH align="right">Subtotal</TH>
+                        <TH>Expiry</TH>
+                        <TH align="right">On shelf</TH>
+                        <TH align="right">Returning</TH>
+                        <TH>Supplier</TH>
+                        <TH align="right">Value</TH>
                       </tr>
                     </THead>
                     <tbody>
-                      {(inspectReturn.items || []).map((item, idx) => (
-                        <TR key={idx}>
-                          <TD className="font-semibold">
-                            {item.product?.name || item.productName || 'Medicine'}
-                          </TD>
-                          <TD className="font-mono text-fg-muted">{item.batchNumber || '—'}</TD>
-                          <TD align="center" className="font-mono font-bold">{item.quantity}</TD>
-                          <TD align="right" className="font-mono">
-                            {formatCurrency(item.unitPrice || item.purchaseRate || 0)}
-                          </TD>
-                          <TD align="right" className="font-mono font-bold">
-                            {formatCurrency((item.quantity || 1) * (item.unitPrice || item.purchaseRate || 0))}
-                          </TD>
-                        </TR>
-                      ))}
+                      {expiring
+                        .filter((b) => !expiredSupplier || (b.partyId || 'unknown') === expiredSupplier)
+                        .map((b) => {
+                          const picked = expiredPicked[b.batchId]?.quantity || 0;
+                          const unitRate = b.purchaseRate / (b.packSize || 1);
+                          return (
+                            <TR key={b.batchId}>
+                              <TD className="font-semibold">{b.productName}</TD>
+                              <TD className="font-mono text-xs">{b.batchNumber}</TD>
+                              <TD>
+                                <span className={cn('font-mono text-xs', b.daysToExpiry < 0 ? 'font-bold text-danger' : 'text-warn')}>
+                                  {formatDate(b.expiryDate)}
+                                </span>
+                                <span className="block text-[10px] text-fg-subtle">
+                                  {b.daysToExpiry < 0 ? `expired ${Math.abs(b.daysToExpiry)}d ago` : `${b.daysToExpiry}d left`}
+                                </span>
+                              </TD>
+                              <TD align="right" className="font-mono">{b.quantity}</TD>
+                              <TD align="right">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={b.quantity}
+                                  step="any"
+                                  value={picked || ''}
+                                  onChange={(e) => {
+                                    const qty = Math.max(0, Math.min(parseFloat(e.target.value) || 0, b.quantity));
+                                    setExpiredPicked((prev) => ({ ...prev, [b.batchId]: { ...prev[b.batchId], quantity: qty } }));
+                                  }}
+                                  className="h-8 w-20 rounded-md border border-line bg-surface px-2 text-right font-mono text-sm"
+                                  aria-label={`Return quantity for ${b.productName} ${b.batchNumber}`}
+                                />
+                              </TD>
+                              <TD className="text-xs text-fg-muted">{b.partyName || '—'}</TD>
+                              <TD align="right" className="font-mono font-bold">{formatCurrency(picked * unitRate)}</TD>
+                            </TR>
+                          );
+                        })}
                     </tbody>
                   </Table>
                 </TableWrap>
+              </>
+            )
+          ) : !prBill ? (
+            <>
+              <Input
+                icon={Search}
+                autoFocus
+                value={prSearch}
+                onChange={(e) => setPrSearch(e.target.value)}
+                placeholder="Supplier bill number or distributor name…"
+                aria-label="Find the supplier bill"
+              />
+              <div className="max-h-96 overflow-y-auto rounded-md border border-line">
+                {prMatches.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => choosePurchaseBill(b.id)}
+                    className="flex w-full items-center justify-between gap-3 border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-raised"
+                  >
+                    <span>
+                      <span className="block font-mono text-xs font-bold text-fg">{b.invoiceNumber}</span>
+                      <span className="block text-xs text-fg-muted">
+                        {b.party?.name || 'Supplier'} · {formatDate(b.purchaseDate || b.createdAt)}
+                      </span>
+                    </span>
+                    <span className="font-mono text-sm font-bold text-accent">{formatCurrency(b.grandTotal || 0)}</span>
+                  </button>
+                ))}
               </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-md border border-line bg-raised px-4 py-2.5 text-xs">
+                <span className="font-bold text-fg">{prBill.partyName}</span>
+                <span className="ml-2 font-mono text-fg-muted">{prBill.invoiceNumber}</span>
+                <span className="ml-2 text-fg-subtle">· received {formatDate(prBill.purchaseDate)}</span>
+                <button onClick={() => setPrBill(null)} className="ml-3 font-bold text-brand hover:underline">
+                  change bill
+                </button>
+              </div>
+
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>Medicine</TH>
+                      <TH>Batch</TH>
+                      <TH>Expiry</TH>
+                      <TH align="right">Received</TH>
+                      <TH align="right">On shelf</TH>
+                      <TH align="right">Can return</TH>
+                      <TH align="right">Returning</TH>
+                      <TH align="right">Value</TH>
+                    </tr>
+                  </THead>
+                  <tbody>
+                    {prBill.lines.map((line) => {
+                      const picked = prPicked[line.productId]?.quantity || 0;
+                      return (
+                        <TR key={line.productId}>
+                          <TD className="font-semibold">{line.productName}</TD>
+                          <TD className="font-mono text-xs">{line.batchNumber || '—'}</TD>
+                          <TD>
+                            <span className={cn('font-mono text-xs', line.isExpired && 'font-bold text-danger')}>
+                              {line.expiryDate ? formatDate(line.expiryDate) : '—'}
+                            </span>
+                            {line.isExpired ? <span className="block text-[10px] font-bold text-danger">expired</span> : null}
+                          </TD>
+                          <TD align="right" className="font-mono">{line.receivedUnits}</TD>
+                          <TD align="right" className="font-mono">{line.onHandUnits}</TD>
+                          <TD align="right" className="font-mono font-bold">{line.returnableUnits}</TD>
+                          <TD align="right">
+                            <input
+                              type="number"
+                              min={0}
+                              max={line.returnableUnits}
+                              step="any"
+                              value={picked || ''}
+                              onChange={(e) => {
+                                const qty = Math.max(0, Math.min(parseFloat(e.target.value) || 0, line.returnableUnits));
+                                setPrPicked((prev) => ({ ...prev, [line.productId]: { ...prev[line.productId], quantity: qty } }));
+                              }}
+                              disabled={line.returnableUnits <= 0}
+                              className="h-8 w-20 rounded-md border border-line bg-surface px-2 text-right font-mono text-sm disabled:opacity-40"
+                              aria-label={`Return quantity for ${line.productName}`}
+                            />
+                          </TD>
+                          <TD align="right" className="font-mono font-bold">{formatCurrency(picked * line.purchaseRate)}</TD>
+                        </TR>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              </TableWrap>
+            </>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Deduction by supplier" hint="Short credit, handling charge">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={prDeduction || ''}
+                onChange={(e) => setPrDeduction(Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder="₹ 0.00"
+                className="font-mono"
+              />
+            </Field>
+            <Field label="Settled by">
+              <Select value={prRefundMethod} onChange={(e) => setPrRefundMethod(e.target.value)}>
+                <option value="DEBIT_NOTE">Debit note against the account</option>
+                <option value="CASH">Cash refund</option>
+                <option value="UPI">UPI refund</option>
+              </Select>
+            </Field>
+            <Field label="Note">
+              <Input value={prNotes} onChange={(e) => setPrNotes(e.target.value)} placeholder="Reason, optional" />
+            </Field>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── INSPECT ────────────────────────────────────────────────────────── */}
+      <Modal
+        open={!!inspect}
+        onClose={() => setInspect(null)}
+        title={inspect ? `${inspect.returnType === 'SALES' ? 'Credit note' : 'Debit note'} ${inspect.returnNumber}` : ''}
+        size="lg"
+      >
+        {inspect ? (
+          <div className="space-y-4 p-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {([
+                ['Raised', formatDate(inspect.createdAt)],
+                ['Items', String(inspect.items?.length || 0)],
+                ['Deduction', formatCurrency(withExtras(inspect).discount || 0)],
+                ['Net', formatCurrency(inspect.totalReturnAmount || 0)],
+              ] as const).map(([label, value]) => (
+                <div key={label} className="rounded-md border border-line bg-raised px-3 py-2">
+                  <span className="block text-[11px] font-bold uppercase text-fg-subtle">{label}</span>
+                  <span className="mt-0.5 block font-mono text-sm font-bold text-fg">{value}</span>
+                </div>
+              ))}
             </div>
+
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>Medicine</TH>
+                    <TH>Batch</TH>
+                    <TH align="right">Qty</TH>
+                    <TH align="right">Rate</TH>
+                    <TH>Condition</TH>
+                    <TH align="right">Value</TH>
+                  </tr>
+                </THead>
+                <tbody>
+                  {(inspect.items || []).map((item, idx) => (
+                    <TR key={idx}>
+                      <TD className="font-semibold">{item.product?.name || item.productName || productName(item.productId)}</TD>
+                      <TD className="font-mono text-xs text-fg-muted">{item.batchNumber || '—'}</TD>
+                      <TD align="right" className="font-mono">{item.quantity}</TD>
+                      <TD align="right" className="font-mono">{formatCurrency(item.unitPrice ?? item.purchaseRate ?? 0)}</TD>
+                      <TD>
+                        {item.condition ? (
+                          <StatusChip tone={item.condition === 'RESTOCK' ? 'success' : 'warning'} small>
+                            {item.condition === 'RESTOCK' ? 'Back to shelf' : 'Written off'}
+                          </StatusChip>
+                        ) : (
+                          <span className="text-xs text-fg-subtle">{item.reason || '—'}</span>
+                        )}
+                      </TD>
+                      <TD align="right" className="font-mono font-bold">{formatCurrency(item.totalAmount || 0)}</TD>
+                    </TR>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrap>
+
+            {inspect.notes ? (
+              <p className="rounded-md border border-line bg-raised px-3 py-2 text-xs text-fg-muted">{inspect.notes}</p>
+            ) : null}
           </div>
         ) : null}
       </Modal>

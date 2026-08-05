@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { Plus, RefreshCw, CheckCircle, XCircle, UserCheck, Clock } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
+import AttendancePanel from '@/components/employees/AttendancePanel';
 import type { User } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import {
@@ -97,6 +98,9 @@ export default function EmployeesPage() {
       />
 
       <div className="space-y-5">
+        {/* Who is in, and for how long. Above the roster: it is the question asked daily. */}
+        <AttendancePanel />
+
         {/* Pending approvals — surfaced first because they block someone from working. */}
         {pendingApprovals.length > 0 && (
           <Card className="overflow-hidden border-warn-line">

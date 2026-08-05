@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Search } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { openCommandPalette } from '@/components/common/CommandPalette';
+import ClockControl from '@/components/layout/ClockControl';
 
 /** Brand + search bar for small screens, where the sidebar is hidden. */
 export default function MobileHeader() {
@@ -19,10 +20,13 @@ export default function MobileHeader() {
         </span>
       </Link>
 
+      {/* Clocking in must be reachable on a phone: the sidebar that carries it is hidden here. */}
+      <span className="ml-auto">{user ? <ClockControl compact /> : null}</span>
+
       <button
         onClick={openCommandPalette}
         aria-label="Search"
-        className="ml-auto p-2 rounded-md text-fg-subtle hover:bg-hover hover:text-fg transition-colors"
+        className="p-2 rounded-md text-fg-subtle hover:bg-hover hover:text-fg transition-colors"
       >
         <Search className="h-5 w-5" />
       </button>

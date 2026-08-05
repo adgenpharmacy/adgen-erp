@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useFieldChain } from '@/lib/use-listbox-keys';
 import { api } from '@/lib/api-client';
 import { ArrowLeft, Save, Snowflake } from 'lucide-react';
 import Link from 'next/link';
@@ -30,6 +31,16 @@ export default function NewProductPage() {
     mrp: 0,
     purchaseRate: 0,
   });
+
+  /*
+   * Enter walks the form instead of submitting it. A medicine is a dozen short fields typed in
+   * one run; a form that saves on the first Enter cannot be filled from the keyboard at all.
+   * The last field blurs rather than wrapping, so Enter there does not jump back to the top.
+   */
+  const fieldChain = useFieldChain([
+    'name', 'productType', 'packSize', 'genericName',
+    'mrp', 'purchaseRate', 'companyName', 'hsnCode', 'gstPercent', 'division',
+  ]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +86,8 @@ export default function NewProductPage() {
                 required
                 placeholder="e.g. DOLO 650MG"
                 value={formData.name}
+                ref={fieldChain.register('name')}
+                onKeyDown={fieldChain.onKeyDown('name')}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="font-semibold"
               />
@@ -84,6 +97,8 @@ export default function NewProductPage() {
               <Field label="Product Form / Category" required>
                 <Select
                   value={formData.productType}
+                ref={fieldChain.register('productType')}
+                onKeyDown={fieldChain.onKeyDown('productType')}
                   onChange={(e) => setFormData({ ...formData, productType: e.target.value })}
                 >
                   <option value="TABLET">Tablet</option>
@@ -103,6 +118,8 @@ export default function NewProductPage() {
                   required
                   min={1}
                   value={formData.packSize}
+                ref={fieldChain.register('packSize')}
+                onKeyDown={fieldChain.onKeyDown('packSize')}
                   onChange={(e) => setFormData({ ...formData, packSize: parseInt(e.target.value) || 1 })}
                   className="text-right font-mono font-semibold"
                 />
@@ -114,6 +131,8 @@ export default function NewProductPage() {
                 type="text"
                 placeholder="e.g. Paracetamol 650mg"
                 value={formData.genericName}
+                ref={fieldChain.register('genericName')}
+                onKeyDown={fieldChain.onKeyDown('genericName')}
                 onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
               />
             </Field>
@@ -125,6 +144,8 @@ export default function NewProductPage() {
                   step="any"
                   min="0"
                   value={formData.mrp || ''}
+                  ref={fieldChain.register('mrp')}
+                  onKeyDown={fieldChain.onKeyDown('mrp')}
                   onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
                   placeholder="0.00"
                   className="font-mono font-semibold"
@@ -136,6 +157,8 @@ export default function NewProductPage() {
                   step="any"
                   min="0"
                   value={formData.purchaseRate || ''}
+                  ref={fieldChain.register('purchaseRate')}
+                  onKeyDown={fieldChain.onKeyDown('purchaseRate')}
                   onChange={(e) => setFormData({ ...formData, purchaseRate: parseFloat(e.target.value) || 0 })}
                   placeholder="0.00"
                   className="font-mono font-semibold"
@@ -149,6 +172,8 @@ export default function NewProductPage() {
                   type="text"
                   placeholder="e.g. Micro Labs"
                   value={formData.companyName}
+                ref={fieldChain.register('companyName')}
+                onKeyDown={fieldChain.onKeyDown('companyName')}
                   onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 />
               </Field>
@@ -157,6 +182,8 @@ export default function NewProductPage() {
                 <Input
                   type="text"
                   value={formData.hsnCode}
+                ref={fieldChain.register('hsnCode')}
+                onKeyDown={fieldChain.onKeyDown('hsnCode')}
                   onChange={(e) => setFormData({ ...formData, hsnCode: e.target.value })}
                   className="font-mono font-semibold"
                 />
@@ -167,6 +194,8 @@ export default function NewProductPage() {
               <Field label="GST Tax %">
                 <Select
                   value={formData.gstPercent}
+                ref={fieldChain.register('gstPercent')}
+                onKeyDown={fieldChain.onKeyDown('gstPercent')}
                   onChange={(e) => {
                     // Not `|| 12`: that silently turned the "0% (Exempt)" option into 12%.
                     const chosen = parseFloat(e.target.value);
@@ -183,6 +212,8 @@ export default function NewProductPage() {
               <Field label="Division Schedule">
                 <Select
                   value={formData.division}
+                ref={fieldChain.register('division')}
+                onKeyDown={fieldChain.onKeyDown('division')}
                   onChange={(e) => setFormData({ ...formData, division: e.target.value })}
                 >
                   <option value="GENERAL">General OTC</option>

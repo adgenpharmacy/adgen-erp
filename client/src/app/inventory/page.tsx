@@ -55,7 +55,9 @@ const FILTER_TABS = [
 
 export default function InventoryPage() {
   const toast = useToast();
-  const { inventory: cachedInventory, loading, refreshData } = useErpData();
+  const { inventory: cachedInventory, loading, refreshData, profile } = useErpData();
+  // Same switch the reports use: a GSTIN on file means the tax on purchases is reclaimable.
+  const gstRegistered = Boolean((profile?.gstNumber || '').trim());
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [isMounted, setIsMounted] = useState(false);
   const [search, setSearch] = useState('');
@@ -132,7 +134,14 @@ export default function InventoryPage() {
       const prate = inv.purchaseRate || 0;
 
       totalMrpValue += (inv.totalMrpValue || (stock * mrp));
-      totalCostValue += (inv.totalCostValue || (stock * prate));
+      /*
+       * Cost basis follows registration, exactly as the P&L does. Without a GSTIN the tax paid
+       * to suppliers is never reclaimed, so it is part of what the shelf cost — valuing at the
+       * bare rate understated stock on hand and overstated the margin.
+       */
+      totalCostValue += gstRegistered
+        ? (inv.totalCostValue || (stock * prate))
+        : (inv.totalCostValueInclGst ?? inv.totalCostValue ?? (stock * prate));
 
       if (stock === 0) outOfStockCount++;
       else if (stock <= lowThreshold) lowStockCount++;
@@ -153,7 +162,7 @@ export default function InventoryPage() {
       lowStockCount,
       outOfStockCount,
     };
-  }, [inventory]);
+  }, [inventory, gstRegistered, now]);
 
   const filteredInventory = useMemo(() => {
     return inventory

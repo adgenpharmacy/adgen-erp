@@ -5,9 +5,21 @@ import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 import type { Sale, SaleDetail } from '@/types';
 import Portal from '@/components/ui/Portal';
+import PaperSizeControl from '@/components/print/PaperSizeControl';
+import { usePaperSize } from '@/components/print/paper';
+import UpiQr from '@/components/invoice/UpiQr';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
 import { formatPharmacyAddress } from '@/types';
+
+/**
+ * UPI id the scan-to-pay QR collects into.
+ *
+ * An environment variable rather than a database column so it needs no migration, and rather
+ * than a bare literal so a change of payment account does not require a code edit. Set
+ * NEXT_PUBLIC_UPI_ID in the Vercel project to override.
+ */
+const UPI_ID = process.env.NEXT_PUBLIC_UPI_ID || '8839640968@okbizaxis';
 
 interface InvoicePrintModalProps {
   invoice?: SaleDetail | Sale;
@@ -17,6 +29,7 @@ interface InvoicePrintModalProps {
 
 export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePrintModalProps) {
   const [copied, setCopied] = useState(false);
+  const [paper, setPaper] = usePaperSize();
   // Pharmacy identity is owner-configurable in Admin; it was hardcoded here,
   // which meant a placeholder GSTIN printed on real tax invoices.
   const { profile } = useErpData();
@@ -29,7 +42,13 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
    * fetches its own detail rather than trusting whatever the caller happened to hold.
    */
   const [detail, setDetail] = useState<SaleDetail | Sale | null>(null);
-  const needsDetail = !!source && !(source.items && source.items.length > 0);
+  /*
+   * "Has lines" is not the same as "has printable lines". A bill handed over straight from a
+   * create/update response used to carry its rows without the product and batch behind them, and
+   * this check passed, so the memo printed "Medicine Item" against every row until the page was
+   * reloaded. Require the joined product before trusting what was passed in.
+   */
+  const needsDetail = !!source && !(source.items && source.items.length > 0 && source.items.every((i) => i.product));
 
   useEffect(() => {
     if (!source || !needsDetail) return;
@@ -154,6 +173,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
           </div>
 
           <div className="flex items-center gap-2">
+            <PaperSizeControl spec={paper} onChange={setPaper} />
             <button
               onClick={handleShare}
               className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
@@ -263,7 +283,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
               <tr className="bg-slate-100 border-b border-slate-300 font-extrabold text-slate-700 text-[10px] uppercase print:bg-slate-200">
                 <th className="py-2 px-2">#</th>
                 <th className="py-2 px-2">Medicine Product Name</th>
-                <th className="py-2 px-2">HSN</th>
+                <th className="py-2 px-2 print-optional">HSN</th>
                 <th className="py-2 px-2">Batch</th>
                 <th className="py-2 px-2">Exp</th>
                 <th className="py-2 px-2 text-center">Pack / Strip</th>
@@ -313,7 +333,7 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                         <div className="text-[9px] text-slate-500 font-normal">{item.product.genericName}</div>
                       )}
                     </td>
-                    <td className="py-2 px-2 font-mono text-slate-600">{item.product?.hsnCode || '3004'}</td>
+                    <td className="py-2 px-2 font-mono text-slate-600 print-optional">{item.product?.hsnCode || '3004'}</td>
                     <td className="py-2 px-2 font-mono font-bold text-slate-900">{item.batch?.batchNumber || 'DEF'}</td>
                     <td className="py-2 px-2 text-slate-600 font-mono">
                       {item.batch?.expiryDate ? formatDate(item.batch.expiryDate) : '-'}
@@ -446,6 +466,23 @@ export default function InvoicePrintModal({ invoice, bill, onClose }: InvoicePri
                   ₹{netPayableVal.toFixed(2)}
                 </span>
               </div>
+
+              {/*
+                Scan-to-pay, carrying the net payable. Placed under the total so the amount the
+                QR encodes is next to the amount printed — if the two ever disagreed it would be
+                obvious. Hidden once the bill is settled in cash, and on roll paper, where a
+                scannable code rarely survives the print resolution.
+              */}
+              {netPayableVal > 0 && UPI_ID ? (
+                <div className={paper.compact ? 'hidden' : 'pt-2'}>
+                  <UpiQr
+                    upiId={UPI_ID}
+                    payeeName={profile?.name || 'AdGen Pharmacy'}
+                    amount={netPayableVal}
+                    note={`Bill ${activeInvoice.invoiceNumber || ''}`.trim()}
+                  />
+                </div>
+              ) : null}
 
               {/*
                 Sign-off sits directly under the net amount, where the eye already is. The

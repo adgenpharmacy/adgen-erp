@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { useErpData } from '@/context/ErpDataContext';
-import { formatDate, formatCurrency } from '@/lib/utils';
+import { formatDate, formatCurrency, cn } from '@/lib/utils';
 import { Search, Plus, BookOpen } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
 import type { LedgerEntry, Customer, Party } from '@/types';
@@ -26,7 +26,6 @@ import {
   TD,
   useToast,
 } from '@/components/ui';
-import { cn } from '@/lib/utils';
 
 export default function LedgerPage() {
   const toast = useToast();
@@ -35,6 +34,8 @@ export default function LedgerPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [search, setSearch] = useState('');
+  /** Which book is on screen: what patients owe the shop, or what the shop owes distributors. */
+  const [book, setBook] = useState<'SALES' | 'PURCHASE'>('SALES');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentType, setPaymentType] = useState<'CUSTOMER' | 'PARTY'>('CUSTOMER');
   const [entityId, setEntityId] = useState('');
@@ -77,12 +78,32 @@ export default function LedgerPage() {
     } catch (e) { toast.error('Failed to record payment', getApiErrorMessage(e)); }
   };
 
-  const filtered = ledgers.filter((l) => {
+  /*
+   * Money owed TO the shop and money owed BY the shop were listed together, so the one figure a
+   * pharmacy actually wants — what each side comes to — could not be read off the screen. They
+   * are the same table but two different books, split by which party the entry belongs to.
+   */
+  const matchesSearch = (l: LedgerEntry) => {
     const q = search.toLowerCase();
-    return (l.customer?.name || '').toLowerCase().includes(q) ||
+    if (!q) return true;
+    return (
+      (l.customer?.name || '').toLowerCase().includes(q) ||
       (l.party?.name || '').toLowerCase().includes(q) ||
-      (l.description || '').toLowerCase().includes(q);
-  });
+      (l.description || '').toLowerCase().includes(q)
+    );
+  };
+
+  const isSupplierSide = (l: LedgerEntry) => l.partyType === 'SUPPLIER' || Boolean(l.partyId) || Boolean(l.purchaseBillId);
+
+  const salesLedger = ledgers.filter((l) => !isSupplierSide(l) && matchesSearch(l));
+  const purchaseLedger = ledgers.filter((l) => isSupplierSide(l) && matchesSearch(l));
+  const filtered = book === 'SALES' ? salesLedger : purchaseLedger;
+
+  const outstandingOf = (rows: LedgerEntry[]) =>
+    rows.reduce((sum, l) => sum + (l.isSettled ? 0 : l.outstandingAmount ?? l.amount ?? 0), 0);
+
+  const receivable = outstandingOf(salesLedger);
+  const payable = outstandingOf(purchaseLedger);
 
   const handleInlineSettle = async (item: LedgerEntry) => {
     try {
@@ -101,7 +122,7 @@ export default function LedgerPage() {
     <PageMain>
       <PageHeader
         title="Ledger"
-        subtitle={`${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'}`}
+        subtitle={`${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'} in this book`}
         action={
           <Button onClick={() => setShowPaymentModal(true)}>
             <Plus className="h-4 w-4" aria-hidden />
@@ -119,6 +140,30 @@ export default function LedgerPage() {
           aria-label="Search ledger"
         />
       </PageHeader>
+
+      {/* The two balances side by side: what is coming in, and what has to go out. */}
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {([
+          ['SALES', 'Receivable — patients owe you', receivable, salesLedger.length, 'text-brand'],
+          ['PURCHASE', 'Payable — you owe distributors', payable, purchaseLedger.length, 'text-warn'],
+        ] as const).map(([id, label, value, count, tone]) => (
+          <button
+            key={id}
+            onClick={() => setBook(id)}
+            aria-pressed={book === id}
+            className={cn(
+              'rounded-lg border p-4 text-left transition-colors',
+              book === id ? 'border-brand bg-brand-subtle/40 shadow-card' : 'border-line bg-surface hover:border-line-strong'
+            )}
+          >
+            <span className="block text-[11px] font-extrabold uppercase tracking-wider text-fg-subtle">{label}</span>
+            <span className={cn('mt-1 block font-mono text-xl font-black', tone)}>{formatCurrency(value)}</span>
+            <span className="mt-0.5 block text-xs text-fg-muted">
+              {count} {count === 1 ? 'entry' : 'entries'}
+            </span>
+          </button>
+        ))}
+      </div>
 
       <Card className="overflow-hidden">
         {filtered.length === 0 ? (

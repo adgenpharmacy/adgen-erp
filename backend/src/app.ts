@@ -20,6 +20,7 @@ import usersRoutes from './routes/users.routes';
 import systemRoutes from './routes/system.routes';
 import settingsRoutes from './routes/settings.routes';
 import stockAdjustmentRoutes from './routes/stock-adjustments.routes';
+import attendanceRoutes from './routes/attendance.routes';
 
 import { requestLogger } from './middlewares/logger.middleware';
 import { maintenanceMode } from './middlewares/maintenance.middleware';
@@ -122,6 +123,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/stock-adjustments', stockAdjustmentRoutes);
+app.use('/api/attendance', attendanceRoutes);
 
 // Welcome & Status
 app.get(['/', '/api'], (req, res) => {

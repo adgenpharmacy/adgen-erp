@@ -5,6 +5,8 @@ import { Printer, X, Share2, Check } from 'lucide-react';
 import { formatDate, numberToWords, formatQuantity } from '@/lib/utils';
 import type { Purchase, PurchaseDetail } from '@/types';
 import Portal from '@/components/ui/Portal';
+import PaperSizeControl from '@/components/print/PaperSizeControl';
+import { usePaperSize } from '@/components/print/paper';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
 import { formatPharmacyAddress } from '@/types';
@@ -19,6 +21,8 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
   // Pharmacy identity is owner-configurable in Admin; it was hardcoded here,
   // which meant a placeholder GSTIN printed on real tax invoices.
   const { profile } = useErpData();
+  const [paper, setPaper] = usePaperSize();
+  const shopName = profile?.name || 'Pharmacy';
 
   /*
    * The purchases list is fetched without its lines, so a bill passed straight from a list row
@@ -52,7 +56,7 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
     const originalTitle = document.title;
     const invNum = purchase.invoiceNumber || purchase.id || 'Draft';
     const partyName = (purchase.party?.name || 'Supplier').replace(/[^a-zA-Z0-9_-]/g, '_');
-    document.title = `Purchase_Invoice_${invNum}_${partyName}_AdGen_Pharma`;
+    document.title = `Purchase_Invoice_${invNum}_${partyName}_${shopName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
     window.print();
     setTimeout(() => {
       document.title = originalTitle;
@@ -60,7 +64,7 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
   };
 
   const handleShare = async () => {
-    const text = `*ADGEN PHARMACY - PURCHASE INVOICE MEMO*\n----------------------------\nInvoice #: ${purchase.invoiceNumber}\nDate: ${formatDate(purchase.purchaseDate || purchase.createdAt)}\nSupplier: ${purchase.party?.name || 'Distributor'}\nPhone: ${purchase.party?.phone || 'N/A'}\n----------------------------\n*Grand Total: ₹${purchase.grandTotal?.toFixed(2)}*\nPayment: ${purchase.isPaid ? 'PAID' : 'CREDIT'}\n----------------------------`;
+    const text = `*${shopName.toUpperCase()} - PURCHASE INVOICE MEMO*\n----------------------------\nInvoice #: ${purchase.invoiceNumber}\nDate: ${formatDate(purchase.purchaseDate || purchase.createdAt)}\nSupplier: ${purchase.party?.name || 'Distributor'}\nPhone: ${purchase.party?.phone || 'N/A'}\n----------------------------\n*Grand Total: ₹${purchase.grandTotal?.toFixed(2)}*\nPayment: ${purchase.isPaid ? 'PAID' : 'CREDIT'}\n----------------------------`;
     
     if (navigator.share) {
       try {
@@ -128,6 +132,7 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
           </div>
 
           <div className="flex items-center gap-2">
+            <PaperSizeControl spec={paper} onChange={setPaper} />
             <button
               onClick={handleShare}
               className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
@@ -159,7 +164,7 @@ export default function PurchasePrintModal({ purchase: source, onClose }: Purcha
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
             <div className="flex items-start gap-3">
-              <img src="/logo.png" alt="AdGen Pharma" className="h-12 w-auto object-contain shrink-0" />
+              <img src="/logo.png" alt={shopName} className="h-12 w-auto object-contain shrink-0" />
               <div>
                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
                   {profile?.name || 'ADGEN PHARMA'}

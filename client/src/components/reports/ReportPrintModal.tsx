@@ -5,6 +5,10 @@ import { formatCurrency } from '@/lib/utils';
 import type { Sale, Purchase } from '@/types';
 import { useState } from 'react';
 import Portal from '@/components/ui/Portal';
+import PaperSizeControl from '@/components/print/PaperSizeControl';
+import { usePaperSize } from '@/components/print/paper';
+import { useErpData } from '@/context/ErpDataContext';
+import { formatPharmacyAddress } from '@/types';
 
 interface ReportPrintModalProps {
   dateRangeLabel: string;
@@ -41,13 +45,16 @@ export default function ReportPrintModal({
   onClose,
 }: ReportPrintModalProps) {
   const [copied, setCopied] = useState(false);
+  const [paper, setPaper] = usePaperSize();
+  const { profile } = useErpData();
+  const shopName = profile?.name || 'Pharmacy';
 
   const handlePrint = () => {
     window.print();
   };
 
   const handleShare = async () => {
-    const summary = `*ADGEN PHARMACY - OFFICIAL BUSINESS REPORT*\n----------------------------\nPeriod: ${dateRangeLabel} (${startDate} to ${endDate})\n----------------------------\nSales Revenue: ${formatCurrency(metrics.totalSalesRevenue)} (${sales.length} Bills)\nProcurement Cost: ${formatCurrency(metrics.totalPurchasesCost)} (${purchases.length} Invoices)\nGross Profit: ${formatCurrency(metrics.netGrossProfit)} (Margin: ${metrics.profitMarginPercent.toFixed(1)}%)\nNet GST Liability: ${formatCurrency(metrics.netGstPayable)}\n----------------------------\nReport Generated: ${new Date().toLocaleString('en-IN')}`;
+    const summary = `*${shopName.toUpperCase()} - OFFICIAL BUSINESS REPORT*\n----------------------------\nPeriod: ${dateRangeLabel} (${startDate} to ${endDate})\n----------------------------\nSales Revenue: ${formatCurrency(metrics.totalSalesRevenue)} (${sales.length} Bills)\nProcurement Cost: ${formatCurrency(metrics.totalPurchasesCost)} (${purchases.length} Invoices)\nGross Profit: ${formatCurrency(metrics.netGrossProfit)} (Margin: ${metrics.profitMarginPercent.toFixed(1)}%)\nNet GST Liability: ${formatCurrency(metrics.netGstPayable)}\n----------------------------\nReport Generated: ${new Date().toLocaleString('en-IN')}`;
 
     if (navigator.share) {
       try {
@@ -70,7 +77,7 @@ export default function ReportPrintModal({
     <Portal>
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
+      className="print-root fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:static print:block print:p-0 print:overflow-visible print:bg-transparent"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -84,6 +91,7 @@ export default function ReportPrintModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <PaperSizeControl spec={paper} onChange={setPaper} />
             <button
               onClick={handleShare}
               className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
@@ -115,15 +123,25 @@ export default function ReportPrintModal({
           <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-6">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <img src="/logo.png" alt="AdGen Pharmacy" className="h-10 w-auto object-contain" />
+                <img src="/logo.png" alt={shopName} className="h-10 w-auto object-contain" />
                 <div>
-                  <h1 className="text-xl font-extrabold tracking-tight text-slate-900 print:text-black">ADGEN PHARMACY</h1>
+                  {/*
+                    Identity comes from the pharmacy profile. It used to be hardcoded here — name,
+                    address, drug licence numbers, and a placeholder GSTIN (23AAPFA1234F1Z5) that
+                    belongs to nobody. A financial report carrying an invented tax number is worse
+                    than one carrying none, so the GSTIN line only prints when there is a real one.
+                  */}
+                  <h1 className="text-xl font-extrabold tracking-tight text-slate-900 print:text-black uppercase">
+                    {profile?.name || 'Pharmacy'}
+                  </h1>
                   <p className="text-[10px] text-slate-600 print:text-black font-bold uppercase tracking-wider">OFFICIAL EXECUTIVE BUSINESS FINANCIAL REPORT</p>
                 </div>
               </div>
               <p className="text-[11px] text-slate-600 print:text-black font-medium leading-snug">
-                27-A CHANDRA NAGAR, BARFANI DHAM MR-9, INDORE (M.P)<br />
-                <strong>DL NO:</strong> 20B/5441/12/2024, 21B/5442/12/2024 | <strong>GSTIN:</strong> 23AAPFA1234F1Z5
+                {formatPharmacyAddress(profile) || '—'}<br />
+                {profile?.dlNumber ? <><strong>DL NO:</strong> {profile.dlNumber}</> : null}
+                {profile?.dlNumber && profile?.gstNumber ? ' | ' : ''}
+                {profile?.gstNumber ? <><strong>GSTIN:</strong> {profile.gstNumber}</> : null}
               </p>
             </div>
             <div className="text-right font-mono">

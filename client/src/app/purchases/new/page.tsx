@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { api } from '@/lib/api-client';
 import { getCachedProducts, invalidateCatalogCache } from '@/lib/catalog-cache';
+import QuickAddProductModal from '@/components/products/QuickAddProductModal';
+import { useListboxKeys } from '@/lib/use-listbox-keys';
 import {
   Building2,
   Receipt,
@@ -77,6 +79,8 @@ function NewPurchasePageContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  /** Row that asked for a new medicine, so the created product lands on the right line. */
+  const [quickAddForRow, setQuickAddForRow] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
 
@@ -197,16 +201,18 @@ function NewPurchasePageContent() {
     void getCachedProducts('');
   }, []);
 
-  // INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE
+  /*
+   * INSTANT 0ms MEDICINE SEARCH VIA BROWSER CACHE.
+   *
+   * An empty box now lists the catalogue instead of clearing it. Requiring a keystroke before
+   * anything appeared meant the operator had to know a medicine's name was in the system before
+   * they could look for it, and made the dropdown feel broken on first click.
+   */
   useEffect(() => {
     let isCurrent = true;
-    if (search.trim()) {
-      getCachedProducts(search.trim()).then((res) => {
-        if (isCurrent) setProducts(res);
-      });
-    } else {
-      setProducts([]);
-    }
+    getCachedProducts(search.trim()).then((res) => {
+      if (isCurrent) setProducts(res);
+    });
     return () => { isCurrent = false; };
   }, [search]);
 
@@ -255,6 +261,19 @@ function NewPurchasePageContent() {
       inputRefs.current[`batch-${index}`]?.focus();
     }, 50);
   };
+
+  /*
+   * Arrow keys drive the medicine dropdown: type, ArrowDown, Enter. Same behaviour as the sales
+   * counter so an operator moving between the two screens does not have to change habit.
+   */
+  const medicineKeys = useListboxKeys(
+    products.length,
+    (index) => {
+      const chosen = products[index];
+      if (chosen && activeSearchIndex !== null) selectProductForItem(activeSearchIndex, chosen);
+    },
+    () => setActiveSearchIndex(null)
+  );
 
   const clearItemProduct = (index: number) => {
     const updated = [...items];
@@ -684,24 +703,51 @@ function NewPurchasePageContent() {
                         value={activeSearchIndex === idx ? search : ''}
                         onFocus={() => setActiveSearchIndex(idx)}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search the medicine catalogue…"
+                        onKeyDown={medicineKeys.onKeyDown}
+                        role="combobox"
+                        aria-expanded={activeSearchIndex === idx}
+                        aria-controls={`purchase-medicine-list-${idx}`}
+                        placeholder="Search catalogue · ↑↓ to choose, Enter to add"
                         aria-label={`Search medicine for item ${idx + 1}`}
                       />
 
                       {activeSearchIndex === idx ? (
-                        <div className="absolute inset-x-0 top-full z-40 mt-1.5 max-h-64 overflow-y-auto rounded-md border border-line bg-surface shadow-pop">
+                        <div
+                          id={`purchase-medicine-list-${idx}`}
+                          role="listbox"
+                          className="absolute inset-x-0 top-full z-40 mt-1.5 max-h-64 overflow-y-auto rounded-md border border-line bg-surface shadow-pop"
+                        >
                           {products.length === 0 ? (
-                            <p className="px-4 py-6 text-center text-sm text-fg-subtle">
-                              {search.trim() ? 'No matching medicine found' : 'Start typing to search the catalogue…'}
-                            </p>
+                            <div className="px-4 py-5 text-center">
+                              <p className="text-sm text-fg-subtle">
+                                {search.trim() ? `"${search.trim()}" is not in the catalogue` : 'No medicines yet'}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="mt-2.5"
+                                onClick={() => setQuickAddForRow(idx)}
+                              >
+                                <Plus className="h-4 w-4" aria-hidden />
+                                Add it now
+                              </Button>
+                            </div>
                           ) : (
-                            products.map((prod) => {
+                            products.map((prod, optionIndex) => {
+                              const active = medicineKeys.highlight === optionIndex;
                               return (
                                 <button
                                   key={prod.id}
                                   type="button"
+                                  ref={medicineKeys.setOptionRef(optionIndex)}
+                                  role="option"
+                                  aria-selected={active}
+                                  onMouseEnter={() => medicineKeys.setHighlight(optionIndex)}
                                   onClick={() => selectProductForItem(idx, prod)}
-                                  className="flex w-full items-center justify-between gap-3 border-b border-line-light px-3 py-2.5 text-left transition-colors last:border-0 hover:bg-hover"
+                                  className={cn(
+                                    'flex w-full items-center justify-between gap-3 border-b border-line-light px-3 py-2.5 text-left transition-colors last:border-0',
+                                    active ? 'bg-brand-subtle' : 'hover:bg-hover'
+                                  )}
                                 >
                                   <span className="min-w-0">
                                     <span className="block truncate text-sm font-semibold text-fg">{prod.name}</span>
@@ -856,6 +902,26 @@ function NewPurchasePageContent() {
           ))}
         </div>
       </div>
+
+      {/*
+        Adding a medicine mid-bill. The new product is selected onto the row that asked for it,
+        so entry carries on from where it stopped instead of the bill being abandoned.
+      */}
+      {quickAddForRow !== null ? (
+      <QuickAddProductModal
+        open
+        initialName={search}
+        onClose={() => setQuickAddForRow(null)}
+        onCreated={(product) => {
+          const row = quickAddForRow;
+          if (row === null) return;
+          selectProductForItem(row, product);
+          setQuickAddForRow(null);
+          setSearch('');
+          setActiveSearchIndex(null);
+        }}
+      />
+      ) : null}
 
       {/* UNSAVED DATA CONFIRMATION MODAL */}
       <Modal

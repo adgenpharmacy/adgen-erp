@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import ClockControl from '@/components/layout/ClockControl';
 import {
   LayoutDashboard,
   Receipt,
@@ -145,6 +146,13 @@ export default function Sidebar() {
             </div>
           ) : null}
         </nav>
+
+        {/* Shift clock — placed with the user, where someone looks when arriving or leaving. */}
+        {user ? (
+          <div className="px-3 pt-3">
+            <ClockControl />
+          </div>
+        ) : null}
 
         {/* User */}
         {user ? (

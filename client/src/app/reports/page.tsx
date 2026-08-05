@@ -19,6 +19,7 @@ import {
   Pill,
   CalendarDays,
   ShieldCheck,
+  RotateCcw,
 } from 'lucide-react';
 import {
   explodeSale,
@@ -144,7 +145,7 @@ export default function ReportsPage() {
   const { inventory: cachedInventory, profile } = useErpData();
 
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'DAYS' | 'SALES' | 'PURCHASES' | 'MEDICINES' | 'GST' | 'PL' | 'EXPIRY'
+    'OVERVIEW' | 'DAYS' | 'SALES' | 'PURCHASES' | 'MEDICINES' | 'GST' | 'PL' | 'RETURNS' | 'EXPIRY'
   >('OVERVIEW');
   const [timePreset, setTimePreset] = useState<TimeRangePreset>('ALL_TIME');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -355,6 +356,18 @@ export default function ReportsPage() {
   // ── Column definitions ────────────────────────────────────────────────────
 
   const money = (v: number) => formatCurrency(v);
+
+  /** Return rows carry a bill/customer/supplier the shared ReturnRecord type does not name. */
+  const returnExtras = (r: ReturnRecord) =>
+    r as ReturnRecord & {
+      discount?: number;
+      customer?: { name?: string };
+      salesBill?: { invoiceNumber?: string; customerName?: string };
+      purchaseBill?: { invoiceNumber?: string; party?: { name?: string } };
+    };
+
+  const medicineName = (productId: string) =>
+    inventory.find((i) => (i.productId || i.id) === productId)?.productName || 'Medicine';
   const sum = <T,>(rows: T[], pick: (r: T) => number) => rows.reduce((t, r) => t + pick(r), 0);
 
   const saleLineColumns: Column<SaleLine>[] = [
@@ -400,6 +413,7 @@ export default function ReportsPage() {
     { id: 'MEDICINES', label: 'Medicines' },
     { id: 'GST', label: registered ? 'GST filing' : 'GST info' },
     { id: 'PL', label: 'Profit & Loss' },
+    { id: 'RETURNS', label: 'Returns' },
     { id: 'EXPIRY', label: 'Expiry risk' },
   ] as const;
 
@@ -846,6 +860,142 @@ export default function ReportsPage() {
                   { key: 'profit', header: 'Profit', value: (d) => d.profit, render: (d) => <span className={d.profit >= 0 ? 'font-bold text-brand-hover' : 'font-bold text-danger'}>{money(d.profit)}</span>, align: 'right', total: (r) => money(sum(r, (d) => d.profit)) },
                   { key: 'margin', header: 'Margin', value: (d) => d.marginPercent, render: (d) => pct(d.marginPercent), align: 'right' },
                 ]}
+              />
+            </div>
+          )}
+
+          {/* ── RETURNS ──────────────────────────────────────────────────── */}
+          {activeTab === 'RETURNS' && (
+            <div className="space-y-5">
+              {/*
+                Kept as two separate statements on purpose. A credit note to a patient and a debit
+                note to a distributor move money in opposite directions — netting them into one
+                "returns" figure hides both.
+              */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Tile
+                  label="Credit notes to patients" value={formatCurrency(s.returnedInclusive)}
+                  sub={`${filteredSalesReturns.length} notes`} tone="bad"
+                  explain={<>Goods handed back by patients, valued at what they paid. Restocked items also come back out of cost, so profit is not charged twice.</>}
+                />
+                <Tile
+                  label="Cost back on the shelf" value={formatCurrency(s.returnedCost)}
+                  sub="restocked items only"
+                  explain={<>Only goods marked &ldquo;back to shelf&rdquo; return to stock. Damaged returns stay a cost.</>}
+                />
+                <Tile
+                  label="Debit notes to suppliers" value={formatCurrency(purchaseReturnValue)}
+                  sub={`${filteredPurchaseReturns.length} notes`} tone="accent"
+                  explain={<>Expired or damaged stock sent back to distributors, reducing what you owe them.</>}
+                />
+                <Tile
+                  label="Return rate" value={pct(s.charged > 0 ? (s.returnedInclusive / s.charged) * 100 : 0)}
+                  sub="of counter takings"
+                />
+              </div>
+
+              <ReportTable<ReturnRecord>
+                caption={<span className="flex items-center gap-2"><RotateCcw className="h-4 w-4 text-danger" />Patient returns — credit notes</span>}
+                rows={filteredSalesReturns}
+                rowKey={(r) => r.id}
+                exportName="patient-returns"
+                initialSort={{ key: 'date', direction: 'desc' }}
+                empty="No patient returns in this period."
+                columns={[
+                  { key: 'note', header: 'Note #', value: (r) => r.returnNumber },
+                  { key: 'date', header: 'Date', value: (r) => r.createdAt, render: (r) => formatDate(r.createdAt) },
+                  {
+                    key: 'patient', header: 'Patient / Bill',
+                    value: (r) => returnExtras(r).customer?.name || returnExtras(r).salesBill?.customerName || 'Walk-in',
+                    render: (r) => (
+                      <span>
+                        <span className="block font-semibold">
+                          {returnExtras(r).customer?.name || returnExtras(r).salesBill?.customerName || 'Walk-in'}
+                        </span>
+                        <span className="block font-mono text-[10px] text-fg-subtle">
+                          {returnExtras(r).salesBill?.invoiceNumber || '—'}
+                        </span>
+                      </span>
+                    ),
+                  },
+                  { key: 'items', header: 'Lines', value: (r) => r.items?.length || 0, align: 'right', total: (rows) => sum(rows, (r) => r.items?.length || 0) },
+                  {
+                    key: 'deduction', header: 'Deduction', value: (r) => returnExtras(r).discount || 0, align: 'right',
+                    render: (r) => (returnExtras(r).discount ? money(returnExtras(r).discount || 0) : '—'),
+                    total: (rows) => money(sum(rows, (r) => returnExtras(r).discount || 0)),
+                  },
+                  {
+                    key: 'net', header: 'Refunded', value: (r) => r.totalReturnAmount || 0, align: 'right',
+                    render: (r) => money(r.totalReturnAmount || 0),
+                    total: (rows) => money(sum(rows, (r) => r.totalReturnAmount || 0)),
+                  },
+                ]}
+                expand={(r) => (
+                  <ReportTable
+                    caption="Medicines returned"
+                    rows={r.items || []}
+                    rowKey={(i, ) => `${r.id}-${i.productId}-${i.batchNumber ?? ''}`}
+                    columns={[
+                      { key: 'name', header: 'Medicine', value: (i) => i.product?.name || i.productName || medicineName(i.productId) },
+                      { key: 'batch', header: 'Batch', value: (i) => i.batchNumber || '—' },
+                      { key: 'qty', header: 'Qty', value: (i) => i.quantity, align: 'right' },
+                      { key: 'rate', header: 'Rate', value: (i) => i.unitPrice ?? 0, render: (i) => money(i.unitPrice ?? 0), align: 'right' },
+                      { key: 'cond', header: 'Condition', value: (i) => (i.condition === 'RESTOCK' ? 'Back to shelf' : 'Written off') },
+                      { key: 'value', header: 'Value', value: (i) => i.totalAmount ?? 0, render: (i) => money(i.totalAmount ?? 0), align: 'right' },
+                    ]}
+                  />
+                )}
+              />
+
+              <ReportTable<ReturnRecord>
+                caption={<span className="flex items-center gap-2"><Building2 className="h-4 w-4 text-accent" />Supplier returns — debit notes</span>}
+                rows={filteredPurchaseReturns}
+                rowKey={(r) => r.id}
+                exportName="supplier-returns"
+                initialSort={{ key: 'date', direction: 'desc' }}
+                empty="No supplier returns in this period."
+                columns={[
+                  { key: 'note', header: 'Note #', value: (r) => r.returnNumber },
+                  { key: 'date', header: 'Date', value: (r) => r.createdAt, render: (r) => formatDate(r.createdAt) },
+                  {
+                    key: 'supplier', header: 'Supplier / Bill',
+                    value: (r) => returnExtras(r).purchaseBill?.party?.name || 'Supplier',
+                    render: (r) => (
+                      <span>
+                        <span className="block font-semibold">{returnExtras(r).purchaseBill?.party?.name || 'Supplier'}</span>
+                        <span className="block font-mono text-[10px] text-fg-subtle">
+                          {returnExtras(r).purchaseBill?.invoiceNumber || '—'}
+                        </span>
+                      </span>
+                    ),
+                  },
+                  { key: 'items', header: 'Lines', value: (r) => r.items?.length || 0, align: 'right', total: (rows) => sum(rows, (r) => r.items?.length || 0) },
+                  {
+                    key: 'deduction', header: 'Deduction', value: (r) => returnExtras(r).discount || 0, align: 'right',
+                    render: (r) => (returnExtras(r).discount ? money(returnExtras(r).discount || 0) : '—'),
+                    total: (rows) => money(sum(rows, (r) => returnExtras(r).discount || 0)),
+                  },
+                  {
+                    key: 'net', header: 'Claimed', value: (r) => r.totalReturnAmount || 0, align: 'right',
+                    render: (r) => money(r.totalReturnAmount || 0),
+                    total: (rows) => money(sum(rows, (r) => r.totalReturnAmount || 0)),
+                  },
+                ]}
+                expand={(r) => (
+                  <ReportTable
+                    caption="Medicines sent back"
+                    rows={r.items || []}
+                    rowKey={(i, ) => `${r.id}-${i.productId}-${i.batchNumber ?? ''}`}
+                    columns={[
+                      { key: 'name', header: 'Medicine', value: (i) => i.product?.name || i.productName || medicineName(i.productId) },
+                      { key: 'batch', header: 'Batch', value: (i) => i.batchNumber || '—' },
+                      { key: 'qty', header: 'Qty', value: (i) => i.quantity, align: 'right' },
+                      { key: 'rate', header: 'Rate', value: (i) => i.purchaseRate ?? 0, render: (i) => money(i.purchaseRate ?? 0), align: 'right' },
+                      { key: 'reason', header: 'Reason', value: (i) => i.reason || '—' },
+                      { key: 'value', header: 'Value', value: (i) => i.totalAmount ?? 0, render: (i) => money(i.totalAmount ?? 0), align: 'right' },
+                    ]}
+                  />
+                )}
               />
             </div>
           )}

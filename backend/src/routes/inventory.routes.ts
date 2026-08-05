@@ -79,8 +79,22 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         return sum + (perUnitMrp * b.quantity);
       }, 0);
 
+      /*
+       * Stock is valued twice: at the bare supplier rate, and at what was actually paid for it.
+       *
+       * `purchaseRate` is GST-exclusive — the purchase bill adds tax on top. A shop that is
+       * registered reclaims that tax, so the bare rate is its cost. A shop below the turnover
+       * threshold reclaims nothing, so the tax is part of what the shelf cost it, and reporting
+       * the bare rate understates the stock on hand (~₹14.7k on this catalogue) and flatters the
+       * margin. Both figures are returned; the client picks by whether a GSTIN is on file.
+       */
       const totalCostValue = prod.batches.reduce((sum, b) => {
         const perUnitCost = b.purchaseRate / packSize;
+        return sum + (perUnitCost * b.quantity);
+      }, 0);
+
+      const totalCostValueInclGst = prod.batches.reduce((sum, b) => {
+        const perUnitCost = (b.purchaseRate / packSize) * (1 + (b.taxPercent || 0) / 100);
         return sum + (perUnitCost * b.quantity);
       }, 0);
 
@@ -107,6 +121,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
         systemStock: totalStock,
         totalMrpValue: Math.round(totalMrpValue * 100) / 100,
         totalCostValue: Math.round(totalCostValue * 100) / 100,
+        totalCostValueInclGst: Math.round(totalCostValueInclGst * 100) / 100,
         batches: prod.batches,
       };
     });

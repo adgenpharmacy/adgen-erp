@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { api } from '@/lib/api-client';
 import { getCachedInventory, invalidateCatalogCache } from '@/lib/catalog-cache';
+import { useListboxKeys } from '@/lib/use-listbox-keys';
 import InvoicePrintModal from '@/components/invoice/InvoicePrintModal';
 import {
   User,
@@ -231,15 +232,13 @@ function NewSalePageContent() {
   // Must hit /inventory, not /products: only /inventory returns live `systemStock` and every
   // batch ordered by expiry ascending. /products returns a single newest-created batch, which
   // made the counter show a hardcoded stock of 10 and pick the wrong batch for FEFO.
+  // An empty box lists the catalogue rather than clearing it, so the dropdown is useful on the
+  // first click instead of only after the operator already knows what to type.
   useEffect(() => {
     let isCurrent = true;
-    if (search.trim()) {
-      getCachedInventory(search.trim()).then((res) => {
-        if (isCurrent) setProducts(res);
-      });
-    } else {
-      setProducts([]);
-    }
+    getCachedInventory(search.trim()).then((res) => {
+      if (isCurrent) setProducts(res);
+    });
     return () => { isCurrent = false; };
   }, [search]);
 
@@ -313,6 +312,19 @@ function NewSalePageContent() {
       inputRefs.current[`strips-${index}`]?.focus();
     }, 50);
   };
+
+  /*
+   * Arrow keys drive the medicine dropdown so a line can be filled without leaving the keyboard:
+   * type, ArrowDown to the right medicine, Enter to select. Escape closes the list.
+   */
+  const medicineKeys = useListboxKeys(
+    products.length,
+    (index) => {
+      const chosen = products[index];
+      if (chosen && activeSearchIndex !== null) selectProductForItem(activeSearchIndex, chosen);
+    },
+    () => setActiveSearchIndex(null)
+  );
 
   const clearItemProduct = (index: number) => {
     const updated = [...items];
@@ -838,25 +850,41 @@ function NewSalePageContent() {
                         value={activeSearchIndex === idx ? search : ''}
                         onFocus={() => setActiveSearchIndex(idx)}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search medicine stock instantly…"
+                        onKeyDown={medicineKeys.onKeyDown}
+                        role="combobox"
+                        aria-expanded={activeSearchIndex === idx}
+                        aria-controls={`medicine-list-${idx}`}
+                        placeholder="Search medicine · ↑↓ to choose, Enter to add"
                         aria-label={`Search medicine for item ${idx + 1}`}
                       />
 
                       {activeSearchIndex === idx ? (
-                        <div className="absolute inset-x-0 top-full z-40 mt-1.5 max-h-64 overflow-y-auto rounded-md border border-line bg-surface shadow-pop">
+                        <div
+                          id={`medicine-list-${idx}`}
+                          role="listbox"
+                          className="absolute inset-x-0 top-full z-40 mt-1.5 max-h-64 overflow-y-auto rounded-md border border-line bg-surface shadow-pop"
+                        >
                           {products.length === 0 ? (
                             <p className="px-4 py-6 text-center text-sm text-fg-subtle">
-                              {search.trim() ? 'No matching stock found' : 'Start typing to search inventory…'}
+                              {search.trim() ? 'No matching stock found' : 'No medicines in stock'}
                             </p>
                           ) : (
-                            products.map((inv) => {
+                            products.map((inv, optionIndex) => {
                               const batch = inv.batches?.[0];
+                              const active = medicineKeys.highlight === optionIndex;
                               return (
                                 <button
                                   key={inv.id}
                                   type="button"
+                                  ref={medicineKeys.setOptionRef(optionIndex)}
+                                  role="option"
+                                  aria-selected={active}
+                                  onMouseEnter={() => medicineKeys.setHighlight(optionIndex)}
                                   onClick={() => selectProductForItem(idx, inv)}
-                                  className="flex w-full items-center justify-between gap-3 border-b border-line-light px-3 py-2.5 text-left transition-colors last:border-0 hover:bg-hover"
+                                  className={cn(
+                                    'flex w-full items-center justify-between gap-3 border-b border-line-light px-3 py-2.5 text-left transition-colors last:border-0',
+                                    active ? 'bg-brand-subtle' : 'hover:bg-hover'
+                                  )}
                                 >
                                   <span className="min-w-0">
                                     <span className="block truncate text-sm font-semibold text-fg">

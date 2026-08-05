@@ -358,8 +358,21 @@ router.post('/', authenticate, validateCreateSale, async (req: AuthenticatedRequ
             create: billItemsToCreate,
           },
         },
+        /*
+         * Lines carry their product and batch, not just the raw rows.
+         *
+         * The counter opens the print memo straight from this response. With bare items it had
+         * the quantities but no medicine names, batch numbers or expiries, so a freshly saved
+         * bill printed "Medicine Item / DEF / -" until the page was reloaded and the modal
+         * refetched the bill for itself.
+         */
         include: {
-          items: true,
+          items: {
+            include: {
+              product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
+              batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true, taxPercent: true } },
+            },
+          },
           customer: true,
         },
       });
@@ -695,7 +708,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
           amountPaid,
           isSettled: !isCredit || (debtAmount <= 0),
         },
-        include: { customer: true, items: true },
+        // Same shape as the create response: the edit screen prints straight from this.
+        include: {
+          customer: true,
+          items: {
+            include: {
+              product: { select: { name: true, genericName: true, hsnCode: true, gstPercent: true, purchaseRate: true, packSize: true, packUnit: true, contentUnit: true } },
+              batch: { select: { batchNumber: true, expiryDate: true, purchaseRate: true, mrp: true, taxPercent: true } },
+            },
+          },
+        },
       });
 
       // Synchronize Ledger Entries: Delete old sales bill ledger entries & recreate if credit remains

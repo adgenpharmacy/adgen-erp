@@ -105,7 +105,10 @@ export interface InventoryItem {
   /** Total quantity in content units (tablets), summed across every batch. */
   systemStock: number;
   totalMrpValue: number;
+  /** Valued at the bare supplier rate — the cost basis for a GST-registered shop. */
   totalCostValue: number;
+  /** Valued at rate plus the GST paid on it — the cost basis when that tax cannot be reclaimed. */
+  totalCostValueInclGst?: number;
   /** Every batch, ordered by expiry ascending (FEFO). */
   batches: InventoryBatch[];
 }
