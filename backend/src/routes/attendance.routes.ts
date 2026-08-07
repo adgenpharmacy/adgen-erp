@@ -12,7 +12,7 @@ router.use(authenticate);
  * remembers to clock out. Rather than leaving the session open and recording a fourteen-hour
  * shift, it is closed at `lastSeenAt`: the last moment the app knows the person was there.
  */
-const IDLE_TIMEOUT_MINUTES = Number(process.env.ATTENDANCE_IDLE_MINUTES || 15);
+const IDLE_TIMEOUT_MINUTES = Number(process.env.ATTENDANCE_IDLE_MINUTES || 60);
 
 /**
  * Close any session that has gone quiet for longer than the timeout.
