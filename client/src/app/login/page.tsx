@@ -277,10 +277,14 @@ export default function LoginPage() {
               placeholder="staff@adgenpharmacy.com"
             />
           </Field>
-          <Field label="Choose a Password" required>
+          <Field label="Choose a Password" required hint="At least 8 characters">
             <Input
               type="password"
               required
+              // The rule was advertised in the placeholder and enforced nowhere: a two-character
+              // password was accepted and stored. The server checks it now, so the form should
+              // say so before the request rather than after it is refused.
+              minLength={8}
               autoComplete="new-password"
               value={reqPassword}
               onChange={(e) => setReqPassword(e.target.value)}

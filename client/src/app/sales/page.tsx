@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api-client';
 import InvoicePrintModal from '@/components/invoice/InvoicePrintModal';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
@@ -55,6 +56,8 @@ export default function SalesPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { sales: cachedSales, loading, refreshData } = useErpData();
   const [sales, setSales] = useState<Sale[]>([]);
   const [isMounted, setIsMounted] = useState(false);
@@ -434,14 +437,17 @@ export default function SalesPage() {
                           >
                             <Printer className="h-4 w-4" />
                           </button>
-                          <button
-                            onClick={(e) => handleDelete(s.id, e)}
-                            className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
-                            title="Delete sales bill"
-                            aria-label="Delete bill"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {/* Owner-only endpoint; showing it to staff only produced a 403. */}
+                          {isOwner ? (
+                            <button
+                              onClick={(e) => handleDelete(s.id, e)}
+                              className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                              title="Delete sales bill"
+                              aria-label="Delete bill"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
                         </span>
                       </TD>
                     </TR>

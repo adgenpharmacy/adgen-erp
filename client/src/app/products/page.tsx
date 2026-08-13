@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useErpData } from '@/context/ErpDataContext';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api-client';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
 import {
@@ -14,6 +15,8 @@ import {
   Boxes,
   Eye,
   RefreshCw,
+  Archive,
+  RotateCcw,
 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
 import type { Product, InventoryItem, InventoryBatch, ProductType } from '@/types';
@@ -69,6 +72,8 @@ const TYPE_TABS = [
 export default function ProductsPage() {
   const toast = useToast();
   const confirm = useConfirm();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { products: cachedProducts, inventory: cachedInventory, loading, refreshData } = useErpData();
   const [products, setProducts] = useState<Product[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -82,6 +87,10 @@ export default function ProductsPage() {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  /** Removed medicines, fetched on demand — they are not in the shared catalogue cache. */
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [removed, setRemoved] = useState<Product[]>([]);
+  const [loadingRemoved, setLoadingRemoved] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -115,17 +124,24 @@ export default function ProductsPage() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const ok = await confirm({
-      title: 'Delete this medicine?',
-      message: 'The product will be removed from the catalogue. Existing bills that reference it are not affected.',
-      confirmLabel: 'Delete medicine',
+      title: 'Remove this medicine?',
+      // Said "removed from the catalogue … existing bills are not affected", which reads as
+      // reversible. It is not: the medicine disappears from search, billing and this list, and
+      // nothing in the app lists removed medicines to bring one back.
+      message:
+        'It will disappear from the catalogue, from medicine search and from the billing counter, ' +
+        'and cannot be restored from within the app. Existing bills keep it. Medicines with stock ' +
+        'on hand cannot be removed.',
+      confirmLabel: 'Remove medicine',
     });
     if (!ok) return;
     try {
       await api.delete(`/products/${id}`);
-      toast.success('Medicine deleted');
+      toast.success('Medicine removed from the catalogue');
       await refreshData();
     } catch (err) {
-      toast.error('Failed to delete product', getApiErrorMessage(err));
+      // The server refuses while stock is on hand and says how much; that message is the answer.
+      toast.error('Medicine not removed', getApiErrorMessage(err));
     }
   };
 
@@ -149,6 +165,35 @@ export default function ProductsPage() {
       lowStockThreshold: p.lowStockThreshold || 5,
     });
     setShowAddModal(true);
+  };
+
+  /**
+   * Put a removed medicine back in the catalogue.
+   *
+   * Removal is a soft delete, but until now nothing read the removed rows back, so a mis-click
+   * was permanent from inside the app — the medicine vanished from search, billing and this list
+   * with no route to undo it.
+   */
+  const loadRemoved = async () => {
+    try {
+      setLoadingRemoved(true);
+      const res = await api.get<Product[]>('/products?includeInactive=1');
+      setRemoved((res.data || []).filter((p) => !p.isActive));
+    } catch (err) {
+      toast.error('Could not load removed medicines', getApiErrorMessage(err));
+    } finally {
+      setLoadingRemoved(false);
+    }
+  };
+
+  const handleRestore = async (p: Product) => {
+    try {
+      await api.put(`/products/${p.id}`, { isActive: true });
+      toast.success(`${p.name} is back in the catalogue`);
+      await Promise.all([loadRemoved(), refreshData()]);
+    } catch (err) {
+      toast.error('Could not restore the medicine', getApiErrorMessage(err));
+    }
   };
 
   const filteredProducts = useMemo(() => {
@@ -195,6 +240,16 @@ export default function ProductsPage() {
             >
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin text-brand')} />
             </Button>
+            {isOwner ? (
+              <Button
+                variant="outline"
+                onClick={() => { setShowRemoved(true); void loadRemoved(); }}
+                title="List removed medicines and put one back"
+              >
+                <Archive className="h-4 w-4" aria-hidden />
+                Removed
+              </Button>
+            ) : null}
             <Button
               onClick={() => {
                 setEditingProduct(null);
@@ -336,14 +391,18 @@ export default function ProductsPage() {
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={(e) => handleDelete(p.id, e)}
-                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
-                          title="Delete product"
-                          aria-label={`Delete ${p.name}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {/* The endpoint is owner-only, so offering it to staff only ever
+                            produced a "Forbidden" toast. */}
+                        {isOwner ? (
+                          <button
+                            onClick={(e) => handleDelete(p.id, e)}
+                            className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                            title="Remove from catalogue"
+                            aria-label={`Remove ${p.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </span>
                     </TD>
                   </TR>
@@ -603,6 +662,61 @@ export default function ProductsPage() {
             </span>
           </label>
         </form>
+      </Modal>
+
+      {/* Removed medicines. The only route back into the catalogue for a soft-deleted product. */}
+      <Modal
+        open={showRemoved}
+        onClose={() => setShowRemoved(false)}
+        title="Removed medicines"
+        subtitle="Hidden from the catalogue, search and billing — restore one to bring it back"
+        size="lg"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => setShowRemoved(false)}>Close</Button>
+          </div>
+        }
+      >
+        {loadingRemoved ? (
+          <TableSkeleton rows={4} cols={3} />
+        ) : removed.length === 0 ? (
+          <EmptyState
+            icon={Archive}
+            title="Nothing has been removed"
+            message="Every medicine in the catalogue is active."
+          />
+        ) : (
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Medicine</TH>
+                  <TH className="hidden sm:table-cell">Company</TH>
+                  <TH align="right">Restore</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {removed.map((p) => (
+                  <TR key={p.id}>
+                    <TD>
+                      <span className="block font-semibold">{toTitleCase(p.name)}</span>
+                      {p.genericName ? (
+                        <span className="block text-xs text-fg-subtle">{p.genericName}</span>
+                      ) : null}
+                    </TD>
+                    <TD className="hidden sm:table-cell text-fg-muted">{p.companyName || '—'}</TD>
+                    <TD align="right">
+                      <Button size="sm" variant="outline" onClick={() => handleRestore(p)}>
+                        <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                        Restore
+                      </Button>
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
+        )}
       </Modal>
     </PageMain>
   );

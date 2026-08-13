@@ -8,14 +8,54 @@ import { getApiErrorMessage } from '@/types';
 import { Button, Field, Input, Select, Modal, useToast } from '@/components/ui';
 
 /**
+ * Category options, matching the ProductType enum in the Prisma schema exactly.
+ *
+ * The full Products form offers only eight of the nine and folds OINTMENT into the CREAM label,
+ * which leaves imported OINTMENT rows describing themselves as something the form cannot express.
+ * Listed in full here.
+ */
+const PRODUCT_TYPES = [
+  { value: 'TABLET', label: 'Tablet' },
+  { value: 'CAPSULE', label: 'Capsule' },
+  { value: 'SYRUP', label: 'Syrup' },
+  { value: 'INJECTION', label: 'Injection' },
+  { value: 'CREAM', label: 'Cream' },
+  { value: 'OINTMENT', label: 'Ointment' },
+  { value: 'DROPS', label: 'Drops' },
+  { value: 'POWDER', label: 'Powder' },
+  { value: 'OTHERS', label: 'Others' },
+] as const;
+
+/**
+ * The pack and content units that go with a dosage form.
+ *
+ * Picking "Syrup" and leaving the units reading "Strip of Tablet" describes a bottle of medicine
+ * as a strip of tablets, and that is what the stock screens and the invoice then print. Changing
+ * the category moves the units with it; either can still be overridden underneath.
+ */
+const UNITS_FOR_TYPE: Record<string, { packUnit: string; contentUnit: string }> = {
+  TABLET: { packUnit: 'Strip', contentUnit: 'Tablet' },
+  CAPSULE: { packUnit: 'Strip', contentUnit: 'Capsule' },
+  SYRUP: { packUnit: 'Bottle', contentUnit: 'ml' },
+  INJECTION: { packUnit: 'Vial', contentUnit: 'ml' },
+  CREAM: { packUnit: 'Tube', contentUnit: 'gm' },
+  OINTMENT: { packUnit: 'Tube', contentUnit: 'gm' },
+  DROPS: { packUnit: 'Bottle', contentUnit: 'Drop' },
+  POWDER: { packUnit: 'Packet', contentUnit: 'gm' },
+  OTHERS: { packUnit: 'Packet', contentUnit: 'Unit' },
+};
+
+/**
  * Create a medicine without leaving the bill being entered.
  *
  * Six lines into a purchase, the seventh medicine turns out not to be in the catalogue. The only
  * way out was to abandon the bill, add the product on the Products screen, come back and start
  * again — so this creates it in place and hands it straight back to the caller to be selected.
  *
- * Deliberately the short form: name, pack, rates, GST. Everything else has a sensible default and
- * can be filled in later on the Products screen; a long form here would defeat the point.
+ * Short form, but not shorter than the catalogue needs. Category and division used to be missing
+ * from it entirely, and since the server falls back to the column defaults for anything it is not
+ * sent, every medicine added mid-purchase was filed as a TABLET on GENERAL OTC — a syrup created
+ * this way sat under the Tablets filter and printed as one. They are asked for here instead.
  */
 export default function QuickAddProductModal({
   open,
@@ -39,7 +79,10 @@ export default function QuickAddProductModal({
    */
   const [form, setForm] = useState(() => ({
     name: initialName?.trim() || '',
+    genericName: '',
     companyName: '',
+    productType: 'TABLET',
+    division: 'GENERAL',
     packSize: 10,
     packUnit: 'Strip',
     contentUnit: 'Tablet',
@@ -57,6 +100,12 @@ export default function QuickAddProductModal({
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  /** Category carries its usual units along with it; both remain editable below. */
+  const setProductType = (value: string) => {
+    const units = UNITS_FOR_TYPE[value] ?? UNITS_FOR_TYPE.OTHERS;
+    setForm((f) => ({ ...f, productType: value, packUnit: units.packUnit, contentUnit: units.contentUnit }));
+  };
+
   const submit = async () => {
     if (!form.name.trim()) {
       toast.error('Name required', 'Enter the medicine name.');
@@ -67,6 +116,7 @@ export default function QuickAddProductModal({
       const res = await api.post<Product>('/products', {
         ...form,
         name: form.name.trim(),
+        genericName: form.genericName.trim() || null,
         companyName: form.companyName.trim() || null,
       });
       // The catalogue cache is what the search box reads, so it has to drop or the new
@@ -110,6 +160,31 @@ export default function QuickAddProductModal({
             }}
             placeholder="e.g. DOLO 650"
           />
+        </Field>
+
+        <Field label="Generic salt composition" className="sm:col-span-2">
+          <Input
+            value={form.genericName}
+            onChange={(e) => set('genericName', e.target.value)}
+            placeholder="e.g. Paracetamol 650mg"
+          />
+        </Field>
+
+        <Field label="Product form / category" required>
+          <Select value={form.productType} onChange={(e) => setProductType(e.target.value)}>
+            {PRODUCT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Division schedule">
+          <Select value={form.division} onChange={(e) => set('division', e.target.value)}>
+            <option value="GENERAL">General OTC</option>
+            <option value="SCHEDULE_H">Schedule H (Rx)</option>
+            <option value="SCHEDULE_H1">Schedule H1 (Rx)</option>
+            <option value="SCHEDULE_X">Schedule X (Rx)</option>
+          </Select>
         </Field>
 
         <Field label="Company">

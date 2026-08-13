@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
-import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -121,6 +121,20 @@ router.post('/payment', authenticate, async (req: AuthenticatedRequest, res: Res
       return res.status(400).json({ error: 'Valid payment amount is required' });
     }
 
+    // Without this a mistyped `type` wrote a ledger row with neither a customer nor a supplier
+    // on it: money recorded as received, against nobody, and invisible on every balance.
+    const isCustomer = type === 'CUSTOMER';
+    const isSupplier = type === 'PARTY' || type === 'SUPPLIER';
+    if (!isCustomer && !isSupplier) {
+      return res.status(400).json({ error: 'Payment type must be CUSTOMER or SUPPLIER' });
+    }
+    if (isCustomer && !customerId) {
+      return res.status(400).json({ error: 'Select the customer this payment came from' });
+    }
+    if (isSupplier && !partyId) {
+      return res.status(400).json({ error: 'Select the supplier this payment was made to' });
+    }
+
     const entry = await prisma.$transaction(async (tx) => {
       // 1. Create Ledger entry for payment
       const ledgerRecord = await tx.ledgerEntry.create({
@@ -148,7 +162,9 @@ router.post('/payment', authenticate, async (req: AuthenticatedRequest, res: Res
           const due = bill.grandTotal - bill.amountPaid;
           const payForBill = Math.min(due, remainingFunds);
           const newAmountPaid = bill.amountPaid + payForBill;
-          const isSettled = newAmountPaid >= bill.grandTotal;
+          // Same paise tolerance as every other settle in the app. Without it a bill paid in
+          // full stayed "unsettled" whenever the line totals summed a fraction of a paisa short.
+          const isSettled = newAmountPaid >= bill.grandTotal - 0.01;
 
           await tx.salesBill.update({
             where: { id: bill.id },
@@ -254,6 +270,88 @@ router.post('/settle', authenticate, async (req: AuthenticatedRequest, res: Resp
     });
 
     res.json({ message: 'Payment settled successfully' });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * DELETE /api/ledger/payment/:id — Undo a recorded repayment.
+ *
+ * Recording a payment writes a ledger row AND walks the party's open bills marking them paid.
+ * There was no way to take any of that back, so a figure typed with an extra zero left bills
+ * marked settled that were not, and the only fix was a hand-edit of the database.
+ *
+ * The bills are un-paid in the reverse of the order the payment filled them — newest settled
+ * first — which is the exact inverse when nothing else has been recorded since, and a safe
+ * approximation when it has: the party's total outstanding always ends up correct, even if a
+ * later payment leaves the money sitting against a different bill than it started on.
+ *
+ * Rows belonging to a bill or to a credit/debit note are refused: those are owned by the
+ * document that created them and are reversed by deleting or cancelling that document.
+ */
+router.delete('/payment/:id', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (id.startsWith('synth-')) {
+      return res.status(400).json({
+        error: 'This row is the unpaid balance of a bill, not a recorded payment. Delete the bill instead.',
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const entry = await tx.ledgerEntry.findUnique({ where: { id } });
+      if (!entry) throw new Error('Ledger entry not found');
+
+      if (entry.salesBillId || entry.purchaseBillId) {
+        throw new Error(
+          'This entry belongs to a bill or a credit note. Delete that document to reverse it, ' +
+            'rather than the ledger line it produced.'
+        );
+      }
+
+      let toReverse = entry.amount;
+
+      if (entry.partyType === 'CUSTOMER' && entry.customerId) {
+        const bills = await tx.salesBill.findMany({
+          where: { customerId: entry.customerId, amountPaid: { gt: 0 } },
+          orderBy: { createdAt: 'desc' },
+        });
+        for (const bill of bills) {
+          if (toReverse <= 0) break;
+          const take = Math.min(bill.amountPaid, toReverse);
+          const restored = bill.amountPaid - take;
+          await tx.salesBill.update({
+            where: { id: bill.id },
+            data: { amountPaid: restored, isSettled: restored >= bill.grandTotal - 0.01 },
+          });
+          toReverse -= take;
+        }
+      }
+
+      if (entry.partyType === 'SUPPLIER' && entry.partyId) {
+        const bills = await tx.purchaseBill.findMany({
+          where: { partyId: entry.partyId, amountPaid: { gt: 0 } },
+          orderBy: { createdAt: 'desc' },
+        });
+        for (const bill of bills) {
+          if (toReverse <= 0) break;
+          const paid = bill.amountPaid || 0;
+          const take = Math.min(paid, toReverse);
+          const restored = paid - take;
+          await tx.purchaseBill.update({
+            where: { id: bill.id },
+            data: { amountPaid: restored, isPaid: restored >= bill.grandTotal - 0.01 },
+          });
+          toReverse -= take;
+        }
+      }
+
+      await tx.ledgerEntry.delete({ where: { id } });
+    }, { timeout: 30000, maxWait: 15000 });
+
+    res.json({ message: 'Payment reversed' });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

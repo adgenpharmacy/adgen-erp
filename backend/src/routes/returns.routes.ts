@@ -1,9 +1,34 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
-import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
+import { nextSeriesNumber } from '../lib/billing-math';
 
 const router = Router();
 router.use(authenticate);
+
+/*
+ * Return numbers used to be `SR-`/`PR-` plus the last six digits of Date.now(). Those six digits
+ * are milliseconds within a ~16 minute 40 second window, so the counter repeats roughly three
+ * times an hour: two credit notes raised months apart routinely carried the same number. A debit
+ * or credit note is an accounting document that gets quoted back by suppliers and auditors, so
+ * duplicates are not survivable.
+ *
+ * Same rule as the sales and purchase invoice series: derive from the highest already issued,
+ * which neither reuses a number after a deletion nor breaks on a backdated document.
+ */
+const SALES_RETURN_PREFIX = 'SR-';
+const PURCHASE_RETURN_PREFIX = 'PR-';
+
+async function nextReturnNumber(
+  tx: { findMany: (args: any) => Promise<{ returnNumber: string }[]> },
+  prefix: string
+): Promise<string> {
+  const issued = await tx.findMany({
+    where: { returnNumber: { startsWith: prefix } },
+    select: { returnNumber: true },
+  });
+  return nextSeriesNumber(issued.map((r) => r.returnNumber), prefix);
+}
 
 // ==========================================
 // 1. SALES RETURNS (CREDIT NOTES)
@@ -126,8 +151,6 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'At least one return item is required' });
     }
 
-    const returnNumber = `SR-${Date.now().toString().slice(-6)}`;
-
     /*
      * Deduction withheld from the refund — opened packaging, a restocking fee, a part credit
      * agreed at the counter. Stored separately from the line values so the credit note still
@@ -182,6 +205,9 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
           }
         }
       }
+
+      // Inside the transaction, so the number is derived against the same snapshot it is written to.
+      const returnNumber = await nextReturnNumber(tx.salesReturn, SALES_RETURN_PREFIX);
 
       const record = await tx.salesReturn.create({
         data: {
@@ -294,7 +320,7 @@ router.post('/sales', async (req: AuthenticatedRequest, res: Response) => {
       maxWait: 15000,
     });
 
-    console.log(`[ERP] Sales Return created: ${returnNumber} (₹${totalReturnAmount})`);
+    console.log(`[ERP] Sales Return created: ${salesReturn.returnNumber} (₹${totalReturnAmount})`);
     res.status(201).json(salesReturn);
   } catch (error: any) {
     /*
@@ -470,8 +496,6 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'At least one return item is required' });
     }
 
-    const returnNumber = `PR-${Date.now().toString().slice(-6)}`;
-
     // Deduction the supplier applies to the debit note; the stored total is net of it.
     const grossReturnAmount = items.reduce((sum: number, item: any) => {
       return sum + (parseFloat(item.quantity || 1) * parseFloat(item.purchaseRate || 0));
@@ -500,6 +524,8 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
           }
         }
       }
+
+      const returnNumber = await nextReturnNumber(tx.purchaseReturn, PURCHASE_RETURN_PREFIX);
 
       const record = await tx.purchaseReturn.create({
         data: {
@@ -621,12 +647,187 @@ router.post('/purchases', async (req: AuthenticatedRequest, res: Response) => {
       maxWait: 15000,
     });
 
-    console.log(`[ERP] Purchase Return created: ${returnNumber} (₹${totalReturnAmount})`);
+    console.log(`[ERP] Purchase Return created: ${purchaseReturn.returnNumber} (₹${totalReturnAmount})`);
     res.status(201).json(purchaseReturn);
   } catch (error: any) {
     // Same as sales returns: the message explains what is wrong, so it must reach the screen.
     console.error('Error creating purchase return:', error);
     res.status(400).json({ error: error?.message || 'Failed to process purchase return' });
+  }
+});
+
+// ==========================================
+// 3. CANCELLING A RETURN
+// ==========================================
+
+/*
+ * Returns were create-only. A credit note raised against the wrong invoice, for the wrong
+ * medicine, or simply twice by a double-click could not be withdrawn from the app at all: the
+ * stock was already back on the shelf, the refund already on the customer's ledger, and the only
+ * remedy was editing the database by hand.
+ *
+ * Cancelling undoes precisely what raising it did, in reverse, using the amounts stored on the
+ * record rather than recomputing them — so a rate or MRP that has changed since cannot make the
+ * reversal disagree with the entry it is reversing.
+ *
+ * Owner-only, in line with deleting a sale or a purchase bill.
+ */
+
+/** The batch a return line moved stock through: the one it named, else the shortest-dated. */
+async function findReturnBatch(tx: any, productId: string, batchNumber: string | null | undefined) {
+  const label = (batchNumber || '').trim() || 'DEFAULT';
+  const named = await tx.inventoryBatch.findFirst({ where: { productId, batchNumber: label } });
+  if (named) return named;
+  return tx.inventoryBatch.findFirst({ where: { productId }, orderBy: { expiryDate: 'asc' } });
+}
+
+// DELETE /api/returns/sales/:id — Cancel a credit note: pull the restocked goods back off the
+// shelf, undo the refund on the ledger and on the invoice it was applied to.
+router.delete('/sales/:id', requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.$transaction(async (tx) => {
+      const record = await tx.salesReturn.findUnique({ where: { id }, include: { items: true } });
+      if (!record) throw new Error('Credit note not found');
+
+      // 1. Remove the stock the return put back. DAMAGED lines never reached the shelf.
+      for (const item of record.items) {
+        if (item.condition !== 'RESTOCK') continue;
+        const qty = item.quantity || 0;
+        if (qty <= 0) continue;
+
+        const batch = await findReturnBatch(tx, item.productId, item.batchNumber);
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
+          select: { name: true },
+        });
+
+        if (!batch || batch.quantity < qty) {
+          throw new Error(
+            `Cannot cancel ${record.returnNumber}: ${qty} of ${product?.name ?? item.productId} was put back ` +
+              `by this credit note but only ${batch?.quantity ?? 0} remains in stock — it has since been sold. ` +
+              `Reverse that sale first.`
+          );
+        }
+
+        await tx.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { quantity: { decrement: qty } },
+        });
+      }
+
+      /*
+       * 2. Undo the credit on the customer's ledger.
+       *
+       * Matched on the description the create path writes, narrowed by the customer, the bill and
+       * the amount. The description alone is not safe to match on: a return number is
+       * `SR-` plus the last six digits of the millisecond clock, which repeats about every
+       * seventeen minutes, so two credit notes months apart can carry the same number.
+       */
+      await tx.ledgerEntry.deleteMany({
+        where: {
+          description: `Sales Return Credit Note ${record.returnNumber}`,
+          customerId: record.customerId,
+          salesBillId: record.salesBillId,
+          amount: record.totalReturnAmount,
+        },
+      });
+
+      // 3. Undo the credit applied to the invoice, so the customer owes it again.
+      if (record.salesBillId) {
+        const bill = await tx.salesBill.findUnique({ where: { id: record.salesBillId } });
+        if (bill) {
+          const restored = Math.max(0, bill.amountPaid - record.totalReturnAmount);
+          await tx.salesBill.update({
+            where: { id: record.salesBillId },
+            data: { amountPaid: restored, isSettled: restored >= bill.grandTotal - 0.01 },
+          });
+        }
+      }
+
+      // 4. Remove the record (lines cascade).
+      await tx.salesReturn.delete({ where: { id } });
+    }, { timeout: 30000, maxWait: 15000 });
+
+    res.json({ message: 'Credit note cancelled, stock and balances reversed' });
+  } catch (error: any) {
+    console.error('Error cancelling sales return:', error);
+    res.status(400).json({ error: error?.message || 'Failed to cancel credit note' });
+  }
+});
+
+// DELETE /api/returns/purchases/:id — Cancel a debit note: put the goods sent back to the
+// supplier onto the shelf again and restore what was owed.
+router.delete('/purchases/:id', requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.$transaction(async (tx) => {
+      const record = await tx.purchaseReturn.findUnique({ where: { id }, include: { items: true } });
+      if (!record) throw new Error('Debit note not found');
+
+      // 1. Return the stock to the shelf. A debit note may have drawn its quantity from several
+      //    batches when no batch carried the number written on it; the goods come back to the
+      //    named batch, or to the shortest-dated one, which is where FEFO would have taken them.
+      for (const item of record.items) {
+        const qty = item.quantity || 0;
+        if (qty <= 0) continue;
+
+        const batch = await findReturnBatch(tx, item.productId, item.batchNumber);
+
+        if (batch) {
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantity: { increment: qty } },
+          });
+          continue;
+        }
+
+        // Every batch of this product is gone. Recreate one so the goods are not lost, dated
+        // from the line itself where the debit note recorded an expiry.
+        await tx.inventoryBatch.create({
+          data: {
+            productId: item.productId,
+            batchNumber: (item.batchNumber || '').trim() || 'DEFAULT',
+            expiryDate: item.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            quantity: qty,
+            mrp: 0,
+            purchaseRate: item.purchaseRate || 0,
+          },
+        });
+      }
+
+      // 2. Undo the credit on the supplier's ledger, narrowed the same way as a credit note —
+      //    see the note there on why the return number alone is not a safe match.
+      await tx.ledgerEntry.deleteMany({
+        where: {
+          description: `Purchase Return Debit Note ${record.returnNumber}`,
+          partyId: record.partyId,
+          purchaseBillId: record.purchaseBillId,
+          amount: record.totalReturnAmount,
+        },
+      });
+
+      // 3. Restore what was owed on the supplier bill.
+      if (record.purchaseBillId) {
+        const bill = await tx.purchaseBill.findUnique({ where: { id: record.purchaseBillId } });
+        if (bill) {
+          const restored = Math.max(0, (bill.amountPaid || 0) - record.totalReturnAmount);
+          await tx.purchaseBill.update({
+            where: { id: record.purchaseBillId },
+            data: { amountPaid: restored, isPaid: restored >= bill.grandTotal - 0.01 },
+          });
+        }
+      }
+
+      await tx.purchaseReturn.delete({ where: { id } });
+    }, { timeout: 30000, maxWait: 15000 });
+
+    res.json({ message: 'Debit note cancelled, stock and balances reversed' });
+  } catch (error: any) {
+    console.error('Error cancelling purchase return:', error);
+    res.status(400).json({ error: error?.message || 'Failed to cancel debit note' });
   }
 });
 

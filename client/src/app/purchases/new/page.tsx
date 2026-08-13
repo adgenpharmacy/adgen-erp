@@ -733,7 +733,8 @@ function NewPurchasePageContent() {
                               </Button>
                             </div>
                           ) : (
-                            products.map((prod, optionIndex) => {
+                            <>
+                            {products.map((prod, optionIndex) => {
                               const active = medicineKeys.highlight === optionIndex;
                               return (
                                 <button
@@ -761,7 +762,22 @@ function NewPurchasePageContent() {
                                   </span>
                                 </button>
                               );
-                            })
+                            })}
+                            {/*
+                              Also offered when the search DID match something. It used to appear
+                              only on an empty result, so searching a name that returns three
+                              similar medicines — none of them the one on the invoice — left no
+                              way to add the fourth without abandoning the bill.
+                            */}
+                            <button
+                              type="button"
+                              onClick={() => setQuickAddForRow(idx)}
+                              className="flex w-full items-center gap-2 border-t border-line bg-sunken px-3 py-2.5 text-left text-sm font-semibold text-brand transition-colors hover:bg-brand-subtle"
+                            >
+                              <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                              {search.trim() ? `Not listed — add “${search.trim()}”` : 'Add a new medicine'}
+                            </button>
+                            </>
                           )}
                         </div>
                       ) : null}

@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { useErpData } from '@/context/ErpDataContext';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
-import { Search, Plus, BookOpen } from 'lucide-react';
+import { Search, Plus, BookOpen, Undo2 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
+import { useAuth } from '@/context/AuthContext';
 import type { LedgerEntry, Customer, Party } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import {
@@ -25,10 +26,14 @@ import {
   TR,
   TD,
   useToast,
+  useConfirm,
 } from '@/components/ui';
 
 export default function LedgerPage() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { ledgers: cachedLedgers, customers: cachedCustomers, parties: cachedParties, refreshData } = useErpData();
   const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -55,6 +60,36 @@ export default function LedgerPage() {
       refreshData();
     }
     catch (e) { console.error('Failed to fetch ledgers:', e); }
+  };
+
+  /**
+   * Undo a recorded repayment.
+   *
+   * Recording one writes a ledger row and marks the party's open bills paid; with no way to
+   * reverse it, an amount typed with an extra zero left bills settled that were not, and the
+   * only remedy was editing the database. Synthetic rows (the unpaid balance of a bill, id
+   * prefixed `synth-`) are not payments and are not offered.
+   */
+  const isReversiblePayment = (l: LedgerEntry) =>
+    isOwner && !l.id.startsWith('synth-') && !l.salesBillId && !l.purchaseBillId;
+
+  const handleReversePayment = async (l: LedgerEntry) => {
+    const who = l.customer?.name || l.party?.name || 'this account';
+    const ok = await confirm({
+      title: 'Reverse this payment?',
+      message:
+        `${formatCurrency(l.amount || 0)} recorded against ${who} will be removed, and the bills it ` +
+        `settled will show as owing again. This cannot be undone.`,
+      confirmLabel: 'Reverse payment',
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/ledger/payment/${l.id}`);
+      toast.success('Payment reversed');
+      await fetchLedgers();
+    } catch (err) {
+      toast.error('Could not reverse the payment', getApiErrorMessage(err));
+    }
   };
 
   useEffect(() => {
@@ -222,13 +257,25 @@ export default function LedgerPage() {
                         {formatCurrency(l.outstandingAmount ?? l.amount ?? 0)}
                       </TD>
                       <TD align="center">
-                        {l.isSettled ? (
-                          <StatusChip tone="neutral" small>Settled</StatusChip>
-                        ) : (
-                          <Button size="sm" onClick={() => handleInlineSettle(l)}>
-                            Settle
-                          </Button>
-                        )}
+                        <span className="flex items-center justify-center gap-1.5">
+                          {l.isSettled ? (
+                            <StatusChip tone="neutral" small>Settled</StatusChip>
+                          ) : (
+                            <Button size="sm" onClick={() => handleInlineSettle(l)}>
+                              Settle
+                            </Button>
+                          )}
+                          {isReversiblePayment(l) ? (
+                            <button
+                              onClick={() => handleReversePayment(l)}
+                              className="rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                              title="Reverse this recorded payment"
+                              aria-label="Reverse payment"
+                            >
+                              <Undo2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                        </span>
                       </TD>
                     </TR>
                   );

@@ -37,7 +37,18 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
     const { q, limit } = req.query;
     const searchStr = typeof q === 'string' ? q.trim() : '';
 
-    const whereClause: any = { isActive: true };
+    /*
+     * `?includeInactive=1` returns removed medicines as well.
+     *
+     * Removing a medicine is a soft delete, but nothing could ever read the removed rows back, so
+     * from inside the app it was permanent: a mis-click took a medicine out of the catalogue,
+     * search and billing with no way to undo it. The Products screen uses this to list them and
+     * put one back. Every other caller — billing, purchase entry, returns — omits it and keeps
+     * seeing only what is actually sellable.
+     */
+    const includeInactive = req.query.includeInactive === '1' || req.query.includeInactive === 'true';
+
+    const whereClause: any = includeInactive ? {} : { isActive: true };
     if (searchStr) {
       whereClause.OR = [
         { name: { contains: searchStr, mode: 'insensitive' } },
@@ -162,15 +173,45 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
   }
 });
 
-// DELETE /api/products/:id — Soft-delete product
+/**
+ * DELETE /api/products/:id — Soft-delete product.
+ *
+ * The row survives so existing bills keep their medicine, but GET /products filters on
+ * `isActive` and no screen lists the inactive ones — so this is one-way from inside the app.
+ *
+ * That made it dangerous on a medicine that still has stock: the batches stay in the database
+ * with quantity on them while the medicine disappears from the catalogue, from search and from
+ * the till, and there is no way to bring it back or sell it. Stock on hand is therefore refused,
+ * with the quantity named so the operator knows what to do about it first.
+ */
 router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    await prisma.product.update({
+
+    const product = await prisma.product.findUnique({
       where: { id },
-      data: { isActive: false },
+      select: { name: true, contentUnit: true },
     });
-    res.json({ message: 'Product deactivated successfully' });
+    if (!product) return res.status(404).json({ error: 'Medicine not found' });
+
+    const onHand = await prisma.inventoryBatch.aggregate({
+      where: { productId: id, quantity: { gt: 0 } },
+      _sum: { quantity: true },
+    });
+    const stock = onHand._sum.quantity || 0;
+
+    if (stock > 0) {
+      return res.status(409).json({
+        error:
+          `${product.name} still has ${stock} ${product.contentUnit || 'unit'}(s) in stock. ` +
+          `Removing it now would hide that stock from the catalogue and the billing counter with no ` +
+          `way to sell it. Clear the stock first — sell it, return it to the supplier, or write it ` +
+          `off from Stock Adjustments.`,
+      });
+    }
+
+    await prisma.product.update({ where: { id }, data: { isActive: false } });
+    res.json({ message: 'Medicine removed from the catalogue' });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

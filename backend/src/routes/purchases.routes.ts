@@ -327,8 +327,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
 
     // Prefetched outside the transaction for the same reason as the create path: per-line
     // lookups inside an interactive transaction blow past Prisma's time limit on a long bill.
-    const editProductIds: string[] = [...new Set(((items ?? []) as { productId: string }[]).map((i) => i.productId))];
-    const editProductList = await prisma.product.findMany({ where: { id: { in: editProductIds } } });
+    //
+    // The bill's CURRENT lines are included as well: a line removed by this edit still needs its
+    // product's packSize to work out how much stock to take back off the shelf.
+    const editProductIds: string[] = ((items ?? []) as { productId: string }[]).map((i) => i.productId);
+    const currentLineProducts = await prisma.purchaseBillItem.findMany({
+      where: { purchaseBillId: id },
+      select: { productId: true },
+    });
+    const allProductIds = [...new Set([...editProductIds, ...currentLineProducts.map((r) => r.productId)])];
+    const editProductList = await prisma.product.findMany({ where: { id: { in: allProductIds } } });
     const productMap = new Map(editProductList.map((p) => [p.id, p]));
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -353,6 +361,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
         const existingBatches = await tx.inventoryBatch.findMany({
           where: { purchaseBillId: id },
         });
+        /** Batches this bill created that the edited version still accounts for. */
+        const keptBatchIds = new Set<string>();
 
         for (const item of items) {
           const { productId, batchNumber, expiryDate, quantity, freeQuantity, purchaseRate, mrp, discountPercent, taxPercent, gstPercent } = item;
@@ -401,6 +411,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
               (editExpiry ? sameMonth(b.expiryDate, editExpiry) : true)
           );
           if (matchBatch) {
+            keptBatchIds.add(matchBatch.id);
             const oldItem = existingBill.items.find(i => i.productId === productId && i.batchNumber === batchNumber);
             const oldPacks = oldItem ? (oldItem.quantity + (oldItem.freeQuantity || 0)) : 0;
             const oldContentUnits = oldPacks * packSize;
@@ -433,6 +444,43 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
                 purchaseBillId: id,
               },
             });
+          }
+        }
+
+        /*
+         * Take back the stock of lines this edit removed.
+         *
+         * The lines were deleted above and the loop only ever touches batches that a SURVIVING
+         * line matches, so a batch belonging to a dropped line was left sitting in inventory at
+         * full quantity with nothing on any bill to account for it. Deleting one line off a
+         * saved bill silently invented stock, permanently.
+         *
+         * Only batches this bill created (`purchaseBillId = id`) are considered, so a batch
+         * another bill topped up is never disturbed.
+         */
+        for (const stale of existingBatches) {
+          if (keptBatchIds.has(stale.id)) continue;
+
+          const sold = await tx.salesBillItem.count({ where: { batchId: stale.id } });
+          if (sold > 0) {
+            throw new Error(
+              `Cannot remove the line for batch ${stale.batchNumber}: stock from it has already been sold. ` +
+                `Reverse the sale first, or leave the line on the bill.`
+            );
+          }
+
+          // Exactly what this bill's old line put in, so anything a manual adjustment added stays.
+          const oldItem = existingBill.items.find(
+            (i) => i.productId === stale.productId && i.batchNumber === stale.batchNumber
+          );
+          const packSize = productMap.get(stale.productId)?.packSize || 1;
+          const contributed = oldItem ? (oldItem.quantity + (oldItem.freeQuantity || 0)) * packSize : stale.quantity;
+          const remaining = Math.max(0, stale.quantity - contributed);
+
+          if (remaining === 0) {
+            await tx.inventoryBatch.delete({ where: { id: stale.id } });
+          } else {
+            await tx.inventoryBatch.update({ where: { id: stale.id }, data: { quantity: remaining } });
           }
         }
 

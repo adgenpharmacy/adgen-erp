@@ -14,6 +14,7 @@ import {
   TrendingDown,
   TrendingUp,
   RefreshCw,
+  Undo2,
 } from 'lucide-react';
 import {
   Button,
@@ -29,6 +30,7 @@ import {
   TD,
   TableSkeleton,
   useToast,
+  useConfirm,
 } from '@/components/ui';
 import type { ChipTone } from '@/components/ui/StatusChip';
 
@@ -73,6 +75,7 @@ const FILTERS: { id: 'ALL' | AdjustmentSource; label: string }[] = [
 export default function StockAdjustmentsPage() {
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const isOwner = user?.role === 'OWNER';
 
   const [rows, setRows] = useState<StockAdjustment[]>([]);
@@ -96,6 +99,44 @@ export default function StockAdjustmentsPage() {
     else setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOwner]);
+
+  /**
+   * Undo a correction.
+   *
+   * The undo is itself an adjustment carrying the inverse change, not a deletion — the point of
+   * this log is that stock never moves without a record, and erasing the row would defeat it. So
+   * both entries stay visible: what was done, and that it was taken back.
+   */
+  const reverse = async (row: StockAdjustment) => {
+    const ok = await confirm({
+      title: 'Reverse this adjustment?',
+      message:
+        `${row.product.name} · batch ${row.batch.batchNumber || 'DEFAULT'} goes back to ` +
+        `${row.previousQuantity}. Both the original correction and this reversal stay in the log.`,
+      confirmLabel: 'Reverse adjustment',
+    });
+    if (!ok) return;
+    try {
+      await api.post(`/stock-adjustments/${row.id}/reverse`);
+      toast.success('Adjustment reversed', 'The batch is back to its earlier quantity.');
+      await load();
+    } catch (err) {
+      // Refused when the added stock has since been sold; that message explains why.
+      toast.error('Could not reverse', getApiErrorMessage(err));
+    }
+  };
+
+  /** A reversal row, and any row already reversed, must not offer the button again. */
+  const isReversal = (r: StockAdjustment) => /^Reversal of adjustment /.test(r.reason || '');
+  const reversedIds = useMemo(
+    () =>
+      new Set(
+        rows
+          .filter(isReversal)
+          .map((r) => (r.reason || '').replace('Reversal of adjustment ', '').trim())
+      ),
+    [rows]
+  );
 
   const visible = useMemo(
     () => (filter === 'ALL' ? rows : rows.filter((r) => r.source === filter)),
@@ -230,11 +271,12 @@ export default function StockAdjustmentsPage() {
                 <TH className="text-right">Change</TH>
                 <TH>Why</TH>
                 <TH>By</TH>
+                <TH className="text-right">Undo</TH>
               </TR>
             </THead>
             <tbody>
               {visible.map((r) => (
-                <TR key={r.id}>
+                <TR key={r.id} className="group">
                   <TD className="whitespace-nowrap text-fg-muted">{formatDate(r.createdAt)}</TD>
                   <TD className="font-semibold text-fg">{r.product.name}</TD>
                   <TD className="font-mono text-xs text-fg-muted">
@@ -259,6 +301,22 @@ export default function StockAdjustmentsPage() {
                     <span className="mt-1 block text-xs text-fg-muted">{r.reason}</span>
                   </TD>
                   <TD className="text-fg-muted">{r.user?.name ?? 'System'}</TD>
+                  <TD className="text-right">
+                    {isReversal(r) ? (
+                      <span className="text-[11px] font-semibold text-fg-subtle">Undo entry</span>
+                    ) : reversedIds.has(r.id) ? (
+                      <span className="text-[11px] font-semibold text-fg-subtle">Reversed</span>
+                    ) : (
+                      <button
+                        onClick={() => reverse(r)}
+                        className="rounded-md p-1.5 text-fg-subtle opacity-0 transition-opacity hover:bg-warn-subtle hover:text-warn group-hover:opacity-100 focus:opacity-100"
+                        title="Reverse this adjustment"
+                        aria-label={`Reverse adjustment for ${r.product.name}`}
+                      >
+                        <Undo2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </TD>
                 </TR>
               ))}
             </tbody>

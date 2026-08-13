@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
-import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -90,11 +90,63 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const updated = await prisma.customer.update({
-      where: { id },
-      data: req.body,
-    });
+    // Named rather than passing req.body straight through — same reason as suppliers.
+    const { name, phone, email, address, gstNumber, doctorName } = req.body;
+    const data: any = {};
+    if (name !== undefined) data.name = name;
+    if (phone !== undefined) data.phone = phone;
+    if (email !== undefined) data.email = email;
+    if (address !== undefined) data.address = address;
+    if (gstNumber !== undefined) data.gstNumber = gstNumber;
+    if (doctorName !== undefined) data.doctorName = doctorName;
+
+    const updated = await prisma.customer.update({ where: { id }, data });
     res.json(updated);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * DELETE /api/customers/:id — Remove a customer record.
+ *
+ * The Customer model has no isActive column, so unlike suppliers this cannot be softened into a
+ * hide — it is a real delete. It is therefore refused outright for anyone who appears on a bill,
+ * a credit note or the ledger: deleting them would detach those documents from the person they
+ * were raised for. What it does allow is clearing out duplicates and mistyped entries, which is
+ * the case the directory actually needed and had no answer for.
+ */
+router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const customer = await prisma.customer.findUnique({ where: { id } });
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const [bills, returns, ledger] = await Promise.all([
+      prisma.salesBill.count({ where: { customerId: id } }),
+      prisma.salesReturn.count({ where: { customerId: id } }),
+      prisma.ledgerEntry.count({ where: { customerId: id } }),
+    ]);
+
+    if (bills > 0 || returns > 0 || ledger > 0) {
+      const history = [
+        bills > 0 ? `${bills} bill${bills === 1 ? '' : 's'}` : null,
+        returns > 0 ? `${returns} credit note${returns === 1 ? '' : 's'}` : null,
+        ledger > 0 ? `${ledger} ledger entr${ledger === 1 ? 'y' : 'ies'}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+      return res.status(409).json({
+        error:
+          `${customer.name} appears on ${history} and cannot be deleted without detaching those records. ` +
+          `Correct the name and details instead.`,
+      });
+    }
+
+    await prisma.customer.delete({ where: { id } });
+    res.json({ message: 'Customer deleted' });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }

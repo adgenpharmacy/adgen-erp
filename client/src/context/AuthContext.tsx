@@ -54,13 +54,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  // A rejected token (expired, revoked, or signed with a rotated secret) must end the session
-  // instead of leaving the user staring at a dashboard full of zeros.
+  /*
+   * End the session when the server says the account no longer has access.
+   *
+   * 401 covers a rejected token — expired, or signed with a rotated secret. 403 with
+   * `code: ACCOUNT_REVOKED` covers an account disabled or un-approved while someone was signed
+   * in: their token is still valid, so nothing here fired, and they were left on a dashboard of
+   * zeros with a failure toast on every screen. A plain 403 is NOT treated this way — that is
+   * an employee touching an owner-only action, and signing them out for it would be absurd.
+   */
   useEffect(() => {
     const interceptor = api.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error?.response?.status === 401) {
+        const status = error?.response?.status;
+        const revoked = status === 403 && error.response.data?.code === 'ACCOUNT_REVOKED';
+
+        if (status === 401 || revoked) {
           localStorage.removeItem('adgen_user');
           localStorage.removeItem('adgen_token');
           localStorage.removeItem('adgen_global_erp_cache_v1');

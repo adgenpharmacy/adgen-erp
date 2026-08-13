@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api-client';
 import PurchasePrintModal from '@/components/invoice/PurchasePrintModal';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
@@ -58,6 +59,8 @@ function PurchasesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const billIdFromUrl = searchParams.get('bill');
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { purchases: cachedPurchases, loading, refreshData } = useErpData();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [isMounted, setIsMounted] = useState(false);
@@ -433,14 +436,17 @@ function PurchasesPageContent() {
                         >
                           <Printer className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={(e) => handleDelete(p.id, e)}
-                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
-                          title="Delete purchase bill"
-                          aria-label="Delete bill"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {/* Owner-only endpoint; showing it to staff only produced a 403. */}
+                        {isOwner ? (
+                          <button
+                            onClick={(e) => handleDelete(p.id, e)}
+                            className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                            title="Delete purchase bill"
+                            aria-label="Delete bill"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </span>
                     </TD>
                   </TR>

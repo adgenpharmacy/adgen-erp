@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
 import { api } from '@/lib/api-client';
-import { Search, Plus, Edit2, Users } from 'lucide-react';
+import { Search, Plus, Edit2, Users, Trash2 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
+import { useAuth } from '@/context/AuthContext';
 import {
   Button,
   Card,
@@ -21,6 +22,7 @@ import {
   TD,
   TableSkeleton,
   useToast,
+  useConfirm,
 } from '@/components/ui';
 import { formatCurrency } from '@/lib/utils';
 import type { Customer } from '@/types';
@@ -28,6 +30,9 @@ import { getApiErrorMessage } from '@/types';
 
 export default function CustomersPage() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { customers: cachedCustomers, loading, refreshData } = useErpData();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
@@ -68,6 +73,31 @@ export default function CustomersPage() {
       toast.error('Failed to save customer', getApiErrorMessage(e));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  /**
+   * Delete a customer record.
+   *
+   * Unlike a supplier this is a real delete, so the server refuses it for anyone who appears on a
+   * bill, a credit note or the ledger. What it clears is duplicates and mistyped entries — the
+   * case the directory had no answer for, since the only action here was Edit.
+   */
+  const handleDelete = async (cust: Customer) => {
+    const ok = await confirm({
+      title: `Delete ${cust.name}?`,
+      message:
+        'This permanently removes the customer record. It is refused if they appear on any bill, ' +
+        'credit note or ledger entry.',
+      confirmLabel: 'Delete customer',
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/customers/${cust.id}`);
+      toast.success(`${cust.name} deleted`);
+      await refreshData();
+    } catch (e) {
+      toast.error('Customer not deleted', getApiErrorMessage(e));
     }
   };
 
@@ -163,14 +193,26 @@ export default function CustomersPage() {
                         {formatCurrency(outstanding)}
                       </TD>
                       <TD align="center">
-                        <button
-                          onClick={() => openEditModal(c)}
-                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
-                          title="Edit customer"
-                          aria-label={`Edit ${c.name}`}
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
+                        <span className="flex items-center justify-center gap-0.5">
+                          <button
+                            onClick={() => openEditModal(c)}
+                            className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-info-subtle hover:text-info"
+                            title="Edit customer"
+                            aria-label={`Edit ${c.name}`}
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          {isOwner ? (
+                            <button
+                              onClick={() => handleDelete(c)}
+                              className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                              title="Delete customer"
+                              aria-label={`Delete ${c.name}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                        </span>
                       </TD>
                     </TR>
                   );

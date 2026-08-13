@@ -90,12 +90,25 @@ export const authenticate = async (
       return res.status(401).json({ error: 'User account not found.' });
     }
 
+    /*
+     * `code` distinguishes "this account no longer has access" from "this account may not do
+     * this particular thing" (requireOwner, below, which is also a 403). The client ends the
+     * session on the former only — without the distinction it could not tell them apart, so a
+     * revoked staff member kept a session that failed on every screen with no explanation, while
+     * logging out on every 403 would sign an ordinary employee out for clicking an owner action.
+     */
     if (!user.isActive) {
-      return res.status(403).json({ error: 'User account is deactivated. Please contact admin.' });
+      return res.status(403).json({
+        error: 'This account has been disabled. Contact the pharmacy owner.',
+        code: 'ACCOUNT_REVOKED',
+      });
     }
 
     if (user.role === 'EMPLOYEE' && !user.isApproved) {
-      return res.status(403).json({ error: 'Account pending owner approval.' });
+      return res.status(403).json({
+        error: 'Account pending owner approval.',
+        code: 'ACCOUNT_REVOKED',
+      });
     }
 
     req.user = {

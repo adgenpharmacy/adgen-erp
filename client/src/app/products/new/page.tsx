@@ -105,7 +105,11 @@ export default function NewProductPage() {
                   <option value="CAPSULE">Capsule</option>
                   <option value="SYRUP">Syrup</option>
                   <option value="INJECTION">Injection</option>
-                  <option value="CREAM">Cream / Ointment</option>
+                  {/* CREAM and OINTMENT are separate values in the schema. Listing them under one
+                      "Cream / Ointment" option made OINTMENT unreachable, so an imported ointment
+                      could not be described — or corrected — from this form. */}
+                  <option value="CREAM">Cream</option>
+                  <option value="OINTMENT">Ointment</option>
                   <option value="DROPS">Drops</option>
                   <option value="POWDER">Powder</option>
                   <option value="OTHERS">Others</option>

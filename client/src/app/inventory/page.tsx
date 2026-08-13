@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useErpData } from '@/context/ErpDataContext';
+import { useAuth } from '@/context/AuthContext';
 import { formatDate, formatPackQuantity, formatCurrency, cn } from '@/lib/utils';
 import Link from 'next/link';
 import {
@@ -55,6 +56,8 @@ const FILTER_TABS = [
 
 export default function InventoryPage() {
   const toast = useToast();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { inventory: cachedInventory, loading, refreshData, profile } = useErpData();
   // Same switch the reports use: a GSTIN on file means the tax on purchases is reclaimable.
   const gstRegistered = Boolean((profile?.gstNumber || '').trim());
@@ -434,19 +437,22 @@ export default function InventoryPage() {
                             <Eye className="h-3.5 w-3.5" aria-hidden />
                             Batches
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const firstBatch = (inv.batches || [])[0];
-                              setAdjustModalItem({ inv, batch: firstBatch });
-                              setAdjVal('');
-                            }}
-                          >
-                            <Edit className="h-3.5 w-3.5 text-warn" aria-hidden />
-                            Adjust
-                          </Button>
+                          {/* PUT /inventory/adjust is owner-only; staff got a 403 toast. */}
+                          {isOwner ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const firstBatch = (inv.batches || [])[0];
+                                setAdjustModalItem({ inv, batch: firstBatch });
+                                setAdjVal('');
+                              }}
+                            >
+                              <Edit className="h-3.5 w-3.5 text-warn" aria-hidden />
+                              Adjust
+                            </Button>
+                          ) : null}
                         </span>
                       </TD>
                     </TR>
@@ -536,17 +542,19 @@ export default function InventoryPage() {
                             <ExternalLink className="h-3 w-3 text-fg-subtle" aria-hidden />
                           </Link>
                         ) : null}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setAdjustModalItem({ inv: inspectInventory, batch: b });
-                            setAdjVal('');
-                          }}
-                        >
-                          <Edit className="h-3.5 w-3.5 text-warn" aria-hidden />
-                          Adjust
-                        </Button>
+                        {isOwner ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setAdjustModalItem({ inv: inspectInventory, batch: b });
+                              setAdjVal('');
+                            }}
+                          >
+                            <Edit className="h-3.5 w-3.5 text-warn" aria-hidden />
+                            Adjust
+                          </Button>
+                        ) : null}
                       </div>
                     </li>
                   ))}

@@ -3,15 +3,16 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
-import { RotateCcw, Plus, RefreshCw, Search, PackageX } from 'lucide-react';
+import { RotateCcw, Plus, RefreshCw, Search, PackageX, Trash2 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
 import { useErpData } from '@/context/ErpDataContext';
+import { useAuth } from '@/context/AuthContext';
 import { invalidateCatalogCache } from '@/lib/catalog-cache';
 import type { ReturnRecord, Product, Sale, Purchase } from '@/types';
 import { getApiErrorMessage } from '@/types';
 import {
   Button, Card, EmptyState, Field, Input, Select, Modal, PageHeader, StatusChip,
-  TableWrap, Table, THead, TH, TR, TD, TableSkeleton, useToast,
+  TableWrap, Table, THead, TH, TR, TD, TableSkeleton, useToast, useConfirm,
 } from '@/components/ui';
 
 /**
@@ -99,7 +100,10 @@ type Picked = Record<string, { quantity: number; condition?: string; reason?: st
 
 export default function ReturnsPage() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { user } = useAuth();
   const { refreshData } = useErpData();
+  const isOwner = user?.role === 'OWNER';
 
   const [activeTab, setActiveTab] = useState<'SALES' | 'PURCHASE'>('SALES');
   const [salesReturns, setSalesReturns] = useState<ReturnRecord[]>([]);
@@ -173,6 +177,37 @@ export default function ReturnsPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  /**
+   * Withdraw a credit or debit note.
+   *
+   * A note raised against the wrong bill, for the wrong medicine, or twice by a double-click was
+   * final: the stock had moved and the refund was on the ledger with nothing in the app able to
+   * take either back. The server reverses exactly what raising it did — including pulling the
+   * restocked goods off the shelf again — and refuses if that stock has since been sold, so the
+   * failure is explained rather than silently leaving inventory wrong.
+   */
+  const cancelReturn = async (record: ReturnRecord, type: 'SALES' | 'PURCHASE') => {
+    const isSales = type === 'SALES';
+    const ok = await confirm({
+      title: `Cancel ${isSales ? 'credit' : 'debit'} note ${record.returnNumber}?`,
+      message: isSales
+        ? 'The returned medicines come back off the shelf, the refund is removed from the customer’s ledger, and the original invoice goes back to what it was owed. This cannot be undone.'
+        : 'The medicines sent back to the supplier return to stock and the debit note is removed from the supplier’s balance. This cannot be undone.',
+      confirmLabel: 'Cancel note',
+    });
+    if (!ok) return;
+
+    try {
+      await api.delete(`/returns/${isSales ? 'sales' : 'purchases'}/${record.id}`);
+      toast.success(`${record.returnNumber} cancelled`, 'Stock and balances reversed.');
+      setInspect(null);
+      invalidateCatalogCache();
+      await Promise.all([loadReturns(false), refreshData()]);
+    } catch (err) {
+      toast.error('Could not cancel the note', getApiErrorMessage(err));
+    }
+  };
 
   const openSalesComposer = async () => {
     setSrOpen(true);
@@ -462,13 +497,14 @@ export default function ReturnsPage() {
                   <TH align="right">Items</TH>
                   <TH align="right">Deduction</TH>
                   <TH align="right">Net</TH>
+                  {isOwner ? <TH align="right">Actions</TH> : null}
                 </tr>
               </THead>
               <tbody>
                 {rows.map((r) => {
                   const x = withExtras(r);
                   return (
-                    <TR key={r.id} onClick={() => setInspect({ ...r, returnType: activeTab })} className="cursor-pointer">
+                    <TR key={r.id} onClick={() => setInspect({ ...r, returnType: activeTab })} className="group cursor-pointer">
                       <TD className="font-mono text-xs font-bold">{r.returnNumber}</TD>
                       <TD className="text-fg-muted">{formatDate(r.createdAt)}</TD>
                       <TD>
@@ -488,6 +524,23 @@ export default function ReturnsPage() {
                       <TD align="right" className="font-mono font-bold text-brand-hover">
                         {formatCurrency(r.totalReturnAmount || 0)}
                       </TD>
+                      {isOwner ? (
+                        <TD align="right">
+                          <span
+                            className="flex items-center justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() => cancelReturn(r, activeTab)}
+                              className="rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                              title={`Cancel ${activeTab === 'SALES' ? 'credit' : 'debit'} note`}
+                              aria-label={`Cancel note ${r.returnNumber}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </span>
+                        </TD>
+                      ) : null}
                     </TR>
                   );
                 })}
@@ -919,6 +972,19 @@ export default function ReturnsPage() {
         onClose={() => setInspect(null)}
         title={inspect ? `${inspect.returnType === 'SALES' ? 'Credit note' : 'Debit note'} ${inspect.returnNumber}` : ''}
         size="lg"
+        footer={
+          inspect ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {isOwner ? (
+                <Button variant="danger" onClick={() => cancelReturn(inspect, inspect.returnType)}>
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                  Cancel this note
+                </Button>
+              ) : <span />}
+              <Button variant="ghost" onClick={() => setInspect(null)}>Close</Button>
+            </div>
+          ) : null
+        }
       >
         {inspect ? (
           <div className="space-y-4 p-5">

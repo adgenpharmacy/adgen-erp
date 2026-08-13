@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
 import { useErpData } from '@/context/ErpDataContext';
-import { Search, Plus, Edit2, Building2 } from 'lucide-react';
+import { Search, Plus, Edit2, Building2, Trash2 } from 'lucide-react';
 import PageMain from '@/components/layout/PageMain';
+import { useAuth } from '@/context/AuthContext';
 import {
   Button,
   Card,
@@ -20,6 +21,7 @@ import {
   TR,
   TD,
   useToast,
+  useConfirm,
 } from '@/components/ui';
 import { formatCurrency } from '@/lib/utils';
 import type { Party } from '@/types';
@@ -36,6 +38,9 @@ const FORM_FIELDS = [
 
 export default function PartiesPage() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const { parties: cachedParties, refreshData } = useErpData();
   const [parties, setParties] = useState<Party[]>([]);
   const [search, setSearch] = useState('');
@@ -89,6 +94,32 @@ export default function PartiesPage() {
     } catch (e) {
       toast.error('Failed to save supplier', getApiErrorMessage(e));
     } finally { setIsSubmitting(false); }
+  };
+
+  /**
+   * Remove a supplier from the directory.
+   *
+   * Their purchase bills and ledger history stay exactly as they are — the record simply stops
+   * appearing here and in the supplier picker on a new purchase entry. A duplicate typed twice
+   * previously had no way out of the list at all.
+   */
+  const handleDelete = async (party: Party) => {
+    const ok = await confirm({
+      title: `Remove ${party.name}?`,
+      message:
+        'They will no longer appear in the supplier list or on a new purchase entry. Existing ' +
+        'purchase bills and ledger entries are kept.',
+      confirmLabel: 'Remove supplier',
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/parties/${party.id}`);
+      toast.success(`${party.name} removed`);
+      fetchParties();
+    } catch (e) {
+      // The server refuses while money is outstanding and says how much.
+      toast.error('Supplier not removed', getApiErrorMessage(e));
+    }
   };
 
   const filtered = parties.filter((p) =>
@@ -175,14 +206,26 @@ export default function PartiesPage() {
                       {formatCurrency(party.outstandingBalance ?? 0)}
                     </TD>
                     <TD align="center">
-                      <button
-                        onClick={() => openEditModal(party)}
-                        className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-brand-subtle hover:text-brand"
-                        title="Edit supplier"
-                        aria-label={`Edit ${party.name}`}
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
+                      <span className="flex items-center justify-center gap-0.5">
+                        <button
+                          onClick={() => openEditModal(party)}
+                          className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-brand-subtle hover:text-brand"
+                          title="Edit supplier"
+                          aria-label={`Edit ${party.name}`}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        {isOwner ? (
+                          <button
+                            onClick={() => handleDelete(party)}
+                            className="p-1.5 rounded-md text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger"
+                            title="Remove supplier from the directory"
+                            aria-label={`Remove ${party.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </span>
                     </TD>
                   </TR>
                 ))}

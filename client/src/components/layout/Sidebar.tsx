@@ -24,8 +24,17 @@ import {
 import UpdateNotifier from '@/components/layout/UpdateNotifier';
 import { cn } from '@/lib/utils';
 
-/** Grouped so the daily counter workflow sits apart from master data and analysis. */
-const NAV_GROUPS: { heading: string; items: { name: string; href: string; icon: typeof Receipt }[] }[] = [
+/**
+ * Grouped so the daily counter workflow sits apart from master data and analysis.
+ *
+ * `ownerOnly` hides a destination whose API refuses anyone else. Employees used to be listed for
+ * every account, but GET /users is owner-only, so staff who clicked it landed on a page that
+ * could never fill in.
+ */
+const NAV_GROUPS: {
+  heading: string;
+  items: { name: string; href: string; icon: typeof Receipt; ownerOnly?: boolean }[];
+}[] = [
   {
     heading: 'Operations',
     items: [
@@ -48,7 +57,7 @@ const NAV_GROUPS: { heading: string; items: { name: string; href: string; icon: 
     items: [
       { name: 'Customers', href: '/customers', icon: Users },
       { name: 'Suppliers', href: '/parties', icon: Building2 },
-      { name: 'Employees', href: '/employees', icon: UserCheck },
+      { name: 'Employees', href: '/employees', icon: UserCheck, ownerOnly: true },
     ],
   },
   {
@@ -87,13 +96,16 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.map((group) => {
+            const visibleItems = group.items.filter((item) => !item.ownerOnly || user?.role === 'OWNER');
+            if (visibleItems.length === 0) return null;
+            return (
             <div key={group.heading}>
               <p className="px-2.5 mb-1 text-[10px] font-bold uppercase tracking-widest text-fg-subtle">
                 {group.heading}
               </p>
               <div className="space-y-0.5">
-                {group.items.map((item) => {
+                {visibleItems.map((item) => {
                   const isActive = pathname === item.href;
                   const Icon = item.icon;
                   return (
@@ -119,7 +131,8 @@ export default function Sidebar() {
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {user?.role === 'OWNER' ? (
             <div>

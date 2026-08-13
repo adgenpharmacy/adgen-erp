@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
-import { authenticate, AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireOwner } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -10,7 +10,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
     const { q } = req.query;
     const searchStr = typeof q === 'string' ? q.trim() : '';
 
-    const whereClause: any = {};
+    // Removed suppliers stay in the table so their purchase bills keep a name on them, but they
+    // are out of the directory and out of the supplier picker on a new purchase entry.
+    const whereClause: any = { isActive: true };
     if (searchStr) {
       whereClause.OR = [
         { name: { contains: searchStr, mode: 'insensitive' } },
@@ -83,11 +85,56 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const updated = await prisma.party.update({
-      where: { id },
-      data: req.body,
-    });
+    // Named rather than passing req.body straight through, so a stray field in the payload
+    // cannot write a column the form has no business setting.
+    const { name, phone, email, address, gstNumber, dlNumber } = req.body;
+    const data: any = {};
+    if (name !== undefined) data.name = name;
+    if (phone !== undefined) data.phone = phone;
+    if (email !== undefined) data.email = email;
+    if (address !== undefined) data.address = address;
+    if (gstNumber !== undefined) data.gstNumber = gstNumber;
+    if (dlNumber !== undefined) data.dlNumber = dlNumber;
+
+    const updated = await prisma.party.update({ where: { id }, data });
     res.json(updated);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * DELETE /api/parties/:id — Remove a supplier from the directory.
+ *
+ * A soft delete: purchase bills keep their supplier, the ledger keeps its history, and the row
+ * simply stops appearing in the directory and in the supplier picker. A duplicate typed twice
+ * previously had to stay forever.
+ *
+ * Refused while money is outstanding — hiding a supplier the shop still owes would remove the
+ * debt from view without settling it.
+ */
+router.delete('/:id', authenticate, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const party = await prisma.party.findUnique({
+      where: { id },
+      include: { purchaseBills: { where: { isPaid: false }, select: { grandTotal: true, amountPaid: true } } },
+    });
+    if (!party) return res.status(404).json({ error: 'Supplier not found' });
+
+    const outstanding = party.purchaseBills.reduce(
+      (sum, b) => sum + (b.grandTotal - (b.amountPaid || 0)),
+      0
+    );
+    if (outstanding > 0.01) {
+      return res.status(409).json({
+        error: `${party.name} still has ₹${outstanding.toFixed(2)} outstanding. Settle the balance before removing them.`,
+      });
+    }
+
+    await prisma.party.update({ where: { id }, data: { isActive: false } });
+    res.json({ message: 'Supplier removed from the directory' });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
